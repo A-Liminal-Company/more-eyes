@@ -1,0 +1,266 @@
+[
+  {
+    "severity": "high",
+    "category": "security",
+    "title": "SQL Injection in GET /api/user",
+    "description": "The `id` query parameter is directly interpolated into the SQL string via template literal (`SELECT * FROM users WHERE id = ${id}`), allowing an attacker to inject arbitrary SQL (e.g., ?id=1 OR 1=1 or a UNION-based attack, or subqueries to exfiltrate data). This must use parameterized queries, e.g. `db.query('SELECT * FROM users WHERE id = ?', [id])`.",
+    "line": 7,
+    "model": "claude-sonnet-5"
+  },
+  {
+    "severity": "high",
+    "category": "security",
+    "title": "Missing authorization check - anyone can update any user's email",
+    "description": "The intent states only the logged-in user should be able to change their own email, but the POST /api/user/:id/email handler never checks req.user (or any session/auth info) against req.params.id. Any caller can update any user's email by supplying an arbitrary id in the URL. There is also no authentication middleware evident in this file.",
+    "line": 13,
+    "model": "claude-sonnet-5"
+  },
+  {
+    "severity": "high",
+    "category": "bug",
+    "title": "Incorrect usage of db.query result as an object",
+    "description": "`db.query` appears to return an array of rows (as used in the GET handler via `rows[0]`), but in the POST handler `user` is assigned directly to the array returned by db.query, then `user.email = req.body.email` sets a property on the array itself rather than on the row object, and `db.save(user)` presumably expects a row/record, not an array. This will not persist the email change correctly (or will silently attach a stray property to an array).",
+    "line": 14,
+    "model": "claude-sonnet-5"
+  },
+  {
+    "severity": "medium",
+    "category": "bug",
+    "title": "No check for user existence",
+    "description": "If the query returns no rows (invalid id), `rows[0]` will be undefined and res.json(undefined) is returned (GET), or in POST, user (array) will be empty and setting .email won't error but also won't update anything, silently succeeding with `{ ok: true }` even though no user was updated.",
+    "line": 8,
+    "model": "claude-sonnet-5"
+  },
+  {
+    "severity": "medium",
+    "category": "security",
+    "title": "No input validation on email field",
+    "description": "req.body.email is used without any validation (format, length, type). This can allow malformed data or objects to be stored, and depending on the ORM/driver, could enable further injection or type-confusion issues.",
+    "line": 15,
+    "model": "claude-sonnet-5"
+  },
+  {
+    "severity": "medium",
+    "category": "reliability",
+    "title": "No error handling for async operations",
+    "description": "Both route handlers use async/await without try/catch. If db.query or db.save throws (e.g., connection failure, invalid query), Express will need an error-handling middleware or the promise rejection will result in an unhandled rejection / a hanging request without a proper error response to the client.",
+    "line": 6,
+    "model": "claude-sonnet-5"
+  },
+  {
+    "severity": "low",
+    "category": "style",
+    "title": "Use of SELECT * instead of explicit columns",
+    "description": "Selecting all columns with `SELECT *` risks exposing sensitive fields (e.g., password hashes) to API responses; only necessary columns (id, email, name, etc.) should be selected and returned.",
+    "line": 7,
+    "model": "claude-sonnet-5"
+  },
+  {
+    "severity": "high",
+    "category": "security",
+    "title": "SQL injection in user lookup",
+    "description": "The `id` query parameter is interpolated directly into the SQL string, allowing an attacker to inject arbitrary SQL via `/api/user?id=...`. Use parameterized queries, validate/cast the id, and avoid `SELECT *` if sensitive columns may be present.",
+    "line": 7,
+    "model": "gpt-5.5"
+  },
+  {
+    "severity": "high",
+    "category": "security",
+    "title": "Email update lacks authorization check",
+    "description": "The update endpoint uses `req.params.id` directly and never compares it to the authenticated user's id, despite the requirement that users can only change their own email. Any authenticated caller, or even unauthenticated caller if no middleware is configured elsewhere, could update another user's email by choosing their id in the URL.",
+    "line": 11,
+    "model": "gpt-5.5"
+  },
+  {
+    "severity": "medium",
+    "category": "bug",
+    "title": "Incorrect handling of database query result when updating email",
+    "description": "`db.query` likely returns an array of rows or a result wrapper, but the code assigns `user.email` directly and passes `user` to `db.save`. This may mutate the array/wrapper rather than the actual user row, fail to update anything, or save an invalid object; it should select the row explicitly and perform a parameterized UPDATE.",
+    "line": 12,
+    "model": "gpt-5.5"
+  },
+  {
+    "severity": "medium",
+    "category": "reliability",
+    "title": "Missing await and error handling for save operation",
+    "description": "`db.save(user)` is not awaited, so the response can report success before the database write completes or even if it later fails. Both route handlers also lack try/catch or Express error forwarding, which can produce unhandled promise rejections or inconsistent responses on database errors.",
+    "line": 14,
+    "model": "gpt-5.5"
+  },
+  {
+    "severity": "medium",
+    "category": "bug",
+    "title": "Request body parsing is not configured",
+    "description": "The POST handler reads `req.body.email`, but this app never installs JSON/body parsing middleware such as `app.use(express.json())`. Unless mounted behind middleware elsewhere, `req.body` will be undefined and the route will throw.",
+    "line": 13,
+    "model": "gpt-5.5"
+  },
+  {
+    "severity": "low",
+    "category": "security",
+    "title": "Returns entire user row",
+    "description": "`SELECT *` followed by `res.json(rows[0])` may expose sensitive fields such as password hashes, reset tokens, or internal flags. Return only the fields intended for clients.",
+    "line": 7,
+    "model": "gpt-5.5"
+  },
+  {
+    "severity": "high",
+    "category": "security",
+    "title": "SQL Injection Vulnerability",
+    "description": "The `id` parameter from `req.query.id` is concatenated directly into the SQL query string in the `GET /api/user` endpoint. This allows attackers to perform SQL injection attacks, potentially revealing sensitive database contents or executing destructive database commands. Always use parameterized queries (prepared statements) instead of direct string concatenation.",
+    "line": 6,
+    "model": "gemini-3.5-flash"
+  },
+  {
+    "severity": "high",
+    "category": "security",
+    "title": "Broken Access Control (Missing Authentication/Authorization)",
+    "description": "The POST endpoint `/api/user/:id/email` allows updating any user's email without verifying if the requesting user is authenticated or matches the `:id` parameter. This violates the specified design requirement and creates a critical authorization bypass vulnerability.",
+    "line": 11,
+    "model": "gemini-3.5-flash"
+  },
+  {
+    "severity": "high",
+    "category": "bug",
+    "title": "Logical bug: accessing properties on a results array",
+    "description": "The `db.query` function typically returns an array of rows (as suggested by `rows[0]` in the GET endpoint). In the POST endpoint, `const user` gets assigned this array, but then `user.email` is modified directly on the array instead of on the first row element (e.g., `user[0]`). This will cause the email update to fail or not persist correctly.",
+    "line": 12,
+    "model": "gemini-3.5-flash"
+  },
+  {
+    "severity": "medium",
+    "category": "reliability",
+    "title": "Missing await on asynchronous database save operation",
+    "description": "The `db.save` function is likely an asynchronous operation that returns a promise. In the POST route, it is called without an `await` keyword. This can cause race conditions where a success response is returned to the client before the database write has actually completed, and any errors during the save will not be caught.",
+    "line": 14,
+    "model": "gemini-3.5-flash"
+  },
+  {
+    "severity": "medium",
+    "category": "security",
+    "title": "Sensitive Data Exposure via SELECT *",
+    "description": "The `GET /api/user` endpoint performs a `SELECT *` query and returns the entire resulting record. This often exposes sensitive fields such as hashed passwords, salts, implementation details, or session tokens to the client. Modify the query to select only required, safe fields (like `id`, `name`, `email`).",
+    "line": 8,
+    "model": "gemini-3.5-flash"
+  },
+  {
+    "severity": "medium",
+    "category": "reliability",
+    "title": "Uncaught Express Errors in Async Route Handlers",
+    "description": "Both route handlers use asynchronous calls without `try/catch` blocks or an express async handler wrapper. If any database query fails or throws an error, it will result in an unhandled promise rejection, potentially causing the Node.js application to hang or crash.",
+    "line": 5,
+    "model": "gemini-3.5-flash"
+  },
+  {
+    "severity": "high",
+    "category": "security",
+    "title": "SQL injection in GET /api/user",
+    "description": "The id query parameter is interpolated directly into the SQL string (`SELECT * FROM users WHERE id = ${id}`). An attacker can supply values like `1 OR 1=1` or `1; DROP TABLE users--` to read or modify arbitrary data. Use a parameterized query (as the POST handler already does) instead.",
+    "line": 8,
+    "model": "grok-4.5"
+  },
+  {
+    "severity": "high",
+    "category": "security",
+    "title": "Missing authorization on email update",
+    "description": "POST /api/user/:id/email updates whatever id is in the URL with no check that the caller is authenticated or that req.params.id matches the logged-in user. Anyone who can hit the endpoint can change any user's email, violating the stated intent.",
+    "line": 12,
+    "model": "grok-4.5"
+  },
+  {
+    "severity": "high",
+    "category": "bug",
+    "title": "Update logic mutates query result, not a user row",
+    "description": "db.query(...) typically returns a rows array (or result object), not a single user. Assigning user.email = req.body.email and calling db.save(user) therefore does not update the intended record. Use the first row (and handle not-found), or run an UPDATE ... WHERE id = ? statement with the new email.",
+    "line": 14,
+    "model": "grok-4.5"
+  },
+  {
+    "severity": "medium",
+    "category": "reliability",
+    "title": "db.save is not awaited",
+    "description": "db.save(user) is invoked without await, so the handler may respond before the write finishes and errors will become unhandled promise rejections. Await the save and handle failures before sending { ok: true }.",
+    "line": 16,
+    "model": "grok-4.5"
+  },
+  {
+    "severity": "medium",
+    "category": "reliability",
+    "title": "No error handling on async route handlers",
+    "description": "Neither route wraps await calls in try/catch or forwards errors to Express error middleware. A DB failure will reject the promise and can hang the request or crash the process depending on the Express version and unhandledRejection behavior.",
+    "line": 6,
+    "model": "grok-4.5"
+  },
+  {
+    "severity": "medium",
+    "category": "security",
+    "title": "SELECT * may leak sensitive columns",
+    "description": "Returning the full user row can expose password hashes, tokens, or internal fields to the client. Select only the columns the API is meant to expose.",
+    "line": 8,
+    "model": "grok-4.5"
+  },
+  {
+    "severity": "low",
+    "category": "reliability",
+    "title": "Missing not-found and input validation",
+    "description": "GET returns res.json(undefined) when no user matches. POST does not validate that req.body.email is present or a well-formed email, and does not handle a missing user for the given id.",
+    "line": 9,
+    "model": "grok-4.5"
+  },
+  {
+    "severity": "high",
+    "category": "security",
+    "title": "SQL Injection Vulnerability",
+    "description": "Line 6: Direct string concatenation of `req.query.id` into SQL query allows SQL injection attacks. Use parameterized queries like `db.query('SELECT * FROM users WHERE id = ?', [id])`.",
+    "line": 6,
+    "model": "deepseek-v3.1"
+  },
+  {
+    "severity": "high",
+    "category": "security",
+    "title": "Missing Authentication & Authorization",
+    "description": "No authentication check to verify user is logged in, and no authorization check to ensure user can only update their own email. The POST endpoint allows any user to update any other user's email.",
+    "line": 10,
+    "model": "deepseek-v3.1"
+  },
+  {
+    "severity": "medium",
+    "category": "bug",
+    "title": "Incorrect Database Update Logic",
+    "description": "Line 12-13: The `db.query()` returns rows, not a single user object. Line 13 tries to modify a query result and line 14 calls a non-existent `db.save()` method. Should use an UPDATE query instead.",
+    "line": 12,
+    "model": "deepseek-v3.1"
+  },
+  {
+    "severity": "medium",
+    "category": "reliability",
+    "title": "Missing Input Validation",
+    "description": "No validation for: user ID format, email format, or input presence. Invalid inputs could cause errors or security issues.",
+    "line": null,
+    "model": "deepseek-v3.1"
+  },
+  {
+    "severity": "medium",
+    "category": "reliability",
+    "title": "Missing Error Handling",
+    "description": "No try-catch blocks or error handling for database failures. Unhandled promise rejections could crash the server.",
+    "line": null,
+    "model": "deepseek-v3.1"
+  },
+  {
+    "severity": "low",
+    "category": "style",
+    "title": "Missing Body Parser Middleware",
+    "description": "POST endpoint expects `req.body.email` but Express needs `app.use(express.json())` middleware to parse JSON request bodies.",
+    "line": null,
+    "model": "deepseek-v3.1"
+  },
+  {
+    "severity": "low",
+    "category": "style",
+    "title": "Inconsistent Parameter Usage",
+    "description": "GET uses query parameter `?id=` while POST uses route parameter `:id`. Inconsistent parameter sources could confuse API consumers.",
+    "line": null,
+    "model": "deepseek-v3.1"
+  }
+]

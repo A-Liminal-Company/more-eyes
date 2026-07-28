@@ -61,8 +61,14 @@ describe("groupFindings", () => {
 
   it("does not group weakly-similar titles on different lines", () => {
     const groups = groupFindings([
-      finding("claude", "Unsafe cast here", { line: 12 }),
-      finding("gpt", "Cast is unchecked", { line: 88 }),
+      finding("claude", "Unsafe cast here", {
+        line: 12,
+        description: "The numeric conversion drops precision.",
+      }),
+      finding("gpt", "Cast is unchecked", {
+        line: 88,
+        description: "A completely unrelated serialization concern.",
+      }),
     ]);
 
     expect(groups).toHaveLength(2);

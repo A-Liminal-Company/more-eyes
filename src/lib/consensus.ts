@@ -44,19 +44,74 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   return intersection / (a.size + b.size - intersection);
 }
 
-const STRONG_MATCH = 0.4;
-/** Same reported line is corroborating evidence, so less title overlap is needed. */
-const SAME_LINE_MATCH = 0.2;
+const TITLE_MATCH = 0.4;
+/** Titles vary far more than descriptions — "Broken Access Control" vs "Missing
+ * authorization check" describe one issue with almost no shared tokens — so the
+ * description text is also compared, at a stricter threshold since it is longer. */
+const BODY_MATCH = 0.3;
+/** A nearby reported line is corroborating evidence, so less overlap is needed. */
+const NEARBY_LINE_MATCH = 0.15;
+/** Models disagree by a line or two on where an issue starts. */
+const LINE_TOLERANCE = 3;
 
-function isSameIssue(a: ModelFinding, b: ModelFinding): boolean {
-  if (a.category !== b.category) return false;
+function nearbyLines(a: ModelFinding, b: ModelFinding): boolean {
+  return (
+    a.line != null &&
+    b.line != null &&
+    Math.abs(a.line - b.line) <= LINE_TOLERANCE
+  );
+}
 
-  const similarity = jaccard(tokenize(a.title), tokenize(b.title));
-  if (similarity >= STRONG_MATCH) return true;
+/**
+ * How strongly two findings look like the same issue. 0 means "not a match";
+ * anything above is a usable score for picking the *best* group to join.
+ */
+function similarityScore(a: ModelFinding, b: ModelFinding): number {
+  if (a.category !== b.category) return 0;
 
-  const sameLine =
-    a.line != null && b.line != null && a.line === b.line;
-  return sameLine && similarity >= SAME_LINE_MATCH;
+  const titleSimilarity = jaccard(tokenize(a.title), tokenize(b.title));
+  const bodySimilarity = jaccard(
+    tokenize(`${a.title} ${a.description}`),
+    tokenize(`${b.title} ${b.description}`)
+  );
+  const best = Math.max(titleSimilarity, bodySimilarity);
+
+  if (titleSimilarity >= TITLE_MATCH) return best;
+  if (bodySimilarity >= BODY_MATCH) return best;
+  if (nearbyLines(a, b) && best >= NEARBY_LINE_MATCH) return best;
+
+  return 0;
+}
+
+/**
+ * Merges groups that turn out to belong together, repeating until stable.
+ *
+ * A single assignment pass is order-dependent: a finding can start its own group
+ * because the members it would have matched have not been seen yet. Observed in
+ * a real run — one model's "Broken Access Control" split from three others'
+ * "Missing authorization check" purely because it was processed first. Comparing
+ * whole groups afterwards removes that dependence on input order.
+ */
+function mergeRelatedGroups(groups: ModelFinding[][]): void {
+  let merged = true;
+  while (merged) {
+    merged = false;
+
+    outer: for (let i = 0; i < groups.length; i++) {
+      for (let j = i + 1; j < groups.length; j++) {
+        const related = groups[i].some((a) =>
+          groups[j].some((b) => similarityScore(a, b) > 0)
+        );
+
+        if (related) {
+          groups[i].push(...groups[j]);
+          groups.splice(j, 1);
+          merged = true;
+          break outer;
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -73,12 +128,27 @@ export function groupFindings(reviews: ModelFinding[]): FindingGroup[] {
   const groups: ModelFinding[][] = [];
 
   for (const finding of reviews) {
-    const existing = groups.find((group) =>
-      group.some((member) => isSameIssue(member, finding))
-    );
-    if (existing) existing.push(finding);
+    // Best match, not first match. First-match lets a finding be absorbed by an
+    // earlier weakly-related group before it is ever compared with the group it
+    // actually belongs to, which fragmented real runs.
+    let bestGroup: ModelFinding[] | null = null;
+    let bestScore = 0;
+
+    for (const group of groups) {
+      const score = Math.max(
+        ...group.map((member) => similarityScore(member, finding))
+      );
+      if (score > bestScore) {
+        bestScore = score;
+        bestGroup = group;
+      }
+    }
+
+    if (bestGroup) bestGroup.push(finding);
     else groups.push([finding]);
   }
+
+  mergeRelatedGroups(groups);
 
   return groups
     .map((findings) => {
