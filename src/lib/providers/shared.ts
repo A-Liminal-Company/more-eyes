@@ -1,9 +1,60 @@
+import { ReviewError } from "../errors";
+
 export type ReviewInput = {
   title: string;
   description: string;
   language: string;
   code: string;
 };
+
+/** Per-attempt socket timeout handed to the provider SDKs. */
+export const REQUEST_TIMEOUT_MS = Number(
+  process.env.REVIEW_REQUEST_TIMEOUT_MS ?? 45_000
+);
+
+/**
+ * Hard ceiling on one model's total time, retries included.
+ *
+ * Reviews fan out with Promise.all, so without this the slowest model sets the
+ * latency for the whole submission and a hung provider blocks it indefinitely —
+ * the partial-failure design does not help, because nothing has failed yet.
+ */
+export const REVIEW_DEADLINE_MS = Number(
+  process.env.REVIEW_DEADLINE_MS ?? 90_000
+);
+
+/** Retries multiply wall-clock time, so keep them low behind the deadline. */
+export const MAX_RETRIES = 1;
+
+/**
+ * Rejects with a ReviewError if `work` outlives the deadline, so a slow model
+ * degrades into a recorded failure instead of stalling the batch.
+ */
+export async function withDeadline<T>(
+  work: Promise<T>,
+  label: string,
+  deadlineMs: number = REVIEW_DEADLINE_MS
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new ReviewError(
+            `${label} timed out after ${Math.round(deadlineMs / 1000)}s.`
+          )
+        ),
+      deadlineMs
+    );
+  });
+
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export const REVIEW_TOOL_NAME = "submit_review";
 

@@ -6,10 +6,13 @@ import {
   type ReviewResult,
 } from "../validation";
 import {
+  MAX_RETRIES,
+  REQUEST_TIMEOUT_MS,
   REVIEW_TOOL_NAME,
   REVIEW_TOOL_SCHEMA,
   SYSTEM_PROMPT,
   buildUserPrompt,
+  withDeadline,
   type ReviewInput,
 } from "./shared";
 
@@ -22,25 +25,33 @@ export async function reviewWithAnthropic(
     throw new ReviewError("ANTHROPIC_API_KEY is not configured on the server.");
   }
 
-  const client = new Anthropic({ apiKey });
+  const client = new Anthropic({
+    apiKey,
+    timeout: REQUEST_TIMEOUT_MS,
+    maxRetries: MAX_RETRIES,
+  });
 
   let message;
   try {
-    message = await client.messages.create({
-      model: providerModel,
-      max_tokens: 4096,
-      system: SYSTEM_PROMPT,
-      tools: [
-        {
-          name: REVIEW_TOOL_NAME,
-          description: "Submit the structured code review findings.",
-          input_schema: REVIEW_TOOL_SCHEMA,
-        },
-      ],
-      tool_choice: { type: "tool", name: REVIEW_TOOL_NAME },
-      messages: [{ role: "user", content: buildUserPrompt(input) }],
-    });
+    message = await withDeadline(
+      client.messages.create({
+        model: providerModel,
+        max_tokens: 4096,
+        system: SYSTEM_PROMPT,
+        tools: [
+          {
+            name: REVIEW_TOOL_NAME,
+            description: "Submit the structured code review findings.",
+            input_schema: REVIEW_TOOL_SCHEMA,
+          },
+        ],
+        tool_choice: { type: "tool", name: REVIEW_TOOL_NAME },
+        messages: [{ role: "user", content: buildUserPrompt(input) }],
+      }),
+      providerModel
+    );
   } catch (err) {
+    if (err instanceof ReviewError) throw err;
     console.error(`[review] Anthropic request failed (${providerModel}):`, err);
     throw new ReviewError(
       `Claude review request failed: ${

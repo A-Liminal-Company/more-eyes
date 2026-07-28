@@ -6,10 +6,13 @@ import {
   type ReviewResult,
 } from "../validation";
 import {
+  MAX_RETRIES,
+  REQUEST_TIMEOUT_MS,
   REVIEW_TOOL_NAME,
   REVIEW_TOOL_SCHEMA,
   SYSTEM_PROMPT,
   buildUserPrompt,
+  withDeadline,
   type ReviewInput,
 } from "./shared";
 
@@ -25,33 +28,39 @@ export async function reviewWithOpenRouter(
   const client = new OpenAI({
     apiKey,
     baseURL: "https://openrouter.ai/api/v1",
+    timeout: REQUEST_TIMEOUT_MS,
+    maxRetries: MAX_RETRIES,
   });
 
   let completion;
   try {
-    completion = await client.chat.completions.create({
-      model: providerModel,
-      max_tokens: 4096,
-      tools: [
-        {
-          type: "function",
-          function: {
-            name: REVIEW_TOOL_NAME,
-            description: "Submit the structured code review findings.",
-            parameters: REVIEW_TOOL_SCHEMA,
+    completion = await withDeadline(
+      client.chat.completions.create({
+        model: providerModel,
+        max_tokens: 4096,
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: REVIEW_TOOL_NAME,
+              description: "Submit the structured code review findings.",
+              parameters: REVIEW_TOOL_SCHEMA,
+            },
           },
+        ],
+        tool_choice: {
+          type: "function",
+          function: { name: REVIEW_TOOL_NAME },
         },
-      ],
-      tool_choice: {
-        type: "function",
-        function: { name: REVIEW_TOOL_NAME },
-      },
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: buildUserPrompt(input) },
-      ],
-    });
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: buildUserPrompt(input) },
+        ],
+      }),
+      providerModel
+    );
   } catch (err) {
+    if (err instanceof ReviewError) throw err;
     console.error(`[review] OpenRouter request failed (${providerModel}):`, err);
     throw new ReviewError(
       `OpenRouter request failed: ${
