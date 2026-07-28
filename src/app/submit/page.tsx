@@ -52,7 +52,7 @@ export default function SubmitPage() {
   }
 
   return (
-    <main className="mx-auto max-w-3xl w-full px-6 py-12 flex-1">
+    <main id="main" className="mx-auto max-w-3xl w-full px-6 py-12 flex-1">
       <h1 className="text-2xl font-semibold mb-8">Submit code for review</h1>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">

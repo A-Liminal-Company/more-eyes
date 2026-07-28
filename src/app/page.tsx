@@ -13,7 +13,7 @@ export default async function HomePage() {
   });
 
   return (
-    <main className="mx-auto max-w-3xl w-full px-6 py-12 flex-1">
+    <main id="main" className="mx-auto max-w-3xl w-full px-6 py-12 flex-1">
       <div className="flex items-center justify-between mb-8">
         <h1 className="text-2xl font-semibold">Code Review</h1>
         <Link

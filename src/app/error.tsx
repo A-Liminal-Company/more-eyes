@@ -14,7 +14,7 @@ export default function Error({
   }, [error]);
 
   return (
-    <main className="mx-auto max-w-3xl w-full px-6 py-12 flex-1">
+    <main id="main" className="mx-auto max-w-3xl w-full px-6 py-12 flex-1">
       <h1 className="text-2xl font-semibold mb-2">Something went wrong</h1>
       <p className="text-sm text-gray-600 mb-6">
         The page failed to load. This has been logged on the server.

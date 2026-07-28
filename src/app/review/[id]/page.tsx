@@ -44,7 +44,7 @@ export default async function ReviewPage({
   const agreed = groups.filter((g) => g.models.length > 1).length;
 
   return (
-    <main className="mx-auto max-w-3xl w-full px-6 py-12 flex-1">
+    <main id="main" className="mx-auto max-w-3xl w-full px-6 py-12 flex-1">
       <Link href="/" className="text-sm text-gray-500 hover:underline">
         ← All submissions
       </Link>
