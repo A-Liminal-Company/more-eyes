@@ -1,6 +1,10 @@
 import OpenAI from "openai";
 import { ReviewError } from "../errors";
-import { reviewResultSchema, type ReviewResult } from "../validation";
+import {
+  isUsableReview,
+  reviewResultSchema,
+  type ReviewResult,
+} from "../validation";
 import {
   REVIEW_TOOL_NAME,
   REVIEW_TOOL_SCHEMA,
@@ -75,6 +79,10 @@ export async function reviewWithOpenRouter(
     throw new ReviewError(
       `${providerModel} returned an unexpected review shape: ${parsed.error.message}`
     );
+  }
+
+  if (!isUsableReview(parsed.data)) {
+    throw new ReviewError(`${providerModel} returned an empty review.`);
   }
 
   return parsed.data;

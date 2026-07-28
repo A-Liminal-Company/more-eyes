@@ -48,9 +48,35 @@ export const findingSchema = z.object({
 
 export type Finding = z.infer<typeof findingSchema>;
 
-export const reviewResultSchema = z.object({
-  summary: z.string(),
-  findings: z.array(findingSchema),
-});
+/**
+ * Deliberately lenient about what a model returns.
+ *
+ * Models do not reliably honour `required` in a tool schema — Claude via
+ * OpenRouter was observed omitting `summary` on some runs and including it on
+ * others, with the same input and a finish_reason of `tool_calls`. Rejecting the
+ * whole response over one missing string would throw away a perfectly good set
+ * of findings, so `summary` is optional and individually malformed findings are
+ * dropped rather than failing the batch.
+ *
+ * Callers should treat a result with no summary AND no findings as a failure —
+ * see `assertUsableReview`.
+ */
+export const reviewResultSchema = z
+  .object({
+    summary: z.string().optional(),
+    findings: z.array(z.unknown()).optional(),
+  })
+  .transform(({ summary, findings }) => ({
+    summary: summary ?? "",
+    findings: (findings ?? [])
+      .map((f) => findingSchema.safeParse(f))
+      .filter((r) => r.success)
+      .map((r) => r.data),
+  }));
 
 export type ReviewResult = z.infer<typeof reviewResultSchema>;
+
+/** A response with neither a summary nor a single usable finding is not a review. */
+export function isUsableReview(result: ReviewResult): boolean {
+  return result.summary.trim().length > 0 || result.findings.length > 0;
+}

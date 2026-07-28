@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_CODE_LENGTH,
+  isUsableReview,
   reviewResultSchema,
   submissionInputSchema,
 } from "./validation";
@@ -101,7 +102,76 @@ describe("reviewResultSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("rejects an unknown severity", () => {
+  // Regression: Claude via OpenRouter omitted `summary` on some runs despite the
+  // tool schema marking it required, with finish_reason "tool_calls" and no
+  // truncation. Dropping a whole review over that loses real findings.
+  it("accepts a review with no summary and keeps the findings", () => {
+    const result = reviewResultSchema.safeParse({
+      findings: [
+        {
+          severity: "high",
+          category: "security",
+          title: "SQL injection",
+          description: "Interpolated query.",
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.summary).toBe("");
+      expect(result.data.findings).toHaveLength(1);
+    }
+  });
+
+  it("drops malformed findings but keeps the valid ones", () => {
+    const result = reviewResultSchema.safeParse({
+      summary: "Mixed bag.",
+      findings: [
+        {
+          severity: "high",
+          category: "bug",
+          title: "Real finding",
+          description: "Valid.",
+        },
+        { severity: "catastrophic", category: "bug", title: "x" },
+        "not even an object",
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.findings).toHaveLength(1);
+      expect(result.data.findings[0].title).toBe("Real finding");
+    }
+  });
+
+  it("treats a response with neither summary nor findings as unusable", () => {
+    const result = reviewResultSchema.safeParse({});
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(isUsableReview(result.data)).toBe(false);
+    }
+  });
+
+  it("treats findings-only and summary-only responses as usable", () => {
+    const findingsOnly = reviewResultSchema.parse({
+      findings: [
+        {
+          severity: "low",
+          category: "style",
+          title: "t",
+          description: "d",
+        },
+      ],
+    });
+    const summaryOnly = reviewResultSchema.parse({ summary: "All clear." });
+
+    expect(isUsableReview(findingsOnly)).toBe(true);
+    expect(isUsableReview(summaryOnly)).toBe(true);
+  });
+
+  it("drops a finding with an unknown severity, keeping the review", () => {
     const result = reviewResultSchema.safeParse({
       summary: "x",
       findings: [
@@ -113,7 +183,12 @@ describe("reviewResultSchema", () => {
         },
       ],
     });
-    expect(result.success).toBe(false);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.findings).toEqual([]);
+      expect(result.data.summary).toBe("x");
+    }
   });
 
   it("accepts an empty findings array", () => {

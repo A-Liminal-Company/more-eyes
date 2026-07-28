@@ -1,6 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { ReviewError } from "../errors";
-import { reviewResultSchema, type ReviewResult } from "../validation";
+import {
+  isUsableReview,
+  reviewResultSchema,
+  type ReviewResult,
+} from "../validation";
 import {
   REVIEW_TOOL_NAME,
   REVIEW_TOOL_SCHEMA,
@@ -58,6 +62,10 @@ export async function reviewWithAnthropic(
     throw new ReviewError(
       `Claude returned an unexpected review shape: ${parsed.error.message}`
     );
+  }
+
+  if (!isUsableReview(parsed.data)) {
+    throw new ReviewError("Claude returned an empty review.");
   }
 
   return parsed.data;

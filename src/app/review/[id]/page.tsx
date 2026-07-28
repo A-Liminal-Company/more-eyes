@@ -146,7 +146,13 @@ export default async function ReviewPage({
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
                     {modelLabel(review.model)}
                   </p>
-                  <p className="text-sm leading-relaxed">{review.summary}</p>
+                  {review.summary ? (
+                    <p className="text-sm leading-relaxed">{review.summary}</p>
+                  ) : (
+                    <p className="text-sm text-gray-500 italic">
+                      No summary returned — findings only.
+                    </p>
+                  )}
                 </li>
               ))}
             </ul>
