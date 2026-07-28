@@ -22,7 +22,7 @@ model Review {
   submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
   submissionId String     @unique
   summary      String
-  findings     String
+  findings     Json
   model        String
   createdAt    DateTime   @default(now())
 }

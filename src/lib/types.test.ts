@@ -3,19 +3,17 @@ import { parseFindings, sortFindings } from "./types";
 import type { Finding } from "./validation";
 
 describe("parseFindings", () => {
-  it("parses a valid JSON array", () => {
-    const findings = parseFindings(
-      JSON.stringify([{ severity: "low", category: "style" }])
-    );
+  it("passes through an array of findings", () => {
+    const findings = parseFindings([{ severity: "low", category: "style" }]);
     expect(findings).toHaveLength(1);
   });
 
-  it("returns an empty array for malformed JSON", () => {
-    expect(parseFindings("not json")).toEqual([]);
+  it("returns an empty array for a non-array value", () => {
+    expect(parseFindings({ foo: "bar" })).toEqual([]);
   });
 
-  it("returns an empty array when JSON is not an array", () => {
-    expect(parseFindings(JSON.stringify({ foo: "bar" }))).toEqual([]);
+  it("returns an empty array for null", () => {
+    expect(parseFindings(null)).toEqual([]);
   });
 });
 

@@ -97,7 +97,7 @@ describe("POST /api/reviews", () => {
 
     const persisted = createMock.mock.calls[0][0].data;
     expect(persisted.title).toBe(validBody.title);
-    expect(JSON.parse(persisted.review.create.findings)).toHaveLength(1);
+    expect(persisted.review.create.findings).toHaveLength(1);
   });
 
   it("returns 429 once the rate limit is exceeded", async () => {

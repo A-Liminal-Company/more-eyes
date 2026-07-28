@@ -1,12 +1,7 @@
 import type { Finding } from "./validation";
 
-export function parseFindings(json: string): Finding[] {
-  try {
-    const parsed = JSON.parse(json);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+export function parseFindings(value: unknown): Finding[] {
+  return Array.isArray(value) ? (value as Finding[]) : [];
 }
 
 const SEVERITY_ORDER: Record<Finding["severity"], number> = {

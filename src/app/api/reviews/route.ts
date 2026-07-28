@@ -66,7 +66,7 @@ export async function POST(request: NextRequest) {
       review: {
         create: {
           summary: result.summary,
-          findings: JSON.stringify(result.findings),
+          findings: result.findings,
           model: process.env.CLAUDE_MODEL ?? "claude-sonnet-5",
         },
       },
