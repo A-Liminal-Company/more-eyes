@@ -1,0 +1,28 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Submission {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  language    String
+  code        String
+  createdAt   DateTime @default(now())
+  review      Review?
+}
+
+model Review {
+  id           String     @id @default(cuid())
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  submissionId String     @unique
+  summary      String
+  findings     String
+  model        String
+  createdAt    DateTime   @default(now())
+}
