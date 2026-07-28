@@ -310,3 +310,39 @@ grouped into a consensus view.
   reviewer picker verified in-browser against seeded data.
 - **Still unverified:** no live API call has been made through either provider —
   both keys were unset. The happy path remains untested end-to-end.
+
+### First live run — 2026-07-28
+
+`OPENROUTER_API_KEY` added; all six models pointed at a deliberately buggy
+Express snippet. **HTTP 201 in 41s, 5 of 6 models responded.** The happy path is
+now verified end-to-end — the last open item from Pass 1 is closed.
+
+Two real defects surfaced that no amount of seeded data would have found:
+
+- **Models ignore `required` in a tool schema.** Claude returned 7 findings with
+  no `summary` field — `finish_reason: tool_calls`, valid JSON, 1.3k tokens
+  against a 16k limit, so not truncation. The same prompt included `summary` on
+  a repeat run. The strict parse threw the whole review away. Fixed: `summary` is
+  optional, malformed findings are dropped individually, and only a response with
+  neither summary nor findings counts as a failure.
+- **Consensus fragmented on real output.** One authorization flaw appeared as two
+  groups ("Missing authorization check", 3 models / "Broken Access Control",
+  2 models) and one `db.query` bug as three. Root cause was two-fold: title-token
+  overlap is too narrow when models share almost no vocabulary, and single-pass
+  greedy assignment is order-dependent — a finding started its own group because
+  the findings it would have matched had not been processed yet. Fixed by
+  comparing descriptions, scoring best-match instead of first-match, and merging
+  groups until stable. Result on the same data: 33 findings → 13 groups, with SQL
+  injection, missing authorization, and the `db.query` bug each correctly showing
+  5-model agreement.
+
+A regression suite (`src/lib/consensus.real.test.ts`) now runs against the
+captured 33-finding fixture, because synthetic examples made the clustering look
+considerably easier than it is.
+
+- **Ground truth at close:** 58 tests passing, typecheck clean, lint clean, build
+  succeeds.
+- **Environment note:** `qwen3-coder-plus` failed with a 404 — an OpenRouter
+  account-level data-policy restriction, not an app defect. Adjustable at
+  https://openrouter.ai/settings/privacy. Partial-failure handling worked exactly
+  as intended: five reviews persisted and rendered, one failure shown inline.
