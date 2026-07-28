@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { checkRateLimit } from "@/lib/rate-limit";
 import { ReviewError, reviewCode } from "@/lib/review";
 import { submissionInputSchema } from "@/lib/validation";
 
@@ -14,6 +15,17 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const clientKey =
+    request.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "local";
+  const { allowed, retryAfterSeconds } = checkRateLimit(clientKey);
+
+  if (!allowed) {
+    return NextResponse.json(
+      { error: "Too many review requests. Please wait a moment." },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } }
+    );
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -39,6 +51,7 @@ export async function POST(request: NextRequest) {
     result = await reviewCode(input);
   } catch (err) {
     if (err instanceof ReviewError) {
+      console.error("[reviews] review failed:", err.message);
       return NextResponse.json({ error: err.message }, { status: 502 });
     }
     throw err;
