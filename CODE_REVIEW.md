@@ -31,13 +31,13 @@ or reused, even once resolved, so changelog entries stay meaningful.
 | R-3 | Reliability | Low | No request-size guard before body parse | 🔴 Open | `src/app/api/reviews/route.ts` |
 | R-4 | Reliability | Low | No Prisma migration history | 🔴 Open | `prisma/` |
 | A11Y-3 | Accessibility | Low | No skip-link, minor landmark polish | 🔴 Open | `src/app/layout.tsx` |
-| C-4 | Code quality | Low | README is create-next-app boilerplate | 🔴 Open | `README.md` |
+| C-4 | Code quality | Low | README is create-next-app boilerplate | ✅ Fixed | `README.md` |
 | C-5 | Code quality | Low | Default model string duplicated | ✅ Fixed | `src/lib/models.ts` |
 | S-5 | Security | Medium | Second API key broadens credential exposure | 🟡 Partial | `src/lib/providers/openrouter.ts`, `.env.example` |
 | R-5 | Reliability | Medium | No timeout on provider requests | ✅ Fixed | `src/lib/providers/shared.ts` |
 | C-6 | Code quality | Low | Model catalogue can drift from OpenRouter | 🔴 Open | `src/lib/models.ts` |
 
-**13 fixed · 1 partial · 6 open** (5 Low deferred by decision; S-5 partially
+**14 fixed · 1 partial · 5 open** (4 Low deferred by decision; S-5 partially
 addressed by a spend cap on the OpenRouter key.)
 
 ## Details
@@ -218,14 +218,21 @@ addressed by a spend cap on the OpenRouter key.)
 - **Remains:** All of it. Deferred by decision.
 
 ### C-4 — README is create-next-app boilerplate
-- **Priority:** Low · **Status:** 🔴 Open
+- **Priority:** Low · **Status:** ✅ Fixed
 - **Files:** `README.md`
 - **Found:** Untouched scaffold README — nothing about what the app does, how to
-  run it, or which env vars are required (notably `APP_ACCESS_SECRET`).
-- **Why it matters:** The repo is now on GitHub; this is the first thing a
+  run it, or which env vars are required. By the end it omitted six variables,
+  including the two without which the app does not start.
+- **Why it matters:** The repo is on GitHub; this is the first thing a
   collaborator reads.
-- **Remains:** All of it. Deferred by decision — worth doing before anyone else
-  touches the repo.
+- **Done:** Rewritten — what it does and why multi-model, a required/optional env
+  var table, setup through first launch, the reviewer list with guidance on
+  adding models (verify tool support; prefer multi-provider slugs), commands,
+  architecture, and known limitations. Flags that `APP_ACCESS_SECRET` being unset
+  returns 503 on every route, which reads as a broken app rather than a missing
+  setting. **Verified by following it on a fresh clone into a clean directory:**
+  64 tests pass and the build succeeds from the documented steps alone.
+- **Remains:** Nothing.
 
 ### C-5 — Default model string duplicated
 - **Priority:** Low · **Status:** ✅ Fixed
