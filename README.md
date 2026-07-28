@@ -41,7 +41,7 @@ Then fill in `.env`:
 Create the database, then start it:
 
 ```bash
-npx prisma generate && npx prisma db push
+npx prisma generate && npx prisma migrate deploy
 npm run dev
 ```
 
@@ -74,10 +74,11 @@ Edit the list in `src/lib/models.ts`. Two things to know before adding one:
 ## Commands
 
 ```bash
-npm run dev     # development server
-npm test        # vitest
-npm run lint    # eslint
-npm run build   # production build
+npm run dev            # development server
+npm test               # vitest
+npm run lint           # eslint
+npm run build          # production build
+npm run check:models   # verify the registry against OpenRouter's catalogue
 ```
 
 CI runs typecheck, lint, tests, and build on every push and PR.
@@ -96,7 +97,7 @@ src/
     providers/            shared prompt + Anthropic and OpenRouter clients
     consensus.ts          groups findings that describe the same issue
     validation.ts         zod schemas for input and model output
-    rate-limit.ts         5 submissions per minute per client
+    rate-limit.ts         budget of 30 model calls per minute per client
   middleware.ts           shared-secret gate
 ```
 
@@ -137,7 +138,5 @@ updates the changelog. Report-only unless you ask it to fix things.
 - Shared-secret auth — no per-user identity or audit trail.
 - Rate limiting is in-memory and per-process; it resets on restart and doesn't
   coordinate across instances.
-- The rate limit counts submissions, not model calls. Five submissions with six
-  models each is 30 billed calls a minute.
-- Schema is applied with `prisma db push`; there's no migration history yet.
-  Adopt `prisma migrate` before any schema change reaches a shared database.
+- `script-src` still allows `'unsafe-inline'` because Next inlines hydration
+  scripts. Tightening it needs nonce plumbing through the middleware.

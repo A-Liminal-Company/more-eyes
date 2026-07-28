@@ -1,6 +1,6 @@
 # Code Review — code-review-app
 
-Last updated: 2026-07-28 · Pass 1 (+ multi-model feature, live-verified)
+Last updated: 2026-07-28 · Pass 1 complete — all findings resolved
 
 Tracked findings across security, reliability, accessibility, test coverage, and
 code quality. Kept current by the `code-review-app-review` skill — run it to
@@ -27,18 +27,17 @@ or reused, even once resolved, so changelog entries stay meaningful.
 | T-2 | Test coverage | Medium | No component tests | ✅ Fixed | `src/app/submit/page.test.tsx` |
 | C-3 | Code quality | Medium | Findings stored as a JSON string column | ✅ Fixed | `prisma/schema.prisma`, `src/lib/types.ts` |
 | T-3 | Test coverage | Low | No CI configuration | ✅ Fixed | `.github/workflows/ci.yml` |
-| S-4 | Security | Low | No security headers / CSP | 🔴 Open | `next.config.ts` |
-| R-3 | Reliability | Low | No request-size guard before body parse | 🔴 Open | `src/app/api/reviews/route.ts` |
-| R-4 | Reliability | Low | No Prisma migration history | 🔴 Open | `prisma/` |
-| A11Y-3 | Accessibility | Low | No skip-link, minor landmark polish | 🔴 Open | `src/app/layout.tsx` |
+| S-4 | Security | Low | No security headers / CSP | ✅ Fixed | `src/middleware.ts` |
+| R-3 | Reliability | Low | No request-size guard before body parse | ✅ Fixed | `src/app/api/reviews/route.ts` |
+| R-4 | Reliability | Low | No Prisma migration history | ✅ Fixed | `prisma/migrations/`, `.github/workflows/ci.yml` |
+| A11Y-3 | Accessibility | Low | No skip-link, minor landmark polish | ✅ Fixed | `src/app/layout.tsx` |
 | C-4 | Code quality | Low | README is create-next-app boilerplate | ✅ Fixed | `README.md` |
 | C-5 | Code quality | Low | Default model string duplicated | ✅ Fixed | `src/lib/models.ts` |
-| S-5 | Security | Medium | Second API key broadens credential exposure | 🟡 Partial | `src/lib/providers/openrouter.ts`, `.env.example` |
+| S-5 | Security | Medium | Second API key broadens credential exposure | ✅ Fixed | `src/lib/rate-limit.ts`, `.env.example` |
 | R-5 | Reliability | Medium | No timeout on provider requests | ✅ Fixed | `src/lib/providers/shared.ts` |
-| C-6 | Code quality | Low | Model catalogue can drift from OpenRouter | 🔴 Open | `src/lib/models.ts` |
+| C-6 | Code quality | Low | Model catalogue can drift from OpenRouter | ✅ Fixed | `scripts/check-models.ts` |
 
-**14 fixed · 1 partial · 5 open** (4 Low deferred by decision; S-5 partially
-addressed by a spend cap on the OpenRouter key.)
+**20 fixed · 0 partial · 0 open** — every tracked finding is resolved.
 
 ## Details
 
@@ -65,8 +64,9 @@ addressed by a spend cap on the OpenRouter key.)
   billed Anthropic call.
 - **Why it matters:** An open-ended cost vector — one runaway loop could run up a
   large bill.
-- **Done:** In-memory sliding window, 5 requests per minute per client, returning
-  429 with `Retry-After`. Covered by a test.
+- **Done:** In-memory sliding window returning 429 with `Retry-After`, covered by
+  tests. Originally 5 submissions per minute; now a budget of 30 **model calls**
+  per minute — see S-5 for why the unit changed.
 - **Remains:** In-memory state is per-process — it resets on restart and does not
   coordinate across instances. Fine for single-instance deployment; needs Redis
   or similar if this ever scales horizontally.
@@ -184,38 +184,57 @@ addressed by a spend cap on the OpenRouter key.)
 - **Remains:** No coverage reporting or branch protection.
 
 ### S-4 — No security headers / CSP
-- **Priority:** Low · **Status:** 🔴 Open
-- **Files:** `next.config.ts`
+- **Priority:** Low · **Status:** ✅ Fixed
+- **Files:** `src/middleware.ts`
 - **Found:** No CSP, HSTS, `X-Frame-Options`, or related headers.
 - **Why it matters:** Low while access is gated and usage is internal; matters
   more if this becomes publicly reachable.
-- **Remains:** All of it. Deferred by decision.
+- **Done:** CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options`,
+  `Referrer-Policy`, and `Permissions-Policy` on every response, with HSTS added
+  only in production. The policy splits by environment — development needs
+  `'unsafe-eval'` and a websocket for hot reload, and granting those in
+  production would defeat the point. Verified both ways in a browser: dev logs
+  `[HMR] connected`, and a production build renders and hydrates with no CSP
+  violations.
+- **Remains:** `script-src` still allows `'unsafe-inline'` because Next inlines
+  hydration scripts. Removing it needs nonce plumbing through the middleware —
+  worth doing if this is ever exposed publicly.
 
 ### R-3 — No request-size guard before body parse
-- **Priority:** Low · **Status:** 🔴 Open
+- **Priority:** Low · **Status:** ✅ Fixed
 - **Files:** `src/app/api/reviews/route.ts`
-- **Found:** `request.json()` parses the entire body before zod's length caps
-  apply.
-- **Why it matters:** Minor memory-pressure surface. Largely mitigated by S-1 and
-  S-2 in practice.
-- **Remains:** All of it. Deferred by decision.
+- **Found:** `request.json()` parsed the entire body before zod's length caps
+  applied.
+- **Why it matters:** Minor memory-pressure surface, and the guard is what makes
+  it safe to parse before charging the rate limit (see S-5).
+- **Done:** Rejects with 413 from the `content-length` header when the body
+  exceeds the code cap plus headroom, before parsing. Verified live: a 60KB body
+  returns 413, a valid one still succeeds. Covered by a test.
+- **Remains:** Trusts the declared `content-length`. A lying header would still
+  be parsed, though Next imposes its own body limits underneath.
 
 ### R-4 — No Prisma migration history
-- **Priority:** Low · **Status:** 🔴 Open
-- **Files:** `prisma/`
+- **Priority:** Low · **Status:** ✅ Fixed
+- **Files:** `prisma/migrations/`, `.github/workflows/ci.yml`
 - **Found:** Schema applied via `prisma db push`; no `prisma/migrations/`.
-- **Why it matters:** No reproducible schema history. The C-3 change was applied
-  with `--accept-data-loss`, which is acceptable against a local dev database and
-  would not be against a shared one.
-- **Remains:** Adopt `prisma migrate dev` before any schema change reaches a
-  shared or production database. Deferred by decision.
+- **Why it matters:** No reproducible schema history. Earlier schema changes were
+  applied with `--accept-data-loss`, fine against a local dev database and not
+  against a shared one.
+- **Done:** Initial migration checked in, and CI now runs `prisma migrate deploy`
+  instead of `db push` so a missing or broken migration fails there rather than
+  on a real database.
+- **Remains:** Nothing. Use `prisma migrate dev` for future schema changes.
 
 ### A11Y-3 — No skip-link, minor landmark polish
-- **Priority:** Low · **Status:** 🔴 Open
-- **Files:** `src/app/layout.tsx`
-- **Found:** No skip-to-content link.
-- **Why it matters:** Minor given how shallow the navigation is.
-- **Remains:** All of it. Deferred by decision.
+- **Priority:** Low · **Status:** ✅ Fixed
+- **Files:** `src/app/layout.tsx`, all four page components
+- **Found:** No skip-to-content link, and no id on the `main` landmarks.
+- **Why it matters:** Minor given shallow navigation, but a skip link is the
+  cheapest possible win for keyboard users.
+- **Done:** Visually-hidden link that appears on focus, with an `id="main"`
+  target on every page. Verified in-browser that it is the **first focusable
+  element** — a skip link users reach late is useless.
+- **Remains:** Nothing.
 
 ### C-4 — README is create-next-app boilerplate
 - **Priority:** Low · **Status:** ✅ Fixed
@@ -247,17 +266,19 @@ addressed by a spend cap on the OpenRouter key.)
 - **Remains:** Nothing.
 
 ### S-5 — Second API key broadens credential exposure
-- **Priority:** Medium · **Status:** 🔴 Open
-- **Files:** `src/lib/providers/openrouter.ts`, `.env.example`
+- **Priority:** Medium · **Status:** ✅ Fixed
+- **Files:** `src/lib/rate-limit.ts`, `.env.example`
 - **Found:** Adding `OPENROUTER_API_KEY` means two billable credentials now live
   in `.env`, and OpenRouter keys carry spend across many providers.
 - **Why it matters:** A leaked OpenRouter key is broader in blast radius than a
   single-provider key. There is no per-key spend cap enforced in the app.
-- **Done:** A $20/month cap is set on the OpenRouter key, which bounds the worst
-  case regardless of what the app does.
-- **Remains:** The app's own rate limit is still per-submission, not per-model —
-  5 submissions × 6 models is 30 billed calls per minute. The spend cap makes
-  this survivable rather than solved.
+- **Done:** A $20/month cap on the OpenRouter key bounds the worst case, and the
+  rate limit now charges per **model call** rather than per submission — a budget
+  of 30 calls per minute, so a six-model request costs six. Previously a
+  six-model request consumed the same quota as a one-model request while billing
+  six times as much.
+- **Remains:** Budget is in-memory and per-process, so it resets on restart and
+  does not coordinate across instances — the same limitation noted under S-2.
 
 ### R-5 — No timeout on provider requests
 - **Priority:** Medium · **Status:** ✅ Fixed
@@ -276,14 +297,20 @@ addressed by a spend cap on the OpenRouter key.)
   parallel; revisit if the model list grows much larger.
 
 ### C-6 — Model catalogue can drift from OpenRouter
-- **Priority:** Low · **Status:** 🔴 Open
-- **Files:** `src/lib/models.ts`
+- **Priority:** Low · **Status:** ✅ Fixed
+- **Files:** `scripts/check-models.ts`, `package.json`
 - **Found:** Model slugs are hardcoded. They were verified against OpenRouter's
   catalogue when written, but providers deprecate and rename models.
 - **Why it matters:** A stale slug surfaces as a runtime failure for that model
   only — contained by the partial-failure design, but confusing.
-- **Remains:** Re-verify slugs against `https://openrouter.ai/api/v1/models`
-  periodically. Deferred — the failure mode is visible and non-fatal.
+- **Done:** `npm run check:models` verifies each entry against the public
+  catalogue: slug still exists, still reports tool support, and has more than one
+  provider. The single-provider warning would have caught the qwen3-coder-plus
+  404 before a user hit it. Needs no API key. Current run: 6 models, 0 failing,
+  0 warnings.
+- **Remains:** Not wired into CI — it depends on a live external API, and a
+  provider outage should not fail an unrelated build. Run it manually when
+  touching the registry.
 
 ## Changelog
 
@@ -380,3 +407,31 @@ considerably easier than it is.
   Deliberate: lowering the threshold far enough to merge them starts merging
   genuinely distinct findings, and a bad merge hides one issue behind another's
   title. Over-splitting only costs a duplicate row.
+
+### Closing pass — 2026-07-28
+
+Cleared the remaining backlog. **Every tracked finding is now resolved.**
+
+- **A11Y-3** skip link, verified to be the first focusable element.
+- **S-4** security headers and CSP, split by environment — development needs
+  `'unsafe-eval'` and a websocket for hot reload, production must not have them.
+  Verified both ways in a browser rather than trusting the header string.
+- **R-3** 413 guard from `content-length` before parsing.
+- **S-5** rate limit now charges per model call (30/minute) rather than per
+  submission, so a six-model request no longer costs the same quota as a
+  one-model request while billing six times as much. This is why R-3 was worth
+  doing first: the size guard is what makes it safe to parse the body before
+  charging.
+- **R-4** initial migration checked in; CI runs `migrate deploy`.
+- **C-6** `npm run check:models` detects registry drift against OpenRouter's
+  public catalogue, including the single-provider warning that would have caught
+  the qwen3-coder-plus 404 in advance.
+
+- **Ground truth at close:** 73 tests passing, typecheck clean, lint clean,
+  production build succeeds and hydrates under the strict CSP with no violations
+  logged, `check:models` reports 6/6 healthy.
+- **Note on "0 open":** this means every *identified* finding is addressed, not
+  that the code is without fault. Several entries carry a "Remains" line
+  describing accepted limits — in-memory rate limiting, `'unsafe-inline'` in
+  `script-src`, shared-secret auth with no per-user identity. Those are bounded
+  decisions, not oversights. Run the review skill for a fresh look.
