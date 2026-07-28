@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { reviewWithModels } from "@/lib/review";
-import { submissionInputSchema } from "@/lib/validation";
+import { MAX_CODE_LENGTH, submissionInputSchema } from "@/lib/validation";
+
+/** Code cap plus generous headroom for the other fields and JSON overhead. */
+const MAX_REQUEST_BYTES = MAX_CODE_LENGTH + 16_000;
 
 export async function GET() {
   const submissions = await prisma.submission.findMany({
@@ -15,14 +18,14 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const clientKey =
-    request.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "local";
-  const { allowed, retryAfterSeconds } = checkRateLimit(clientKey);
-
-  if (!allowed) {
+  // Checked before parsing: zod's length caps only apply once the whole body is
+  // already in memory. Generous enough for the largest valid submission, and it
+  // is what makes parsing ahead of the rate-limit check safe.
+  const declaredSize = Number(request.headers.get("content-length") ?? 0);
+  if (declaredSize > MAX_REQUEST_BYTES) {
     return NextResponse.json(
-      { error: "Too many review requests. Please wait a moment." },
-      { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } }
+      { error: "Request body is too large." },
+      { status: 413 }
     );
   }
 
@@ -45,6 +48,23 @@ export async function POST(request: NextRequest) {
   }
 
   const { models, ...input } = parsed.data;
+
+  // Charged after validation so the cost reflects the real number of billed
+  // model calls rather than treating every submission as equally expensive.
+  const clientKey =
+    request.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "local";
+  const { allowed, retryAfterSeconds } = checkRateLimit(
+    clientKey,
+    models.length
+  );
+
+  if (!allowed) {
+    return NextResponse.json(
+      { error: "Too many review requests. Please wait a moment." },
+      { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } }
+    );
+  }
+
   const results = await reviewWithModels(models, input);
 
   // Only give up when nothing succeeded — otherwise persist what came back and

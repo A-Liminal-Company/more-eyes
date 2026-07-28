@@ -169,12 +169,54 @@ describe("POST /api/reviews", () => {
     reviewWithModelsMock.mockResolvedValue([okResult]);
     createMock.mockResolvedValue({ id: "abc123" });
 
-    for (let i = 0; i < 5; i++) {
+    // Budget is 30 model calls per window; one model per submission.
+    for (let i = 0; i < 30; i++) {
       expect((await POST(postRequest(validBody))).status).toBe(201);
     }
 
     const limited = await POST(postRequest(validBody));
     expect(limited.status).toBe(429);
     expect(limited.headers.get("Retry-After")).toBeTruthy();
+  });
+
+  it("charges the rate limit per model, not per submission", async () => {
+    reviewWithModelsMock.mockResolvedValue([okResult]);
+    createMock.mockResolvedValue({ id: "abc123" });
+
+    const sixModels = {
+      ...validBody,
+      models: [
+        "claude-sonnet-5",
+        "gpt-5.5",
+        "gemini-3.5-flash",
+        "grok-4.5",
+        "deepseek-v3.1",
+        "qwen3-coder",
+      ],
+    };
+
+    // Five six-model submissions exhaust the same 30-call budget that thirty
+    // single-model submissions would.
+    for (let i = 0; i < 5; i++) {
+      expect((await POST(postRequest(sixModels))).status).toBe(201);
+    }
+
+    expect((await POST(postRequest(sixModels))).status).toBe(429);
+  });
+
+  it("rejects a body larger than the size guard before parsing", async () => {
+    const request = new NextRequest("http://localhost/api/reviews", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "content-length": String(10_000_000),
+      },
+      body: JSON.stringify(validBody),
+    });
+
+    const res = await POST(request);
+
+    expect(res.status).toBe(413);
+    expect(reviewWithModelsMock).not.toHaveBeenCalled();
   });
 });
