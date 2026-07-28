@@ -24,8 +24,12 @@ export const MODELS: ModelOption[] = [
     id: "claude-sonnet-5",
     label: "Claude Sonnet 5",
     lab: "Anthropic",
-    provider: "anthropic",
-    providerModel: "claude-sonnet-5",
+    // Routed via OpenRouter so a single key covers every reviewer. Switch to
+    // provider "anthropic" with providerModel "claude-sonnet-5" to call the
+    // Anthropic API directly instead — that path is still supported and avoids
+    // OpenRouter's markup, but needs ANTHROPIC_API_KEY set.
+    provider: "openrouter",
+    providerModel: "anthropic/claude-sonnet-5",
   },
   {
     id: "gpt-5.5",
