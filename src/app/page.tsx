@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { groupFindings } from "@/lib/consensus";
 import { prisma } from "@/lib/prisma";
 import { parseFindings } from "@/lib/types";
 
@@ -8,7 +9,7 @@ export default async function HomePage() {
   const submissions = await prisma.submission.findMany({
     orderBy: { createdAt: "desc" },
     take: 50,
-    include: { review: true },
+    include: { reviews: true },
   });
 
   return (
@@ -30,9 +31,17 @@ export default async function HomePage() {
       ) : (
         <ul className="divide-y divide-gray-200 border border-gray-200 rounded-lg overflow-hidden">
           {submissions.map((submission) => {
-            const findings = submission.review
-              ? parseFindings(submission.review.findings)
-              : [];
+            const succeeded = submission.reviews.filter(
+              (r) => r.status === "ok"
+            );
+            const findings = groupFindings(
+              succeeded.flatMap((review) =>
+                parseFindings(review.findings).map((finding) => ({
+                  ...finding,
+                  model: review.model,
+                }))
+              )
+            );
             const highCount = findings.filter(
               (f) => f.severity === "high"
             ).length;
@@ -47,15 +56,17 @@ export default async function HomePage() {
                     <p className="font-medium">{submission.title}</p>
                     <p className="text-sm text-gray-500">
                       {submission.language} ·{" "}
-                      {new Date(submission.createdAt).toLocaleString()}
+                      {new Date(submission.createdAt).toLocaleString()} ·{" "}
+                      {succeeded.length} model
+                      {succeeded.length === 1 ? "" : "s"}
                     </p>
                   </div>
                   <div className="text-sm">
-                    {submission.review ? (
+                    {succeeded.length > 0 ? (
                       <span
                         className={
                           highCount > 0
-                            ? "text-red-600 font-medium"
+                            ? "text-red-700 font-medium"
                             : "text-gray-500"
                         }
                       >
@@ -64,7 +75,7 @@ export default async function HomePage() {
                         {highCount > 0 ? ` · ${highCount} high` : ""}
                       </span>
                     ) : (
-                      <span className="text-gray-400">Pending</span>
+                      <span className="text-gray-400">No reviews</span>
                     )}
                   </div>
                 </Link>

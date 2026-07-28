@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { MAX_MODELS_PER_SUBMISSION, MODELS } from "./models";
+
+const MODEL_IDS = MODELS.map((m) => m.id) as [string, ...string[]];
 
 export const MAX_TITLE_LENGTH = 200;
 export const MAX_DESCRIPTION_LENGTH = 2000;
@@ -16,6 +19,15 @@ export const submissionInputSchema = z.object({
     .string()
     .min(1, "Code is required")
     .max(MAX_CODE_LENGTH, `Code must be under ${MAX_CODE_LENGTH} characters`),
+  models: z
+    .array(z.enum(MODEL_IDS))
+    .min(1, "Select at least one model")
+    .max(
+      MAX_MODELS_PER_SUBMISSION,
+      `Select at most ${MAX_MODELS_PER_SUBMISSION} models`
+    )
+    // Duplicates would bill twice for the same opinion and break consensus counts.
+    .transform((ids) => [...new Set(ids)]),
 });
 
 export type SubmissionInput = z.infer<typeof submissionInputSchema>;

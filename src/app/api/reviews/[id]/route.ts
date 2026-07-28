@@ -9,7 +9,7 @@ export async function GET(
 
   const submission = await prisma.submission.findUnique({
     where: { id },
-    include: { review: true },
+    include: { reviews: { orderBy: { createdAt: "asc" } } },
   });
 
   if (!submission) {

@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/rate-limit";
-import { ReviewError, reviewCode } from "@/lib/review";
+import { reviewWithModels } from "@/lib/review";
 import { submissionInputSchema } from "@/lib/validation";
 
 export async function GET() {
   const submissions = await prisma.submission.findMany({
     orderBy: { createdAt: "desc" },
     take: 50,
-    include: { review: true },
+    include: { reviews: true },
   });
 
   return NextResponse.json({ submissions });
@@ -44,34 +44,41 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const input = parsed.data;
+  const { models, ...input } = parsed.data;
+  const results = await reviewWithModels(models, input);
 
-  let result;
-  try {
-    result = await reviewCode(input);
-  } catch (err) {
-    if (err instanceof ReviewError) {
-      console.error("[reviews] review failed:", err.message);
-      return NextResponse.json({ error: err.message }, { status: 502 });
-    }
-    throw err;
+  // Only give up when nothing succeeded — otherwise persist what came back and
+  // let the review page show which models failed.
+  if (results.every((r) => r.status === "failed")) {
+    const failed = results.find((r) => r.status === "failed");
+    return NextResponse.json(
+      {
+        error:
+          failed && failed.status === "failed"
+            ? failed.error
+            : "Every model failed to return a review.",
+      },
+      { status: 502 }
+    );
   }
 
   const submission = await prisma.submission.create({
     data: {
-      title: input.title,
-      description: input.description,
-      language: input.language,
-      code: input.code,
-      review: {
-        create: {
-          summary: result.summary,
-          findings: result.findings,
-          model: process.env.CLAUDE_MODEL ?? "claude-sonnet-5",
-        },
+      ...input,
+      reviews: {
+        create: results.map((r) =>
+          r.status === "ok"
+            ? {
+                model: r.modelId,
+                status: "ok",
+                summary: r.result.summary,
+                findings: r.result.findings,
+              }
+            : { model: r.modelId, status: "failed", error: r.error }
+        ),
       },
     },
-    include: { review: true },
+    include: { reviews: true },
   });
 
   return NextResponse.json({ submission }, { status: 201 });

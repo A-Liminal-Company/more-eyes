@@ -1,6 +1,6 @@
 # Code Review — code-review-app
 
-Last updated: 2026-07-28 · Pass 1
+Last updated: 2026-07-28 · Pass 1 (+ multi-model feature)
 
 Tracked findings across security, reliability, accessibility, test coverage, and
 code quality. Kept current by the `code-review-app-review` skill — run it to
@@ -32,9 +32,13 @@ or reused, even once resolved, so changelog entries stay meaningful.
 | R-4 | Reliability | Low | No Prisma migration history | 🔴 Open | `prisma/` |
 | A11Y-3 | Accessibility | Low | No skip-link, minor landmark polish | 🔴 Open | `src/app/layout.tsx` |
 | C-4 | Code quality | Low | README is create-next-app boilerplate | 🔴 Open | `README.md` |
-| C-5 | Code quality | Low | Default model string duplicated | 🔴 Open | `src/lib/review.ts`, `src/app/api/reviews/route.ts` |
+| C-5 | Code quality | Low | Default model string duplicated | ✅ Fixed | `src/lib/models.ts` |
+| S-5 | Security | Medium | Second API key broadens credential exposure | 🔴 Open | `src/lib/providers/openrouter.ts`, `.env.example` |
+| R-5 | Reliability | Medium | No timeout on provider requests | 🔴 Open | `src/lib/providers/*.ts` |
+| C-6 | Code quality | Low | Model catalogue can drift from OpenRouter | 🔴 Open | `src/lib/models.ts` |
 
-**11 fixed · 0 partial · 6 open** (all open items are Low, deferred by decision.)
+**12 fixed · 0 partial · 8 open** (5 Low deferred by decision; S-5 and R-5 are new
+Medium findings from the multi-model feature.)
 
 ## Details
 
@@ -223,12 +227,49 @@ or reused, even once resolved, so changelog entries stay meaningful.
   touches the repo.
 
 ### C-5 — Default model string duplicated
-- **Priority:** Low · **Status:** 🔴 Open
-- **Files:** `src/lib/review.ts`, `src/app/api/reviews/route.ts`
-- **Found:** `"claude-sonnet-5"` appears as a fallback in both files.
+- **Priority:** Low · **Status:** ✅ Fixed
+- **Files:** `src/lib/models.ts`
+- **Found:** `"claude-sonnet-5"` appeared as a fallback in both `review.ts` and
+  the API route.
 - **Why it matters:** Update one, miss the other, and the persisted `model` field
   silently disagrees with the model actually used.
-- **Remains:** All of it. Deferred by decision.
+- **Done:** Resolved incidentally by the multi-model work — model identity now
+  lives in a single registry (`src/lib/models.ts`) and the selected id is passed
+  explicitly, so there is no fallback string to drift.
+- **Remains:** Nothing.
+
+### S-5 — Second API key broadens credential exposure
+- **Priority:** Medium · **Status:** 🔴 Open
+- **Files:** `src/lib/providers/openrouter.ts`, `.env.example`
+- **Found:** Adding `OPENROUTER_API_KEY` means two billable credentials now live
+  in `.env`, and OpenRouter keys carry spend across many providers.
+- **Why it matters:** A leaked OpenRouter key is broader in blast radius than a
+  single-provider key. There is no per-key spend cap enforced in the app.
+- **Remains:** Set a spend limit on the OpenRouter key itself
+  (https://openrouter.ai/keys supports this), and consider whether the rate limit
+  should be per-model rather than per-submission — 5 submissions × 6 models is
+  30 billed calls per minute.
+
+### R-5 — No timeout on provider requests
+- **Priority:** Medium · **Status:** 🔴 Open
+- **Files:** `src/lib/providers/anthropic.ts`, `src/lib/providers/openrouter.ts`
+- **Found:** Neither provider sets a request timeout. `reviewWithModels` waits on
+  `Promise.all`, so the slowest model determines total latency.
+- **Why it matters:** One hung provider stalls the entire submission — the user
+  waits with no feedback, and the partial-failure design that otherwise protects
+  them does not help, because nothing has failed yet.
+- **Remains:** Add a per-request timeout (both SDKs accept one) so a slow model
+  degrades to a `failed` entry instead of blocking the batch.
+
+### C-6 — Model catalogue can drift from OpenRouter
+- **Priority:** Low · **Status:** 🔴 Open
+- **Files:** `src/lib/models.ts`
+- **Found:** Model slugs are hardcoded. They were verified against OpenRouter's
+  catalogue when written, but providers deprecate and rename models.
+- **Why it matters:** A stale slug surfaces as a runtime failure for that model
+  only — contained by the partial-failure design, but confusing.
+- **Remains:** Re-verify slugs against `https://openrouter.ai/api/v1/models`
+  periodically. Deferred — the failure mode is visible and non-fatal.
 
 ## Changelog
 
@@ -248,3 +289,24 @@ Initial review of the newly scaffolded app. 4 High, 6 Medium, 7 Low identified.
 - **Note:** The full submit → Claude → review happy path has not been exercised
   against the live API — `ANTHROPIC_API_KEY` was unset during this pass, so only
   the graceful-error path was verified end-to-end.
+
+### Multi-model review — 2026-07-28
+
+Feature work, not a review pass. Added OpenRouter alongside direct Anthropic so
+several models review each submission independently, with overlapping findings
+grouped into a consensus view.
+
+- **Schema:** `Review` is now one-to-many per `Submission`, with `status` /
+  `error` columns so a failed model is recorded rather than discarding the batch.
+- **New surface:** `src/lib/models.ts` (curated 6-model registry, all verified
+  tool-capable), `src/lib/providers/{shared,anthropic,openrouter}.ts`,
+  `src/lib/consensus.ts` (deterministic finding clustering).
+- **Closed incidentally:** C-5 — model identity now has a single source of truth.
+- **New findings:** S-5 (second billable credential), R-5 (no provider timeout),
+  C-6 (hardcoded slugs can drift). S-5 and R-5 are Medium and worth addressing
+  before this handles real traffic.
+- **Ground truth at close:** 46 tests passing (up from 25), typecheck clean, lint
+  clean, build succeeds. Consensus grouping, partial-failure display, and the
+  reviewer picker verified in-browser against seeded data.
+- **Still unverified:** no live API call has been made through either provider —
+  both keys were unset. The happy path remains untested end-to-end.

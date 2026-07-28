@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { DEFAULT_MODEL_IDS, MODELS } from "@/lib/models";
 import {
   MAX_CODE_LENGTH,
   MAX_DESCRIPTION_LENGTH,
@@ -14,6 +15,7 @@ export default function SubmitPage() {
   const [description, setDescription] = useState("");
   const [language, setLanguage] = useState("typescript");
   const [code, setCode] = useState("");
+  const [models, setModels] = useState<string[]>(DEFAULT_MODEL_IDS);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const errorRef = useRef<HTMLParagraphElement>(null);
@@ -31,7 +33,7 @@ export default function SubmitPage() {
       const res = await fetch("/api/reviews", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, description, language, code }),
+        body: JSON.stringify({ title, description, language, code, models }),
       });
 
       const data = await res.json();
@@ -127,6 +129,43 @@ export default function SubmitPage() {
           </p>
         </div>
 
+        <fieldset>
+          <legend className="block text-sm font-medium mb-1">Reviewers</legend>
+          <p className="text-xs text-gray-500 mb-2">
+            Each model reviews independently. Picking models from different labs
+            surfaces more — they tend to share blind spots within a family.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {MODELS.map((model) => (
+              <label
+                key={model.id}
+                className="flex items-center gap-2 rounded-md border border-gray-300 px-3 py-2 text-sm cursor-pointer hover:bg-gray-50"
+              >
+                <input
+                  type="checkbox"
+                  checked={models.includes(model.id)}
+                  onChange={(e) =>
+                    setModels((prev) =>
+                      e.target.checked
+                        ? [...prev, model.id]
+                        : prev.filter((id) => id !== model.id)
+                    )
+                  }
+                />
+                <span>
+                  {model.label}
+                  <span className="text-gray-500"> · {model.lab}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          {models.length === 0 && (
+            <p className="text-xs text-red-700 mt-2">
+              Select at least one model.
+            </p>
+          )}
+        </fieldset>
+
         {error && (
           <p
             ref={errorRef}
@@ -140,7 +179,7 @@ export default function SubmitPage() {
 
         <button
           type="submit"
-          disabled={submitting}
+          disabled={submitting || models.length === 0}
           aria-busy={submitting}
           className="self-start rounded-md bg-black text-white px-4 py-2 text-sm font-medium hover:bg-gray-800 disabled:opacity-50"
         >

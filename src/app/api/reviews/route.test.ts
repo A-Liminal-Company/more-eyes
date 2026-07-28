@@ -1,10 +1,9 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resetRateLimit } from "@/lib/rate-limit";
-import { ReviewError } from "@/lib/review";
 
 const createMock = vi.fn();
-const reviewCodeMock = vi.fn();
+const reviewWithModelsMock = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -21,7 +20,7 @@ vi.mock("@/lib/review", async () => {
   );
   return {
     ...actual,
-    reviewCode: (...args: unknown[]) => reviewCodeMock(...args),
+    reviewWithModels: (...args: unknown[]) => reviewWithModelsMock(...args),
   };
 });
 
@@ -40,6 +39,23 @@ const validBody = {
   description: "Divides two numbers",
   language: "typescript",
   code: "const d = (a, b) => a / b;",
+  models: ["claude-sonnet-5"],
+};
+
+const okResult = {
+  modelId: "claude-sonnet-5",
+  status: "ok",
+  result: {
+    summary: "Looks fine.",
+    findings: [
+      {
+        severity: "high",
+        category: "bug",
+        title: "Division by zero",
+        description: "b may be 0.",
+      },
+    ],
+  },
 };
 
 beforeEach(() => {
@@ -52,7 +68,7 @@ describe("POST /api/reviews", () => {
     const res = await POST(postRequest({ ...validBody, title: "" }));
 
     expect(res.status).toBe(400);
-    expect(reviewCodeMock).not.toHaveBeenCalled();
+    expect(reviewWithModelsMock).not.toHaveBeenCalled();
     expect(createMock).not.toHaveBeenCalled();
   });
 
@@ -63,50 +79,98 @@ describe("POST /api/reviews", () => {
       body: "not json",
     });
 
-    const res = await POST(request);
-    expect(res.status).toBe(400);
+    expect((await POST(request)).status).toBe(400);
   });
 
-  it("returns 502 and persists nothing when the review fails", async () => {
-    reviewCodeMock.mockRejectedValue(new ReviewError("no api key"));
+  it("returns 400 when no models are selected", async () => {
+    const res = await POST(postRequest({ ...validBody, models: [] }));
 
-    const res = await POST(postRequest(validBody));
+    expect(res.status).toBe(400);
+    expect(reviewWithModelsMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 for an unknown model id", async () => {
+    const res = await POST(
+      postRequest({ ...validBody, models: ["not-a-real-model"] })
+    );
+
+    expect(res.status).toBe(400);
+    expect(reviewWithModelsMock).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates repeated model ids before dispatching", async () => {
+    reviewWithModelsMock.mockResolvedValue([okResult]);
+    createMock.mockResolvedValue({ id: "abc123" });
+
+    await POST(
+      postRequest({
+        ...validBody,
+        models: ["claude-sonnet-5", "claude-sonnet-5"],
+      })
+    );
+
+    expect(reviewWithModelsMock).toHaveBeenCalledWith(
+      ["claude-sonnet-5"],
+      expect.anything()
+    );
+  });
+
+  it("returns 502 and persists nothing when every model fails", async () => {
+    reviewWithModelsMock.mockResolvedValue([
+      { modelId: "claude-sonnet-5", status: "failed", error: "no api key" },
+      { modelId: "gpt-5.5", status: "failed", error: "no api key" },
+    ]);
+
+    const res = await POST(
+      postRequest({ ...validBody, models: ["claude-sonnet-5", "gpt-5.5"] })
+    );
 
     expect(res.status).toBe(502);
     expect(createMock).not.toHaveBeenCalled();
   });
 
-  it("returns 201 and persists the submission on success", async () => {
-    reviewCodeMock.mockResolvedValue({
-      summary: "Looks fine.",
-      findings: [
-        {
-          severity: "high",
-          category: "bug",
-          title: "Division by zero",
-          description: "b may be 0.",
-        },
-      ],
+  it("persists successes and failures together on partial failure", async () => {
+    reviewWithModelsMock.mockResolvedValue([
+      okResult,
+      { modelId: "gpt-5.5", status: "failed", error: "upstream 500" },
+    ]);
+    createMock.mockResolvedValue({ id: "abc123" });
+
+    const res = await POST(
+      postRequest({ ...validBody, models: ["claude-sonnet-5", "gpt-5.5"] })
+    );
+
+    expect(res.status).toBe(201);
+
+    const created = createMock.mock.calls[0][0].data.reviews.create;
+    expect(created).toHaveLength(2);
+    expect(created[0]).toMatchObject({ model: "claude-sonnet-5", status: "ok" });
+    expect(created[1]).toMatchObject({
+      model: "gpt-5.5",
+      status: "failed",
+      error: "upstream 500",
     });
+  });
+
+  it("returns 201 and persists the submission on success", async () => {
+    reviewWithModelsMock.mockResolvedValue([okResult]);
     createMock.mockResolvedValue({ id: "abc123" });
 
     const res = await POST(postRequest(validBody));
 
     expect(res.status).toBe(201);
-    expect(createMock).toHaveBeenCalledOnce();
 
     const persisted = createMock.mock.calls[0][0].data;
     expect(persisted.title).toBe(validBody.title);
-    expect(persisted.review.create.findings).toHaveLength(1);
+    expect(persisted.reviews.create[0].findings).toHaveLength(1);
   });
 
   it("returns 429 once the rate limit is exceeded", async () => {
-    reviewCodeMock.mockResolvedValue({ summary: "ok", findings: [] });
+    reviewWithModelsMock.mockResolvedValue([okResult]);
     createMock.mockResolvedValue({ id: "abc123" });
 
     for (let i = 0; i < 5; i++) {
-      const res = await POST(postRequest(validBody));
-      expect(res.status).toBe(201);
+      expect((await POST(postRequest(validBody))).status).toBe(201);
     }
 
     const limited = await POST(postRequest(validBody));

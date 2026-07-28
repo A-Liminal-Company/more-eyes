@@ -14,15 +14,21 @@ model Submission {
   language    String
   code        String
   createdAt   DateTime @default(now())
-  review      Review?
+  reviews     Review[]
 }
 
 model Review {
   id           String     @id @default(cuid())
   submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
-  submissionId String     @unique
-  summary      String
-  findings     Json
+  submissionId String
   model        String
+  // "ok" when the model returned a usable review, "failed" otherwise. One model
+  // failing must not discard the reviews that succeeded.
+  status       String
+  summary      String?
+  findings     Json?
+  error        String?
   createdAt    DateTime   @default(now())
+
+  @@index([submissionId])
 }

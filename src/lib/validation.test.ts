@@ -12,8 +12,45 @@ describe("submissionInputSchema", () => {
       description: "Verifies and processes Stripe webhooks",
       language: "typescript",
       code: "export function handler() {}",
+      models: ["claude-sonnet-5"],
     });
     expect(result.success).toBe(true);
+  });
+
+  it("requires at least one model", () => {
+    const result = submissionInputSchema.safeParse({
+      title: "Webhook handler",
+      description: "desc",
+      language: "typescript",
+      code: "code",
+      models: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects an unknown model id", () => {
+    const result = submissionInputSchema.safeParse({
+      title: "Webhook handler",
+      description: "desc",
+      language: "typescript",
+      code: "code",
+      models: ["gpt-9-imaginary"],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("deduplicates repeated model ids", () => {
+    const result = submissionInputSchema.safeParse({
+      title: "Webhook handler",
+      description: "desc",
+      language: "typescript",
+      code: "code",
+      models: ["claude-sonnet-5", "claude-sonnet-5", "gpt-5.5"],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.models).toEqual(["claude-sonnet-5", "gpt-5.5"]);
+    }
   });
 
   it("rejects an empty title", () => {
