@@ -1,6 +1,6 @@
 # Code Review — code-review-app
 
-Last updated: 2026-07-28 · Pass 1 (+ multi-model feature)
+Last updated: 2026-07-28 · Pass 1 (+ multi-model feature, live-verified)
 
 Tracked findings across security, reliability, accessibility, test coverage, and
 code quality. Kept current by the `code-review-app-review` skill — run it to
@@ -20,8 +20,8 @@ or reused, even once resolved, so changelog entries stay meaningful.
 | S-2 | Security | High | No rate limiting on review submissions | ✅ Fixed | `src/lib/rate-limit.ts`, `src/app/api/reviews/route.ts` |
 | R-1 | Reliability | High | No error boundaries | ✅ Fixed | `src/app/error.tsx`, `src/app/global-error.tsx` |
 | T-1 | Test coverage | High | No API route tests | ✅ Fixed | `src/app/api/reviews/route.test.ts`, `src/app/api/reviews/[id]/route.test.ts` |
-| S-3 | Security | Medium | Prompt injection via submitted content | ✅ Fixed | `src/lib/review.ts` |
-| R-2 | Reliability | Medium | No server-side logging | ✅ Fixed | `src/lib/review.ts`, `src/app/api/reviews/route.ts` |
+| S-3 | Security | Medium | Prompt injection via submitted content | ✅ Fixed | `src/lib/providers/shared.ts` |
+| R-2 | Reliability | Medium | No server-side logging | ✅ Fixed | `src/lib/providers/*.ts`, `src/lib/review.ts`, `src/app/api/reviews/route.ts` |
 | A11Y-1 | Accessibility | Medium | No focus management or live region on submit | ✅ Fixed | `src/app/submit/page.tsx` |
 | A11Y-2 | Accessibility | Medium | Severity badge contrast unverified | ✅ Fixed | `src/app/review/[id]/page.tsx` |
 | T-2 | Test coverage | Medium | No component tests | ✅ Fixed | `src/app/submit/page.test.tsx` |
@@ -33,12 +33,12 @@ or reused, even once resolved, so changelog entries stay meaningful.
 | A11Y-3 | Accessibility | Low | No skip-link, minor landmark polish | 🔴 Open | `src/app/layout.tsx` |
 | C-4 | Code quality | Low | README is create-next-app boilerplate | 🔴 Open | `README.md` |
 | C-5 | Code quality | Low | Default model string duplicated | ✅ Fixed | `src/lib/models.ts` |
-| S-5 | Security | Medium | Second API key broadens credential exposure | 🔴 Open | `src/lib/providers/openrouter.ts`, `.env.example` |
-| R-5 | Reliability | Medium | No timeout on provider requests | 🔴 Open | `src/lib/providers/*.ts` |
+| S-5 | Security | Medium | Second API key broadens credential exposure | 🟡 Partial | `src/lib/providers/openrouter.ts`, `.env.example` |
+| R-5 | Reliability | Medium | No timeout on provider requests | ✅ Fixed | `src/lib/providers/shared.ts` |
 | C-6 | Code quality | Low | Model catalogue can drift from OpenRouter | 🔴 Open | `src/lib/models.ts` |
 
-**12 fixed · 0 partial · 8 open** (5 Low deferred by decision; S-5 and R-5 are new
-Medium findings from the multi-model feature.)
+**13 fixed · 1 partial · 6 open** (5 Low deferred by decision; S-5 partially
+addressed by a spend cap on the OpenRouter key.)
 
 ## Details
 
@@ -97,7 +97,8 @@ Medium findings from the multi-model feature.)
 
 ### S-3 — Prompt injection via submitted content
 - **Priority:** Medium · **Status:** ✅ Fixed
-- **Files:** `src/lib/review.ts`
+- **Files:** `src/lib/providers/shared.ts` (moved from `review.ts` in the
+  multi-model refactor), covered by `src/lib/providers/shared.test.ts`
 - **Found:** Title, description, language, and code were interpolated directly
   into a single user-message template literal.
 - **Why it matters:** Forced `tool_choice` constrains the response *shape*, not
@@ -245,21 +246,27 @@ Medium findings from the multi-model feature.)
   in `.env`, and OpenRouter keys carry spend across many providers.
 - **Why it matters:** A leaked OpenRouter key is broader in blast radius than a
   single-provider key. There is no per-key spend cap enforced in the app.
-- **Remains:** Set a spend limit on the OpenRouter key itself
-  (https://openrouter.ai/keys supports this), and consider whether the rate limit
-  should be per-model rather than per-submission — 5 submissions × 6 models is
-  30 billed calls per minute.
+- **Done:** A $20/month cap is set on the OpenRouter key, which bounds the worst
+  case regardless of what the app does.
+- **Remains:** The app's own rate limit is still per-submission, not per-model —
+  5 submissions × 6 models is 30 billed calls per minute. The spend cap makes
+  this survivable rather than solved.
 
 ### R-5 — No timeout on provider requests
-- **Priority:** Medium · **Status:** 🔴 Open
-- **Files:** `src/lib/providers/anthropic.ts`, `src/lib/providers/openrouter.ts`
-- **Found:** Neither provider sets a request timeout. `reviewWithModels` waits on
-  `Promise.all`, so the slowest model determines total latency.
-- **Why it matters:** One hung provider stalls the entire submission — the user
-  waits with no feedback, and the partial-failure design that otherwise protects
-  them does not help, because nothing has failed yet.
-- **Remains:** Add a per-request timeout (both SDKs accept one) so a slow model
-  degrades to a `failed` entry instead of blocking the batch.
+- **Priority:** Medium · **Status:** ✅ Fixed
+- **Files:** `src/lib/providers/shared.ts`, `.../anthropic.ts`, `.../openrouter.ts`
+- **Found:** Neither provider set a request timeout. `reviewWithModels` waits on
+  `Promise.all`, so the slowest model determined total latency.
+- **Why it matters:** One hung provider stalled the entire submission, and the
+  partial-failure design did not help because nothing had failed yet.
+- **Done:** Two layers, because SDK timeouts apply *per attempt* and retries
+  multiply the wall clock — a 45s socket timeout with `maxRetries: 1`, plus a
+  hard 90s deadline per model (`withDeadline`) that covers retries. Only the
+  outer deadline actually guarantees a bound. Configurable via
+  `REVIEW_REQUEST_TIMEOUT_MS` and `REVIEW_DEADLINE_MS`.
+- **Remains:** The deadline is per model, not per submission. Six models each
+  taking 89s would still be a ~90s request. Acceptable while models run in
+  parallel; revisit if the model list grows much larger.
 
 ### C-6 — Model catalogue can drift from OpenRouter
 - **Priority:** Low · **Status:** 🔴 Open
@@ -342,7 +349,27 @@ considerably easier than it is.
 
 - **Ground truth at close:** 58 tests passing, typecheck clean, lint clean, build
   succeeds.
-- **Environment note:** `qwen3-coder-plus` failed with a 404 — an OpenRouter
-  account-level data-policy restriction, not an app defect. Adjustable at
-  https://openrouter.ai/settings/privacy. Partial-failure handling worked exactly
-  as intended: five reviews persisted and rendered, one failure shown inline.
+- **Environment note:** `qwen3-coder-plus` failed with a 404. Partial-failure
+  handling worked exactly as intended: five reviews persisted and rendered, one
+  failure shown inline. Root-caused and fixed below.
+
+### Six-model run — 2026-07-28
+
+- **Qwen 404 root cause:** not a spend or key problem. `qwen3-coder-plus` is
+  served by **Alibaba alone**, so an account data policy excluding that single
+  provider left zero endpoints and OpenRouter returned a hard 404 instead of
+  routing elsewhere. Swapped to `qwen/qwen3-coder` — same family, six providers.
+  Verified live: routes via Novita, returns a well-formed tool call. No change to
+  account privacy settings was needed. **Lesson for the model registry:** prefer
+  multi-provider slugs; single-provider models are a availability risk.
+- **R-5 closed.** See its Details entry for the two-layer approach.
+- **Result:** 6 of 6 models responded in **26.7s** (previously 41s with one
+  failure). 38 findings → 14 groups, with SQL injection and missing
+  authorization each flagged by **all six** models.
+- **Ground truth at close:** 64 tests passing, typecheck clean, lint clean,
+  build succeeds.
+- **Known limitation:** consensus still splits the tail slightly — "db.save is
+  not awaited" and "Database write is not awaited" remain separate groups.
+  Deliberate: lowering the threshold far enough to merge them starts merging
+  genuinely distinct findings, and a bad merge hides one issue behind another's
+  title. Over-splitting only costs a duplicate row.
