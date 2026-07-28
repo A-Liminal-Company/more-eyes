@@ -60,11 +60,14 @@ export const MODELS: ModelOption[] = [
     providerModel: "deepseek/deepseek-chat-v3.1",
   },
   {
-    id: "qwen3-coder-plus",
-    label: "Qwen3 Coder Plus",
+    id: "qwen3-coder",
+    label: "Qwen3 Coder",
     lab: "Qwen",
     provider: "openrouter",
-    providerModel: "qwen/qwen3-coder-plus",
+    // Not the "-plus" variant: that one is served by Alibaba alone, so any
+    // account data policy excluding Alibaba leaves no endpoint and OpenRouter
+    // returns a hard 404. This slug has six providers to fall back through.
+    providerModel: "qwen/qwen3-coder",
   },
 ];
 
