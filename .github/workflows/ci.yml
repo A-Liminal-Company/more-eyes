@@ -8,8 +8,27 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+
+    # Real Postgres rather than a stub, so the migration is exercised against
+    # the same engine production runs.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: code_review_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
-      DATABASE_URL: "file:./dev.db"
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/code_review_test
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

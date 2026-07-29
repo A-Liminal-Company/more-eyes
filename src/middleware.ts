@@ -3,6 +3,13 @@ import { NextRequest, NextResponse } from "next/server";
 const COOKIE_NAME = "cra_access";
 
 export function middleware(request: NextRequest) {
+  // The platform healthcheck must not be gated: a 401 there reads as an
+  // unhealthy container and every deploy gets rolled back. It exposes no
+  // submission data — only whether the process and database are reachable.
+  if (request.nextUrl.pathname === "/api/health") {
+    return withSecurityHeaders(NextResponse.next());
+  }
+
   const secret = process.env.APP_ACCESS_SECRET;
 
   if (!secret) {

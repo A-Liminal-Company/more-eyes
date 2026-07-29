@@ -20,7 +20,7 @@ evidence that code is correct.
 
 ## Setup
 
-Requires Node 22+.
+Requires Node 22+ and Postgres.
 
 ```bash
 npm install
@@ -33,7 +33,7 @@ Then fill in `.env`:
 |---|---|---|
 | `OPENROUTER_API_KEY` | **Yes** | [openrouter.ai/keys](https://openrouter.ai/keys). Powers every reviewer, Claude included. Set a spend limit on the key — one submission bills every selected model. |
 | `APP_ACCESS_SECRET` | **Yes** | Gates the whole app. Generate with `openssl rand -hex 32`. Without it every route returns 503 — this looks like a broken app rather than a missing setting, so check it first when nothing loads. |
-| `DATABASE_URL` | Yes | Defaults to `file:./dev.db`. |
+| `DATABASE_URL` | Yes | Postgres connection string. Railway injects this automatically; locally point it at your own instance. |
 | `ANTHROPIC_API_KEY` | No | Only needed if you repoint the Claude entry in `src/lib/models.ts` at the direct Anthropic API instead of OpenRouter. |
 | `REVIEW_REQUEST_TIMEOUT_MS` | No | Per-attempt socket timeout. Default 45000. |
 | `REVIEW_DEADLINE_MS` | No | Hard ceiling per model, retries included. Default 90000. |
@@ -41,6 +41,7 @@ Then fill in `.env`:
 Create the database, then start it:
 
 ```bash
+createdb code_review_dev
 npx prisma generate && npx prisma migrate deploy
 npm run dev
 ```
@@ -132,6 +133,19 @@ To re-audit, invoke the `code-review-app-review` skill in Claude Code. It
 re-verifies each finding against the actual code rather than trusting the
 document, sweeps for new issues, runs the suite and build for ground truth, and
 updates the changelog. Report-only unless you ask it to fix things.
+
+## Deploying
+
+Built for a single always-on container rather than serverless, for two reasons:
+a six-model review takes 27-90s, which exceeds typical serverless function
+limits, and the rate limiter holds state in process memory — on serverless each
+instance would keep its own copy of the budget.
+
+`railway.json` configures the build, runs `prisma migrate deploy` on start, and
+points the healthcheck at `/api/health`. That route is deliberately exempt from
+the access gate: a gated healthcheck returns 401 and the platform marks every
+deploy failed. It exposes no submission data, only whether the process and
+database are reachable.
 
 ## Known limitations
 
