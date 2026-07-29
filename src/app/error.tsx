@@ -16,12 +16,12 @@ export default function Error({
   return (
     <main id="main" className="mx-auto max-w-3xl w-full px-6 py-12 flex-1">
       <h1 className="text-2xl font-semibold mb-2">Something went wrong</h1>
-      <p className="text-sm text-gray-600 mb-6">
+      <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
         The page failed to load. This has been logged on the server.
       </p>
       <button
         onClick={reset}
-        className="rounded-md bg-black text-white px-4 py-2 text-sm font-medium hover:bg-gray-800"
+        className="min-h-11 rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:bg-white dark:text-black dark:hover:bg-gray-200"
       >
         Try again
       </button>

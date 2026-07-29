@@ -9,9 +9,9 @@ import type { Finding } from "@/lib/validation";
 export const dynamic = "force-dynamic";
 
 const SEVERITY_STYLES: Record<Finding["severity"], string> = {
-  high: "bg-red-100 text-red-800 border-red-200",
-  medium: "bg-amber-100 text-amber-800 border-amber-200",
-  low: "bg-gray-100 text-gray-700 border-gray-200",
+  high: "bg-red-100 text-red-900 border-red-200 dark:bg-red-950 dark:text-red-100 dark:border-red-900",
+  medium: "bg-amber-100 text-amber-900 border-amber-200 dark:bg-amber-950 dark:text-amber-100 dark:border-amber-900",
+  low: "bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700",
 };
 
 export default async function ReviewPage({
@@ -45,12 +45,12 @@ export default async function ReviewPage({
 
   return (
     <main id="main" className="mx-auto max-w-3xl w-full px-6 py-12 flex-1">
-      <Link href="/" className="text-sm text-gray-500 hover:underline">
+      <Link href="/" className="inline-flex min-h-11 items-center text-sm text-gray-500 dark:text-gray-400 hover:underline">
         ← All submissions
       </Link>
 
       <h1 className="text-2xl font-semibold mt-2 mb-1">{submission.title}</h1>
-      <p className="text-sm text-gray-500 mb-8">
+      <p className="text-sm text-gray-500 dark:text-gray-400 mb-8">
         {submission.language} ·{" "}
         {new Date(submission.createdAt).toLocaleString()} ·{" "}
         {succeeded.length} of {submission.reviews.length} model
@@ -59,13 +59,13 @@ export default async function ReviewPage({
 
       {failed.length > 0 && (
         <section
-          className="mb-8 rounded-md border border-amber-200 bg-amber-50 px-4 py-3"
+          className="mb-8 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900 dark:bg-amber-950"
           role="status"
         >
-          <p className="text-sm font-medium text-amber-900">
+          <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
             {failed.length} model{failed.length === 1 ? "" : "s"} failed
           </p>
-          <ul className="mt-1 text-sm text-amber-900">
+          <ul className="mt-1 text-sm text-amber-900 dark:text-amber-100 break-words">
             {failed.map((review) => (
               <li key={review.id}>
                 {modelLabel(review.model)}: {review.error ?? "unknown error"}
@@ -78,17 +78,17 @@ export default async function ReviewPage({
       {succeeded.length > 0 && (
         <>
           <section className="mb-8">
-            <h2 className="text-sm font-semibold uppercase text-gray-500 mb-3">
+            <h2 className="text-sm font-semibold uppercase text-gray-500 dark:text-gray-400 mb-3">
               Findings ({groups.length})
               {agreed > 0 && (
-                <span className="ml-2 font-normal normal-case text-gray-500">
+                <span className="ml-2 font-normal normal-case text-gray-500 dark:text-gray-400">
                   · {agreed} flagged by more than one model
                 </span>
               )}
             </h2>
 
             {groups.length === 0 ? (
-              <p className="text-sm text-gray-500">No issues found.</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">No issues found.</p>
             ) : (
               <ul className="flex flex-col gap-3">
                 {groups.map((group, i) => (
@@ -112,7 +112,7 @@ export default async function ReviewPage({
                       </span>
                     </div>
 
-                    <p className="text-sm font-medium">{group.title}</p>
+                    <p className="text-sm font-medium break-words">{group.title}</p>
 
                     <ul className="mt-2 flex flex-col gap-2">
                       {group.findings.map((finding, j) => (
@@ -134,22 +134,22 @@ export default async function ReviewPage({
           </section>
 
           <section className="mb-8">
-            <h2 className="text-sm font-semibold uppercase text-gray-500 mb-3">
+            <h2 className="text-sm font-semibold uppercase text-gray-500 dark:text-gray-400 mb-3">
               Summaries
             </h2>
             <ul className="flex flex-col gap-3">
               {succeeded.map((review) => (
                 <li
                   key={review.id}
-                  className="rounded-md border border-gray-200 px-4 py-3"
+                  className="rounded-md border border-gray-200 px-4 py-3 dark:border-gray-700"
                 >
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">
                     {modelLabel(review.model)}
                   </p>
                   {review.summary ? (
                     <p className="text-sm leading-relaxed">{review.summary}</p>
                   ) : (
-                    <p className="text-sm text-gray-500 italic">
+                    <p className="text-sm text-gray-500 dark:text-gray-400 italic">
                       No summary returned — findings only.
                     </p>
                   )}
@@ -161,7 +161,7 @@ export default async function ReviewPage({
       )}
 
       <section>
-        <h2 className="text-sm font-semibold uppercase text-gray-500 mb-2">
+        <h2 className="text-sm font-semibold uppercase text-gray-500 dark:text-gray-400 mb-2">
           Code
         </h2>
         <pre className="rounded-md bg-gray-900 text-gray-100 text-xs p-4 overflow-x-auto">

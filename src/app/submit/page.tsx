@@ -55,7 +55,9 @@ export default function SubmitPage() {
     <main id="main" className="mx-auto max-w-3xl w-full px-6 py-12 flex-1">
       <h1 className="text-2xl font-semibold mb-8">Submit code for review</h1>
 
-      <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+      {/* Bottom padding clears the sticky submit button so it never covers the
+          last reviewer row on a phone. */}
+      <form onSubmit={handleSubmit} className="flex flex-col gap-5 pb-24 sm:pb-0">
         <div>
           <label htmlFor="title" className="block text-sm font-medium mb-1">
             Title
@@ -67,7 +69,7 @@ export default function SubmitPage() {
             maxLength={MAX_TITLE_LENGTH}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            className="w-full min-h-11 rounded-md border border-gray-300 px-3 py-2 text-base sm:text-sm dark:border-gray-700 dark:bg-gray-900"
             placeholder="e.g. Stripe webhook handler"
           />
         </div>
@@ -86,7 +88,7 @@ export default function SubmitPage() {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={3}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            className="w-full min-h-11 rounded-md border border-gray-300 px-3 py-2 text-base sm:text-sm dark:border-gray-700 dark:bg-gray-900"
             placeholder="Brief context so the reviewer knows what correct behavior looks like"
           />
         </div>
@@ -105,7 +107,7 @@ export default function SubmitPage() {
             maxLength={50}
             value={language}
             onChange={(e) => setLanguage(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            className="w-full min-h-11 rounded-md border border-gray-300 px-3 py-2 text-base sm:text-sm dark:border-gray-700 dark:bg-gray-900"
             placeholder="e.g. typescript, python, go"
           />
         </div>
@@ -120,18 +122,18 @@ export default function SubmitPage() {
             maxLength={MAX_CODE_LENGTH}
             value={code}
             onChange={(e) => setCode(e.target.value)}
-            rows={16}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono"
+            rows={8}
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-base sm:text-sm font-mono dark:border-gray-700 dark:bg-gray-900 sm:min-h-96"
             placeholder="Paste the code you want reviewed"
           />
-          <p className="text-xs text-gray-500 mt-1">
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             {code.length}/{MAX_CODE_LENGTH} characters
           </p>
         </div>
 
         <fieldset>
           <legend className="block text-sm font-medium mb-1">Reviewers</legend>
-          <p className="text-xs text-gray-500 mb-2">
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
             Each model reviews independently. Picking models from different labs
             surfaces more — they tend to share blind spots within a family.
           </p>
@@ -139,10 +141,11 @@ export default function SubmitPage() {
             {MODELS.map((model) => (
               <label
                 key={model.id}
-                className="flex items-center gap-2 rounded-md border border-gray-300 px-3 py-2 text-sm cursor-pointer hover:bg-gray-50"
+                className="flex min-h-11 items-center gap-3 rounded-md border border-gray-300 px-3 py-2 text-sm cursor-pointer hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-900"
               >
                 <input
                   type="checkbox"
+                  className="size-5 shrink-0"
                   checked={models.includes(model.id)}
                   onChange={(e) =>
                     setModels((prev) =>
@@ -154,13 +157,13 @@ export default function SubmitPage() {
                 />
                 <span>
                   {model.label}
-                  <span className="text-gray-500"> · {model.lab}</span>
+                  <span className="text-gray-500 dark:text-gray-400"> · {model.lab}</span>
                 </span>
               </label>
             ))}
           </div>
           {models.length === 0 && (
-            <p className="text-xs text-red-700 mt-2">
+            <p className="text-xs text-red-700 dark:text-red-400 mt-2">
               Select at least one model.
             </p>
           )}
@@ -170,7 +173,7 @@ export default function SubmitPage() {
           <p
             ref={errorRef}
             tabIndex={-1}
-            className="text-sm text-red-700"
+            className="text-sm text-red-700 dark:text-red-400"
             role="alert"
           >
             {error}
@@ -181,7 +184,7 @@ export default function SubmitPage() {
           type="submit"
           disabled={submitting || models.length === 0}
           aria-busy={submitting}
-          className="self-start rounded-md bg-black text-white px-4 py-2 text-sm font-medium hover:bg-gray-800 disabled:opacity-50"
+          className="sticky bottom-4 z-10 min-h-11 w-full rounded-md bg-black px-4 py-2 text-sm font-medium text-white shadow-lg hover:bg-gray-800 disabled:opacity-50 sm:static sm:w-auto sm:self-start sm:shadow-none dark:bg-white dark:text-black dark:hover:bg-gray-200"
         >
           {submitting ? "Reviewing…" : "Submit for review"}
         </button>

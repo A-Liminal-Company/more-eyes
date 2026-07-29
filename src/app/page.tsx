@@ -18,18 +18,18 @@ export default async function HomePage() {
         <h1 className="text-2xl font-semibold">Code Review</h1>
         <Link
           href="/submit"
-          className="rounded-md bg-black text-white px-4 py-2 text-sm font-medium hover:bg-gray-800"
+          className="inline-flex min-h-11 items-center rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:bg-white dark:text-black dark:hover:bg-gray-200"
         >
           Submit code
         </Link>
       </div>
 
       {submissions.length === 0 ? (
-        <p className="text-gray-500">
+        <p className="text-gray-500 dark:text-gray-400">
           No submissions yet. Submit something to get your first review.
         </p>
       ) : (
-        <ul className="divide-y divide-gray-200 border border-gray-200 rounded-lg overflow-hidden">
+        <ul className="divide-y divide-gray-200 border border-gray-200 rounded-lg overflow-hidden dark:divide-gray-700 dark:border-gray-700">
           {submissions.map((submission) => {
             const succeeded = submission.reviews.filter(
               (r) => r.status === "ok"
@@ -50,11 +50,11 @@ export default async function HomePage() {
               <li key={submission.id}>
                 <Link
                   href={`/review/${submission.id}`}
-                  className="flex items-center justify-between px-4 py-3 hover:bg-gray-50"
+                  className="flex min-h-11 flex-col gap-1 px-4 py-3 hover:bg-gray-50 sm:flex-row sm:items-center sm:justify-between sm:gap-4 dark:hover:bg-gray-900"
                 >
                   <div>
-                    <p className="font-medium">{submission.title}</p>
-                    <p className="text-sm text-gray-500">
+                    <p className="font-medium break-words">{submission.title}</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
                       {submission.language} ·{" "}
                       {new Date(submission.createdAt).toLocaleString()} ·{" "}
                       {succeeded.length} model
@@ -66,8 +66,8 @@ export default async function HomePage() {
                       <span
                         className={
                           highCount > 0
-                            ? "text-red-700 font-medium"
-                            : "text-gray-500"
+                            ? "text-red-700 dark:text-red-400 font-medium"
+                            : "text-gray-500 dark:text-gray-400"
                         }
                       >
                         {findings.length} finding
@@ -75,7 +75,7 @@ export default async function HomePage() {
                         {highCount > 0 ? ` · ${highCount} high` : ""}
                       </span>
                     ) : (
-                      <span className="text-gray-400">No reviews</span>
+                      <span className="text-gray-400 dark:text-gray-500">No reviews</span>
                     )}
                   </div>
                 </Link>
