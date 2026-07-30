@@ -36,8 +36,14 @@ or reused, even once resolved, so changelog entries stay meaningful.
 | S-5 | Security | Medium | Second API key broadens credential exposure | ✅ Fixed | `src/lib/rate-limit.ts`, `.env.example` |
 | R-5 | Reliability | Medium | No timeout on provider requests | ✅ Fixed | `src/lib/providers/shared.ts` |
 | C-6 | Code quality | Low | Model catalogue can drift from OpenRouter | ✅ Fixed | `scripts/check-models.ts` |
+| S-6 | Security | High | Access cookie stores the master secret verbatim | 🔴 Open | `src/middleware.ts` |
+| S-7 | Security | Medium | Access secret accepted via URL query parameter | 🔴 Open | `src/middleware.ts` |
+| S-8 | Security | High | Rate limit keyed on spoofable `X-Forwarded-For` | 🔴 Open | `src/app/api/reviews/route.ts` |
+| R-6 | Reliability | Medium | Rate-limit map grows unbounded across client keys | 🔴 Open | `src/lib/rate-limit.ts` |
+| C-7 | Code quality | Medium | Consensus matching is lexical and has a ceiling | 🔴 Open | `src/lib/consensus.ts` |
 
-**20 fixed · 0 partial · 0 open** — every tracked finding is resolved.
+**20 fixed · 0 partial · 5 open** — five new findings from the self-review pass
+below; all previously tracked findings remain resolved.
 
 ## Details
 
@@ -435,3 +441,76 @@ Cleared the remaining backlog. **Every tracked finding is now resolved.**
   describing accepted limits — in-memory rate limiting, `'unsafe-inline'` in
   `script-src`, shared-secret auth with no per-user identity. Those are bounded
   decisions, not oversights. Run the review skill for a fresh look.
+
+### S-6 — Access cookie stores the master secret verbatim
+- **Priority:** High · **Status:** 🔴 Open
+- **Files:** `src/middleware.ts`
+- **Found:** Flagged by 3 of 6 models. The access cookie's *value* is the shared
+  secret itself, so anything that captures a cookie captures the master
+  credential — logs, proxies, backups, a browser profile on a shared machine.
+- **Why it matters:** There is one secret for the whole app and no way to revoke
+  a single leaked session without rotating access for everyone.
+- **Remains:** Store a derived token instead — an HMAC of a random session id
+  keyed by the secret, or a signed value — so the cookie proves access without
+  carrying the credential.
+
+### S-7 — Access secret accepted via URL query parameter
+- **Priority:** Medium · **Status:** 🔴 Open
+- **Files:** `src/middleware.ts`
+- **Found:** Flagged by 3 of 6 models. `?secret=` is the documented way in, and
+  URLs land in browser history, server access logs, and `Referer` headers.
+- **Why it matters:** A deliberate convenience tradeoff, but an undocumented one.
+- **Remains:** Redirect to the clean path immediately after setting the cookie so
+  the secret does not persist in history, and note the tradeoff in the README.
+
+### S-8 — Rate limit keyed on spoofable `X-Forwarded-For`
+- **Priority:** High · **Status:** 🔴 Open
+- **Files:** `src/app/api/reviews/route.ts`
+- **Found:** The client key comes from `X-Forwarded-For`, which the client
+  controls. Rotating the header resets the budget every request.
+- **Why it matters:** The rate limit is the only thing bounding spend once
+  someone is past the access gate. Trivially bypassed as written.
+- **Remains:** Use the platform's trusted client address, or key on the access
+  cookie rather than a client-supplied header.
+
+### R-6 — Rate-limit map grows unbounded across client keys
+- **Priority:** Medium · **Status:** 🔴 Open
+- **Files:** `src/lib/rate-limit.ts`
+- **Found:** Flagged by 2 models. `hits` never evicts keys, so every distinct
+  client key allocates an entry that is never reclaimed. Compounds with S-8,
+  where an attacker chooses the keys.
+- **Remains:** Evict entries whose charges have all aged out of the window.
+
+### C-7 — Consensus matching is lexical and has a ceiling
+- **Priority:** Medium · **Status:** 🔴 Open
+- **Files:** `src/lib/consensus.ts`
+- **Found:** Reviewing `consensus.ts` with the app produced 21 findings and zero
+  corroborated, while three models had plainly reported one defect in different
+  words. Thresholds were lowered to 0.20 and the case now groups, but the root
+  cause is that token overlap cannot see paraphrase: "chain unrelated findings"
+  and "hide distinct issues" describe one thing and share nothing.
+- **Why it matters:** Fragmentation understates agreement, which is the tool's
+  entire value.
+- **Remains:** Lexical matching is near its ceiling. Embeddings would handle
+  paraphrase properly at the cost of a dependency and a per-finding call.
+  Worth doing only if fragmentation keeps showing up on real runs.
+
+### Self-review pass — 2026-07-30
+
+Submitted this codebase to its own deployed instance: `consensus.ts`, the
+middleware and rate limiter, and the request pipeline, six models each.
+
+- **Fixed:** stringified `findings` (two models returned a JSON-encoded string
+  rather than an array, and were being discarded entirely — 3 of 6 reviewers
+  lost); single-link chaining in group merging, now average linkage at 0.15;
+  match thresholds lowered to 0.20 with line distance as counter-evidence.
+- **New findings:** S-6, S-7, S-8, R-6, C-7 above.
+- **False positives worth recording:** two models agreed that the representative
+  title, category and severity could disagree — they all come from the same
+  object. One reported a missing import that is defined in the same file.
+  Agreement is a confidence signal, not proof.
+- **Method limitation:** submissions are file-by-file, so several findings
+  claimed `isUsableReview` was never applied. It is, in `providers/`, which was
+  not included in that submission.
+- **Ground truth at close:** 77 tests passing, typecheck clean, lint clean,
+  build succeeds, deployed and healthy.
