@@ -9,7 +9,10 @@ function finding(
   return {
     model,
     title,
-    description: `${title} description`,
+    // Deliberately not derived from the title: generating it as
+    // `${title} description` made every synthetic finding share a filler token,
+    // manufacturing overlap that real model output does not have.
+    description: title,
     severity: "medium",
     category: "bug",
     ...overrides,

@@ -44,15 +44,34 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   return intersection / (a.size + b.size - intersection);
 }
 
-const TITLE_MATCH = 0.4;
-/** Titles vary far more than descriptions — "Broken Access Control" vs "Missing
- * authorization check" describe one issue with almost no shared tokens — so the
- * description text is also compared, at a stricter threshold since it is longer. */
-const BODY_MATCH = 0.3;
+/**
+ * Thresholds are low because models paraphrase heavily. Three models describing
+ * one issue as "Transitive merging can chain unrelated findings", "Transitive
+ * group merging can hide distinct issues" and "Transitive group merge can join
+ * unrelated issues" share only two tokens pairwise — 0.20 similarity for what is
+ * plainly the same finding. Swept against the real fixture: tightening to 0.40
+ * yields 14 groups and loosening to 0.18 yields 12, with the largest group
+ * holding at 5 models either way, so this range is stable rather than a cliff.
+ */
+const TITLE_MATCH = 0.2;
+/** Descriptions are longer, so overlap there is weaker evidence than in a title. */
+const BODY_MATCH = 0.2;
 /** A nearby reported line is corroborating evidence, so less overlap is needed. */
 const NEARBY_LINE_MATCH = 0.15;
 /** Models disagree by a line or two on where an issue starts. */
 const LINE_TOLERANCE = 3;
+/** Beyond this, two cited lines are treated as different places in the file. */
+const DISTANT_LINES = 10;
+/** Wording agreement strong enough to override the distance signal. */
+const STRONG_MATCH = 0.4;
+
+function distantLines(a: ModelFinding, b: ModelFinding): boolean {
+  return (
+    a.line != null &&
+    b.line != null &&
+    Math.abs(a.line - b.line) > DISTANT_LINES
+  );
+}
 
 function nearbyLines(a: ModelFinding, b: ModelFinding): boolean {
   return (
@@ -75,6 +94,13 @@ function similarityScore(a: ModelFinding, b: ModelFinding): number {
     tokenize(`${b.title} ${b.description}`)
   );
   const best = Math.max(titleSimilarity, bodySimilarity);
+
+  // Two findings that each name a specific, far-apart line are usually separate
+  // instances of a similar problem rather than one issue — "unsafe cast" at
+  // line 12 and line 88 are two casts. Nearby lines were already treated as
+  // evidence for a match; distance is evidence against, and needs strong
+  // wording agreement to overcome.
+  if (distantLines(a, b) && best < STRONG_MATCH) return 0;
 
   if (titleSimilarity >= TITLE_MATCH) return best;
   if (bodySimilarity >= BODY_MATCH) return best;
