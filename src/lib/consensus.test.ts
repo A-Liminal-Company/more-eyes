@@ -118,4 +118,43 @@ describe("groupFindings", () => {
 
     expect(groups).toHaveLength(2);
   });
+
+  // Found by running this file through the review app itself: two models
+  // independently flagged that single-link merging let unrelated groups chain
+  // together through one weak pair. Average linkage fixes the weak-link case.
+  // A finding that genuinely describes both issues still merges them, which is
+  // arguably correct — see the note on mergeRelatedGroups.
+  it("keeps two well-formed groups separate", () => {
+    const groups = groupFindings([
+      finding("claude", "SQL injection in the user lookup query", {
+        category: "security",
+        description: "Interpolated request input reaches the SQL query.",
+      }),
+      finding("gpt", "SQL injection in the user lookup", {
+        category: "security",
+        description: "Interpolated request input reaches the SQL query directly.",
+      }),
+      finding("grok", "SQL injection in user lookup path", {
+        category: "security",
+        description: "Interpolated request input reaches the SQL query path.",
+      }),
+      finding("deepseek", "Session cookie secure flag not set", {
+        category: "security",
+        description: "Session cookie secure flag is not set on the cookie.",
+      }),
+      finding("gemini", "Session cookie secure flag missing", {
+        category: "security",
+        description: "Session cookie secure flag is not set on the cookie value.",
+      }),
+      finding("qwen", "Session cookie secure flag absent", {
+        category: "security",
+        description: "Session cookie secure flag is not set on the cookie object.",
+      }),
+    ]);
+
+    expect(groups).toHaveLength(2);
+    for (const group of groups) {
+      expect(group.models).toHaveLength(3);
+    }
+  });
 });

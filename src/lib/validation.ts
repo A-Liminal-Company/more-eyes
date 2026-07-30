@@ -49,26 +49,45 @@ export const findingSchema = z.object({
 export type Finding = z.infer<typeof findingSchema>;
 
 /**
+ * Models sometimes return a nested structure JSON-encoded as a string rather
+ * than as the array the schema asks for — `"findings": "[{...}]"`. Observed from
+ * two different models on the same input, and more common on larger inputs.
+ * Unwrap one level before validating.
+ */
+function coerceArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      // Not JSON — fall through and treat as no findings.
+    }
+  }
+  return [];
+}
+
+/**
  * Deliberately lenient about what a model returns.
  *
- * Models do not reliably honour `required` in a tool schema — Claude via
- * OpenRouter was observed omitting `summary` on some runs and including it on
- * others, with the same input and a finish_reason of `tool_calls`. Rejecting the
- * whole response over one missing string would throw away a perfectly good set
- * of findings, so `summary` is optional and individually malformed findings are
- * dropped rather than failing the batch.
+ * A tool schema is a strong hint, not a contract. Observed in practice, all with
+ * `finish_reason: "tool_calls"` and no truncation:
+ *   - `summary` omitted entirely despite being required
+ *   - `findings` returned as a JSON-encoded string instead of an array
+ *   - individual findings with severities outside the enum
  *
- * Callers should treat a result with no summary AND no findings as a failure —
- * see `assertUsableReview`.
+ * Each of these would discard an otherwise-good review under a strict parse, so
+ * every field degrades independently. Callers should treat a result with no
+ * summary AND no findings as a failure — see `isUsableReview`.
  */
 export const reviewResultSchema = z
   .object({
-    summary: z.string().optional(),
-    findings: z.array(z.unknown()).optional(),
+    summary: z.unknown().optional(),
+    findings: z.unknown().optional(),
   })
   .transform(({ summary, findings }) => ({
-    summary: summary ?? "",
-    findings: (findings ?? [])
+    summary: typeof summary === "string" ? summary : "",
+    findings: coerceArray(findings)
       .map((f) => findingSchema.safeParse(f))
       .filter((r) => r.success)
       .map((r) => r.data),

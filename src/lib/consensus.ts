@@ -83,6 +83,23 @@ function similarityScore(a: ModelFinding, b: ModelFinding): number {
   return 0;
 }
 
+/** Mean similarity across every cross-group pair. */
+function averageLinkage(a: ModelFinding[], b: ModelFinding[]): number {
+  let total = 0;
+  for (const x of a) for (const y of b) total += similarityScore(x, y);
+  return total / (a.length * b.length);
+}
+
+/**
+ * Two groups merge when their *average* cross-pair similarity clears this.
+ *
+ * Measured against the real fixture: the two halves of one split authorization
+ * finding average 0.174 and must merge, while unrelated groups (SQL injection
+ * against authorization) average 0.000. The gap is wide, so this sits below the
+ * true positive with room to spare rather than being tuned to the edge.
+ */
+const MERGE_LINKAGE = 0.15;
+
 /**
  * Merges groups that turn out to belong together, repeating until stable.
  *
@@ -91,6 +108,17 @@ function similarityScore(a: ModelFinding, b: ModelFinding): number {
  * a real run — one model's "Broken Access Control" split from three others'
  * "Missing authorization check" purely because it was processed first. Comparing
  * whole groups afterwards removes that dependence on input order.
+ *
+ * Uses average linkage, not single linkage. Merging whenever *any* one pair
+ * matched let unrelated groups chain together through a single weak link —
+ * A~B and B~C would fuse A with C even when A and C share nothing. Requiring the
+ * average to clear the bar keeps the fix for order dependence while preserving
+ * the property that over-splitting is the safer failure mode.
+ *
+ * This narrows chaining rather than eliminating it: a finding that genuinely
+ * describes two issues still pulls both groups together, because its similarity
+ * to each is real. That case is arguably a correct merge, but it means group
+ * membership is not a partition of independent issues.
  */
 function mergeRelatedGroups(groups: ModelFinding[][]): void {
   let merged = true;
@@ -99,11 +127,7 @@ function mergeRelatedGroups(groups: ModelFinding[][]): void {
 
     outer: for (let i = 0; i < groups.length; i++) {
       for (let j = i + 1; j < groups.length; j++) {
-        const related = groups[i].some((a) =>
-          groups[j].some((b) => similarityScore(a, b) > 0)
-        );
-
-        if (related) {
+        if (averageLinkage(groups[i], groups[j]) >= MERGE_LINKAGE) {
           groups[i].push(...groups[j]);
           groups.splice(j, 1);
           merged = true;

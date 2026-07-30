@@ -124,6 +124,62 @@ describe("reviewResultSchema", () => {
     }
   });
 
+  // Regression: two different models returned `findings` as a JSON-encoded
+  // string rather than an array, on the same input, with finish_reason
+  // "tool_calls" and no truncation. A strict parse discarded both reviews.
+  it("accepts findings returned as a JSON-encoded string", () => {
+    const result = reviewResultSchema.safeParse({
+      summary: "Stringified payload.",
+      findings: JSON.stringify([
+        {
+          severity: "high",
+          category: "security",
+          title: "SQL injection",
+          description: "Interpolated query.",
+        },
+      ]),
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.findings).toHaveLength(1);
+      expect(result.data.findings[0].title).toBe("SQL injection");
+    }
+  });
+
+  it("ignores a findings string that is not JSON", () => {
+    const result = reviewResultSchema.safeParse({
+      summary: "Prose instead of findings.",
+      findings: "I could not find any issues.",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.findings).toEqual([]);
+      expect(isUsableReview(result.data)).toBe(true);
+    }
+  });
+
+  it("ignores a non-string summary rather than failing", () => {
+    const result = reviewResultSchema.safeParse({
+      summary: { text: "wrapped in an object" },
+      findings: [
+        {
+          severity: "low",
+          category: "style",
+          title: "t",
+          description: "d",
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.summary).toBe("");
+      expect(result.data.findings).toHaveLength(1);
+    }
+  });
+
   it("drops malformed findings but keeps the valid ones", () => {
     const result = reviewResultSchema.safeParse({
       summary: "Mixed bag.",
