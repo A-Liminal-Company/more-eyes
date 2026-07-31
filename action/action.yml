@@ -55,5 +55,7 @@ outputs:
     description: "true when the review was skipped (no key available, or the triggering event is not a pull request)."
 
 runs:
-  using: "node20"
+  # node20 is deprecated on GitHub runners (they already force node24); the
+  # first dogfood run confirmed the bundle runs clean on 24.
+  using: "node24"
   main: "dist/index.js"
