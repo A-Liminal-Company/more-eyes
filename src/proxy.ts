@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  TOKEN_MAX_AGE_MS,
+  issueToken,
+  safeEqual,
+  verifyToken,
+} from "@/lib/access-token";
 
 const COOKIE_NAME = "cra_access";
+const SECRET_PARAM = "secret";
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   // The platform healthcheck must not be gated: a 401 there reads as an
   // unhealthy container and every deploy gets rolled back. It exposes no
   // submission data — only whether the process and database are reachable.
@@ -21,25 +28,52 @@ export function middleware(request: NextRequest) {
     );
   }
 
-  const cookie = request.cookies.get(COOKIE_NAME)?.value;
-  if (cookie && timingSafeEqual(cookie, secret)) {
-    return withSecurityHeaders(NextResponse.next());
+  const fromHeader = request.headers.get("x-access-secret");
+  const fromQuery = request.nextUrl.searchParams.get(SECRET_PARAM);
+
+  /**
+   * A secret in the query string ends up in browser history, access logs, and
+   * Referer headers, so any granted request carrying one is redirected to the
+   * same URL without it. Only the single navigation that carried the secret is
+   * exposed; everything after it is clean.
+   *
+   * Applied to an already-authorised request too, not just the unlock — someone
+   * with a working cookie following a shared `?secret=` link would otherwise
+   * leave it sitting in the address bar. Refused requests are not redirected:
+   * a 401 is the answer, and redirecting first would only leak the attempt into
+   * one more log line.
+   */
+  const grant = (setCookie: boolean): NextResponse => {
+    let response: NextResponse;
+
+    if (fromQuery !== null) {
+      const clean = request.nextUrl.clone();
+      clean.searchParams.delete(SECRET_PARAM);
+      response = withSecurityHeaders(NextResponse.redirect(clean));
+    } else {
+      response = withSecurityHeaders(NextResponse.next());
+    }
+
+    if (setCookie) {
+      response.cookies.set(COOKIE_NAME, issueToken(secret), {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: TOKEN_MAX_AGE_MS / 1000,
+      });
+    }
+
+    return response;
+  };
+
+  if (verifyToken(request.cookies.get(COOKIE_NAME)?.value, secret)) {
+    return grant(false);
   }
 
-  const provided =
-    request.headers.get("x-access-secret") ??
-    request.nextUrl.searchParams.get("secret");
-
-  if (provided && timingSafeEqual(provided, secret)) {
-    const response = withSecurityHeaders(NextResponse.next());
-    response.cookies.set(COOKIE_NAME, secret, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 30,
-    });
-    return response;
+  const provided = fromHeader ?? fromQuery;
+  if (provided && safeEqual(provided, secret)) {
+    return grant(true);
   }
 
   return withSecurityHeaders(
@@ -92,15 +126,6 @@ export function withSecurityHeaders(response: NextResponse): NextResponse {
   }
 
   return response;
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let mismatch = 0;
-  for (let i = 0; i < a.length; i++) {
-    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return mismatch === 0;
 }
 
 export const config = {

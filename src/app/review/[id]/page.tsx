@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { groupFindings, type ModelFinding } from "@/lib/consensus";
+import {
+  groupFindings,
+  isConsensusAssignment,
+  type ModelFinding,
+} from "@/lib/consensus";
 import { modelLabel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 import { parseFindings } from "@/lib/types";
@@ -40,7 +44,10 @@ export default async function ReviewPage({
     }))
   );
 
-  const groups = groupFindings(allFindings);
+  const groups = groupFindings(
+    allFindings,
+    isConsensusAssignment(submission.consensus) ? submission.consensus : null
+  );
   const agreed = groups.filter((g) => g.models.length > 1).length;
 
   return (

@@ -101,7 +101,7 @@ Only when explicitly requested:
 - `npm test` is vitest. `vitest.setup.ts` wires RTL cleanup — required, since
   vitest only auto-cleans when globals are enabled.
 - Requires `ANTHROPIC_API_KEY` and `APP_ACCESS_SECRET` in `.env`. If
-  `APP_ACCESS_SECRET` is unset the middleware returns 503 for every route, which
+  `APP_ACCESS_SECRET` is unset `proxy.ts` returns 503 for every route, which
   looks like a broken app rather than a config problem — check this before
   chasing a phantom bug.
 - The submit → Claude → review happy path needs a real API key to exercise. If

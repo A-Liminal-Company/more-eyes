@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { clientKeyFor } from "@/lib/client-key";
+import { groupFindings, type ModelFinding } from "@/lib/consensus";
+import { proposeMerges } from "@/lib/consensus-llm";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { reviewWithModels } from "@/lib/review";
@@ -51,10 +54,8 @@ export async function POST(request: NextRequest) {
 
   // Charged after validation so the cost reflects the real number of billed
   // model calls rather than treating every submission as equally expensive.
-  const clientKey =
-    request.headers.get("x-forwarded-for")?.split(",")[0].trim() ?? "local";
   const { allowed, retryAfterSeconds } = checkRateLimit(
-    clientKey,
+    clientKeyFor(request),
     models.length
   );
 
@@ -82,9 +83,24 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Grouping is recomputed on every render, so anything that costs a model call
+  // has to happen here, once, and be stored. Returns null when the pass is
+  // disabled or fails, in which case rendering falls back to lexical grouping.
+  const succeeded = results.filter((r) => r.status === "ok");
+  const allFindings: ModelFinding[] = succeeded.flatMap((r) =>
+    r.status === "ok"
+      ? r.result.findings.map((f) => ({ ...f, model: r.modelId }))
+      : []
+  );
+  const consensus = await proposeMerges(
+    groupFindings(allFindings),
+    allFindings
+  );
+
   const submission = await prisma.submission.create({
     data: {
       ...input,
+      consensus: consensus ?? undefined,
       reviews: {
         create: results.map((r) =>
           r.status === "ok"

@@ -37,6 +37,9 @@ Then fill in `.env`:
 | `ANTHROPIC_API_KEY` | No | Only needed if you repoint the Claude entry in `src/lib/models.ts` at the direct Anthropic API instead of OpenRouter. |
 | `REVIEW_REQUEST_TIMEOUT_MS` | No | Per-attempt socket timeout. Default 45000. |
 | `REVIEW_DEADLINE_MS` | No | Hard ceiling per model, retries included. Default 90000. |
+| `TRUSTED_PROXY_HOPS` | No | How many proxies sit in front of the app. Default 1, which is right behind Railway. Only raise it if you add another proxy — see the rate-limiting note below. |
+| `RATE_LIMIT_GLOBAL_MAX` | No | Model calls per minute across all clients combined. Default 120. |
+| `CONSENSUS_MERGE_MODEL` | No | Enables the model-assisted consensus pass. Unset by default; see [Deterministic consensus](#how-it-works). |
 
 Create the database, then start it:
 
@@ -46,8 +49,17 @@ npx prisma generate && npx prisma migrate deploy
 npm run dev
 ```
 
-Visit `http://localhost:3000/?secret=<your APP_ACCESS_SECRET>` once. That sets
-an httpOnly cookie and every later visit works without the query string.
+Visit `http://localhost:3000/?secret=<your APP_ACCESS_SECRET>` once. The app
+sets an httpOnly cookie and immediately redirects to the same URL without the
+query string, so the secret does not linger in the address bar, in `Referer`
+headers, or in later access log lines. It is still in the history entry for that
+one navigation — if that matters in your setup, send the secret as an
+`x-access-secret` header instead, which takes the same path without the
+redirect.
+
+The cookie holds a signed token derived from the secret, never the secret
+itself, so a captured cookie is not a captured master credential. Rotating
+`APP_ACCESS_SECRET` invalidates every issued token.
 
 ## Reviewers
 
@@ -98,8 +110,11 @@ src/
     providers/            shared prompt + Anthropic and OpenRouter clients
     consensus.ts          groups findings that describe the same issue
     validation.ts         zod schemas for input and model output
+    consensus-llm.ts      optional model-assisted merge pass, off by default
+    access-token.ts       issues and verifies the signed access cookie
+    client-key.ts         derives the rate-limit key from trusted proxy headers
     rate-limit.ts         budget of 30 model calls per minute per client
-  middleware.ts           shared-secret gate
+  proxy.ts                shared-secret gate (Next 16 renamed `middleware`)
 ```
 
 Three decisions worth knowing about, because each came from something that went
@@ -123,6 +138,20 @@ over-splitting; a missed match just costs a duplicate row.
 
 `src/lib/consensus.real.test.ts` runs against a captured real five-model run.
 Synthetic fixtures made the clustering look considerably easier than it is.
+
+Token overlap cannot see paraphrase, though, and that is a real ceiling: three
+models describing one defect as "chain unrelated findings", "hide distinct
+issues" and "join unrelated issues" share almost no vocabulary. Setting
+`CONSENSUS_MERGE_MODEL` to a model slug adds an opt-in second pass that asks
+that model to merge the groups lexical matching left split. It runs **once, at
+submission**, and its answer is stored on the row — grouping is recomputed on
+every page render, so a model call inside it would re-bill on each view. The
+pass never fails a submission: on a timeout, a missing key, or a malformed
+response it is skipped and the lexical grouping stands. Groups the pass
+deliberately kept apart are not re-merged lexically afterwards, and **two groups
+sharing a model are never merged** — a model that filed them as two findings is
+telling you they are two issues, which is better evidence than another model's
+grouping. On the captured 33-finding fixture it takes 12 groups to 9.
 
 ## Review status
 
@@ -152,5 +181,10 @@ database are reachable.
 - Shared-secret auth — no per-user identity or audit trail.
 - Rate limiting is in-memory and per-process; it resets on restart and doesn't
   coordinate across instances.
+- The per-client rate-limit key is an IP address from `X-Forwarded-For`, read
+  from the right so a client cannot choose it. That assumes exactly
+  `TRUSTED_PROXY_HOPS` proxies in front — set it wrong and the key is either
+  client-controlled again or constant for everyone. The global ceiling bounds
+  spend either way.
 - `script-src` still allows `'unsafe-inline'` because Next inlines hydration
-  scripts. Tightening it needs nonce plumbing through the middleware.
+  scripts. Tightening it needs nonce plumbing through `proxy.ts`.

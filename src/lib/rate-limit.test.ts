@@ -1,8 +1,12 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { checkRateLimit, resetRateLimit } from "./rate-limit";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { checkRateLimit, rateLimitSize, resetRateLimit } from "./rate-limit";
 
 beforeEach(() => {
   resetRateLimit();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("checkRateLimit", () => {
@@ -59,5 +63,60 @@ describe("checkRateLimit", () => {
 
     expect(retryAfterSeconds).toBeGreaterThan(0);
     expect(retryAfterSeconds).toBeLessThanOrEqual(60);
+  });
+});
+
+describe("global ceiling", () => {
+  it("bounds total spend even when every request uses a fresh key", () => {
+    // Each key gets its own 30-call budget, so per-client limits alone would
+    // never fire here. Something has to stop it — that is the global bucket.
+    let allowed = 0;
+    for (let i = 0; i < 100; i++) {
+      if (checkRateLimit(`key-${i}`, 6).allowed) allowed++;
+    }
+
+    expect(allowed * 6).toBeLessThanOrEqual(120);
+  });
+
+  it("does not interfere with a single client's own budget", () => {
+    for (let i = 0; i < 30; i++) {
+      expect(checkRateLimit("client").allowed).toBe(true);
+    }
+  });
+
+  it("reports a retry delay when only the global bucket is exhausted", () => {
+    for (let i = 0; i < 4; i++) checkRateLimit(`key-${i}`, 30);
+
+    const { allowed, retryAfterSeconds } = checkRateLimit("fresh-key", 1);
+    expect(allowed).toBe(false);
+    expect(retryAfterSeconds).toBeGreaterThan(0);
+  });
+});
+
+describe("map growth", () => {
+  it("reclaims a key once its window has rolled off", () => {
+    vi.useFakeTimers();
+
+    checkRateLimit("transient", 1);
+    expect(rateLimitSize()).toBe(1);
+
+    vi.advanceTimersByTime(61_000);
+    checkRateLimit("other", 1);
+
+    // "transient" is gone rather than lingering as an empty window.
+    expect(rateLimitSize()).toBe(1);
+  });
+
+  it("stays bounded when a caller cycles through distinct keys", () => {
+    vi.useFakeTimers();
+
+    // Well past the 10,000-key cap, spread over time so entries expire as it
+    // goes — the pattern an attacker rotating a header would produce.
+    for (let i = 0; i < 12_000; i++) {
+      checkRateLimit(`rotating-${i}`, 1);
+      if (i % 1000 === 0) vi.advanceTimersByTime(61_000);
+    }
+
+    expect(rateLimitSize()).toBeLessThanOrEqual(10_000);
   });
 });

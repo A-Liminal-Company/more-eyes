@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { groupFindings } from "@/lib/consensus";
+import { groupFindings, isConsensusAssignment } from "@/lib/consensus";
 import { prisma } from "@/lib/prisma";
 import { parseFindings } from "@/lib/types";
 
@@ -40,7 +40,10 @@ export default async function HomePage() {
                   ...finding,
                   model: review.model,
                 }))
-              )
+              ),
+              isConsensusAssignment(submission.consensus)
+                ? submission.consensus
+                : null
             );
             const highCount = findings.filter(
               (f) => f.severity === "high"

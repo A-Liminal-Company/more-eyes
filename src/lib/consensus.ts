@@ -2,6 +2,37 @@ import type { Finding } from "./validation";
 
 export type ModelFinding = Finding & { model: string };
 
+/**
+ * A grouping worked out once at submission time and stored on the Submission.
+ *
+ * Clustering runs on every render of the home page and every review page, so
+ * anything that costs a model call cannot live inside `groupFindings` — it would
+ * re-bill on each page view and make renders non-deterministic. The optional
+ * model-assisted pass therefore runs once, at POST, and persists its answer
+ * here as keys into the findings it grouped.
+ */
+export type ConsensusAssignment = { v: 1; groups: string[][] };
+
+/** Identifies a finding within a submission: which model, and its position. */
+export function findingKey(model: string, index: number): string {
+  return `${model}#${index}`;
+}
+
+export function isConsensusAssignment(
+  value: unknown
+): value is ConsensusAssignment {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<ConsensusAssignment>;
+  return (
+    candidate.v === 1 &&
+    Array.isArray(candidate.groups) &&
+    candidate.groups.every(
+      (group) =>
+        Array.isArray(group) && group.every((k) => typeof k === "string")
+    )
+  );
+}
+
 export type FindingGroup = {
   /** Representative title — taken from the highest-severity member. */
   title: string;
@@ -146,13 +177,18 @@ const MERGE_LINKAGE = 0.15;
  * to each is real. That case is arguably a correct merge, but it means group
  * membership is not a partition of independent issues.
  */
-function mergeRelatedGroups(groups: ModelFinding[][]): void {
+function mergeRelatedGroups(groups: ModelFinding[][], seededCount = 0): void {
   let merged = true;
   while (merged) {
     merged = false;
 
     outer: for (let i = 0; i < groups.length; i++) {
       for (let j = i + 1; j < groups.length; j++) {
+        // Two groups the model deliberately kept apart are not re-joined by
+        // lexical similarity — deciding they are distinct is the whole reason
+        // the assignment exists. Merges are still indexed from the front, so a
+        // seeded group only ever absorbs a lexical one, never the reverse.
+        if (i < seededCount && j < seededCount) continue;
         if (averageLinkage(groups[i], groups[j]) >= MERGE_LINKAGE) {
           groups[i].push(...groups[j]);
           groups.splice(j, 1);
@@ -174,10 +210,71 @@ function mergeRelatedGroups(groups: ModelFinding[][]): void {
  * single-model findings, which is merely redundant, whereas a bad merge hides
  * one issue behind another's title.
  */
-export function groupFindings(reviews: ModelFinding[]): FindingGroup[] {
+/**
+ * Keys a flat finding list the same way the submission route did when it wrote
+ * the assignment: per-model position, in the order the findings were persisted.
+ * Both sides derive keys from this so they cannot drift apart.
+ */
+export function keyFindings(reviews: ModelFinding[]): string[] {
+  const seen = new Map<string, number>();
+  return reviews.map((finding) => {
+    const index = seen.get(finding.model) ?? 0;
+    seen.set(finding.model, index + 1);
+    return findingKey(finding.model, index);
+  });
+}
+
+/**
+ * Seeds groups from a stored assignment, returning them alongside whatever the
+ * assignment did not account for.
+ *
+ * Findings the assignment does not mention still go through lexical clustering,
+ * so a stale or partial assignment degrades rather than dropping findings. Keys
+ * naming findings that no longer exist are simply skipped.
+ */
+function seedFromAssignment(
+  reviews: ModelFinding[],
+  assignment: ConsensusAssignment
+): { groups: ModelFinding[][]; remaining: ModelFinding[] } {
+  const keys = keyFindings(reviews);
+  const byKey = new Map<string, ModelFinding>();
+  keys.forEach((key, i) => byKey.set(key, reviews[i]));
+
+  const claimed = new Set<string>();
   const groups: ModelFinding[][] = [];
 
-  for (const finding of reviews) {
+  for (const group of assignment.groups) {
+    const members: ModelFinding[] = [];
+    for (const key of group) {
+      const finding = byKey.get(key);
+      // Skip unknown keys, and never let one finding land in two groups.
+      if (!finding || claimed.has(key)) continue;
+      claimed.add(key);
+      members.push(finding);
+    }
+    if (members.length > 0) groups.push(members);
+  }
+
+  return {
+    groups,
+    remaining: reviews.filter((_, i) => !claimed.has(keys[i])),
+  };
+}
+
+export function groupFindings(
+  reviews: ModelFinding[],
+  assignment?: ConsensusAssignment | null
+): FindingGroup[] {
+  const seeded =
+    assignment && isConsensusAssignment(assignment)
+      ? seedFromAssignment(reviews, assignment)
+      : null;
+
+  const groups: ModelFinding[][] = seeded ? seeded.groups : [];
+  // Captured before the loop appends to `groups`, which aliases `seeded.groups`.
+  const seededCount = groups.length;
+
+  for (const finding of seeded ? seeded.remaining : reviews) {
     // Best match, not first match. First-match lets a finding be absorbed by an
     // earlier weakly-related group before it is ever compared with the group it
     // actually belongs to, which fragmented real runs.
@@ -198,7 +295,7 @@ export function groupFindings(reviews: ModelFinding[]): FindingGroup[] {
     else groups.push([finding]);
   }
 
-  mergeRelatedGroups(groups);
+  mergeRelatedGroups(groups, seededCount);
 
   return groups
     .map((findings) => {

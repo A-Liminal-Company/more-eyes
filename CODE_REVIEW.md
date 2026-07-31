@@ -1,6 +1,6 @@
 # Code Review — code-review-app
 
-Last updated: 2026-07-28 · Pass 1 complete — all findings resolved
+Last updated: 2026-07-30 · Self-review findings closed — all findings resolved
 
 Tracked findings across security, reliability, accessibility, test coverage, and
 code quality. Kept current by the `code-review-app-review` skill — run it to
@@ -16,7 +16,7 @@ or reused, even once resolved, so changelog entries stay meaningful.
 
 | ID | Category | Priority | Title | Status | Files |
 |---|---|---|---|---|---|
-| S-1 | Security | High | No auth/authz on app or API routes | ✅ Fixed | `src/middleware.ts` |
+| S-1 | Security | High | No auth/authz on app or API routes | ✅ Fixed | `src/proxy.ts` |
 | S-2 | Security | High | No rate limiting on review submissions | ✅ Fixed | `src/lib/rate-limit.ts`, `src/app/api/reviews/route.ts` |
 | R-1 | Reliability | High | No error boundaries | ✅ Fixed | `src/app/error.tsx`, `src/app/global-error.tsx` |
 | T-1 | Test coverage | High | No API route tests | ✅ Fixed | `src/app/api/reviews/route.test.ts`, `src/app/api/reviews/[id]/route.test.ts` |
@@ -27,7 +27,7 @@ or reused, even once resolved, so changelog entries stay meaningful.
 | T-2 | Test coverage | Medium | No component tests | ✅ Fixed | `src/app/submit/page.test.tsx` |
 | C-3 | Code quality | Medium | Findings stored as a JSON string column | ✅ Fixed | `prisma/schema.prisma`, `src/lib/types.ts` |
 | T-3 | Test coverage | Low | No CI configuration | ✅ Fixed | `.github/workflows/ci.yml` |
-| S-4 | Security | Low | No security headers / CSP | ✅ Fixed | `src/middleware.ts` |
+| S-4 | Security | Low | No security headers / CSP | ✅ Fixed | `src/proxy.ts` |
 | R-3 | Reliability | Low | No request-size guard before body parse | ✅ Fixed | `src/app/api/reviews/route.ts` |
 | R-4 | Reliability | Low | No Prisma migration history | ✅ Fixed | `prisma/migrations/`, `.github/workflows/ci.yml` |
 | A11Y-3 | Accessibility | Low | No skip-link, minor landmark polish | ✅ Fixed | `src/app/layout.tsx` |
@@ -36,20 +36,21 @@ or reused, even once resolved, so changelog entries stay meaningful.
 | S-5 | Security | Medium | Second API key broadens credential exposure | ✅ Fixed | `src/lib/rate-limit.ts`, `.env.example` |
 | R-5 | Reliability | Medium | No timeout on provider requests | ✅ Fixed | `src/lib/providers/shared.ts` |
 | C-6 | Code quality | Low | Model catalogue can drift from OpenRouter | ✅ Fixed | `scripts/check-models.ts` |
-| S-6 | Security | High | Access cookie stores the master secret verbatim | 🔴 Open | `src/middleware.ts` |
-| S-7 | Security | Medium | Access secret accepted via URL query parameter | 🔴 Open | `src/middleware.ts` |
-| S-8 | Security | High | Rate limit keyed on spoofable `X-Forwarded-For` | 🔴 Open | `src/app/api/reviews/route.ts` |
-| R-6 | Reliability | Medium | Rate-limit map grows unbounded across client keys | 🔴 Open | `src/lib/rate-limit.ts` |
-| C-7 | Code quality | Medium | Consensus matching is lexical and has a ceiling | 🔴 Open | `src/lib/consensus.ts` |
+| S-6 | Security | High | Access cookie stores the master secret verbatim | ✅ Fixed | `src/lib/access-token.ts`, `src/proxy.ts` |
+| S-7 | Security | Medium | Access secret accepted via URL query parameter | ✅ Fixed | `src/proxy.ts` |
+| S-8 | Security | High | Rate limit keyed on spoofable `X-Forwarded-For` | ✅ Fixed | `src/lib/client-key.ts`, `src/lib/rate-limit.ts` |
+| R-6 | Reliability | Medium | Rate-limit map grows unbounded across client keys | ✅ Fixed | `src/lib/rate-limit.ts` |
+| C-7 | Code quality | Medium | Consensus matching is lexical and has a ceiling | ✅ Fixed | `src/lib/consensus-llm.ts`, `src/lib/consensus.ts` |
 
-**20 fixed · 0 partial · 5 open** — five new findings from the self-review pass
-below; all previously tracked findings remain resolved.
+**25 fixed · 0 partial · 0 open** — the five findings from the self-review pass
+are now closed alongside everything before them. See the note on what "0 open"
+does and does not mean at the end of the closing pass below.
 
 ## Details
 
 ### S-1 — No auth/authz on app or API routes
 - **Priority:** High · **Status:** ✅ Fixed
-- **Files:** `src/middleware.ts`, `.env.example`
+- **Files:** `src/proxy.ts`, `.env.example`
 - **Found:** Every page and both API routes were reachable by anyone with network
   access. Any visitor could read the code in every past submission and trigger
   billed Anthropic calls.
@@ -191,7 +192,7 @@ below; all previously tracked findings remain resolved.
 
 ### S-4 — No security headers / CSP
 - **Priority:** Low · **Status:** ✅ Fixed
-- **Files:** `src/middleware.ts`
+- **Files:** `src/proxy.ts`
 - **Found:** No CSP, HSTS, `X-Frame-Options`, or related headers.
 - **Why it matters:** Low while access is gated and usage is internal; matters
   more if this becomes publicly reachable.
@@ -203,7 +204,7 @@ below; all previously tracked findings remain resolved.
   `[HMR] connected`, and a production build renders and hydrates with no CSP
   violations.
 - **Remains:** `script-src` still allows `'unsafe-inline'` because Next inlines
-  hydration scripts. Removing it needs nonce plumbing through the middleware —
+  hydration scripts. Removing it needs nonce plumbing through `proxy.ts` —
   worth doing if this is ever exposed publicly.
 
 ### R-3 — No request-size guard before body parse
@@ -443,46 +444,82 @@ Cleared the remaining backlog. **Every tracked finding is now resolved.**
   decisions, not oversights. Run the review skill for a fresh look.
 
 ### S-6 — Access cookie stores the master secret verbatim
-- **Priority:** High · **Status:** 🔴 Open
-- **Files:** `src/middleware.ts`
+- **Priority:** High · **Status:** ✅ Fixed
+- **Files:** `src/lib/access-token.ts`, `src/proxy.ts`
 - **Found:** Flagged by 3 of 6 models. The access cookie's *value* is the shared
   secret itself, so anything that captures a cookie captures the master
   credential — logs, proxies, backups, a browser profile on a shared machine.
 - **Why it matters:** There is one secret for the whole app and no way to revoke
   a single leaked session without rotating access for everyone.
-- **Remains:** Store a derived token instead — an HMAC of a random session id
-  keyed by the secret, or a signed value — so the cookie proves access without
-  carrying the credential.
+- **Done:** The cookie now holds `v1.<issuedAt>.<nonce>.<signature>`, an
+  HMAC-SHA256 over the first three segments keyed by the secret. The nonce is 16
+  random bytes, so every session is distinct rather than every browser holding
+  the identical value. Expiry is enforced server-side against `issuedAt` rather
+  than trusting the cookie's `maxAge`, which is only a request to the browser —
+  and a back-dated `issuedAt` fails the signature, so age cannot be extended.
+  Verified in-browser: the cookie value is a `v1.` token, editing one character
+  of the signature returns 401 on the next request.
+- **Remains:** Still one credential for everyone — a token proves its holder
+  presented the secret, not who they are, so there is no per-user revocation.
+  Rotating `APP_ACCESS_SECRET` invalidates every token at once. **Cookies issued
+  before this change held the raw secret and no longer verify**, so existing
+  sessions re-enter the secret once.
 
 ### S-7 — Access secret accepted via URL query parameter
-- **Priority:** Medium · **Status:** 🔴 Open
-- **Files:** `src/middleware.ts`
+- **Priority:** Medium · **Status:** ✅ Fixed
+- **Files:** `src/proxy.ts`, `README.md`
 - **Found:** Flagged by 3 of 6 models. `?secret=` is the documented way in, and
   URLs land in browser history, server access logs, and `Referer` headers.
 - **Why it matters:** A deliberate convenience tradeoff, but an undocumented one.
-- **Remains:** Redirect to the clean path immediately after setting the cookie so
-  the secret does not persist in history, and note the tradeoff in the README.
+- **Done:** A secret arriving via `?secret=` now sets the cookie on a redirect to
+  the same URL with the parameter removed. The `x-access-secret` header path is
+  unchanged — no redirect, since nothing leaks there. The README documents both,
+  and points at the header as the option with no history exposure at all.
+- **Remains:** The one navigation that carried the secret is still in browser
+  history; a redirect cannot retroactively remove it. Everything after it —
+  the landed URL, `Referer` headers, later log lines — is clean.
 
 ### S-8 — Rate limit keyed on spoofable `X-Forwarded-For`
-- **Priority:** High · **Status:** 🔴 Open
-- **Files:** `src/app/api/reviews/route.ts`
+- **Priority:** High · **Status:** ✅ Fixed
+- **Files:** `src/lib/client-key.ts`, `src/lib/rate-limit.ts`, `src/app/api/reviews/route.ts`
 - **Found:** The client key comes from `X-Forwarded-For`, which the client
   controls. Rotating the header resets the budget every request.
 - **Why it matters:** The rate limit is the only thing bounding spend once
   someone is past the access gate. Trivially bypassed as written.
-- **Remains:** Use the platform's trusted client address, or key on the access
-  cookie rather than a client-supplied header.
+- **Done:** Two layers, because neither is sufficient alone.
+  `X-Forwarded-For` is *appended to* by each proxy, so the code now reads the
+  entry `TRUSTED_PROXY_HOPS` from the **right** (default 1) — a value our own
+  proxy wrote — rather than the leftmost, which is whatever the caller typed.
+  A client sending its own header only prepends to the list and cannot reach the
+  entry we read. On top of that, a global bucket now caps model calls across all
+  clients combined (`RATE_LIMIT_GLOBAL_MAX`, default 120/minute): everyone past
+  the gate shares one secret, so *any* per-client key is choosable by an insider,
+  and the global ceiling is the part that actually bounds spend. Covered by a
+  route test that rotates the header 31 times and expects a 429 — under the old
+  code every request got a fresh budget and all 31 succeeded.
+- **Remains:** The hop count is a configuration assumption. Set it too high and
+  the key is client-controlled again; too low and every client shares one key.
+  Correct for Railway's single edge proxy, documented in the README, and the
+  global ceiling bounds spend either way.
 
 ### R-6 — Rate-limit map grows unbounded across client keys
-- **Priority:** Medium · **Status:** 🔴 Open
+- **Priority:** Medium · **Status:** ✅ Fixed
 - **Files:** `src/lib/rate-limit.ts`
 - **Found:** Flagged by 2 models. `hits` never evicts keys, so every distinct
   client key allocates an entry that is never reclaimed. Compounds with S-8,
   where an attacker chooses the keys.
-- **Remains:** Evict entries whose charges have all aged out of the window.
+- **Done:** Three mechanisms, because each covers a case the others miss. A key
+  is dropped outright when its window empties, rather than being stored as an
+  empty array. An idle client is never touched again, so a periodic sweep — at
+  most once per window, making the O(n) walk free amortised — reclaims keys that
+  expired without being revisited. And a hard cap of 10,000 tracked keys covers
+  the case neither handles: a burst of distinct keys *inside* one window, which
+  is exactly the shape of the S-8 attack. Over the cap, live entries are evicted
+  oldest-activity first. Tested with 12,000 rotating keys.
+- **Remains:** Nothing. Still per-process in-memory state, as noted under S-2.
 
 ### C-7 — Consensus matching is lexical and has a ceiling
-- **Priority:** Medium · **Status:** 🔴 Open
+- **Priority:** Medium · **Status:** ✅ Fixed (opt-in)
 - **Files:** `src/lib/consensus.ts`
 - **Found:** Reviewing `consensus.ts` with the app produced 21 findings and zero
   corroborated, while three models had plainly reported one defect in different
@@ -491,9 +528,44 @@ Cleared the remaining backlog. **Every tracked finding is now resolved.**
   and "hide distinct issues" describe one thing and share nothing.
 - **Why it matters:** Fragmentation understates agreement, which is the tool's
   entire value.
-- **Remains:** Lexical matching is near its ceiling. Embeddings would handle
-  paraphrase properly at the cost of a dependency and a per-finding call.
-  Worth doing only if fragmentation keeps showing up on real runs.
+- **Done:** An opt-in model-assisted merge pass, enabled by setting
+  `CONSENSUS_MERGE_MODEL`. The structural constraint drove the design:
+  `groupFindings` runs at *render* time, on the home page and every review page,
+  so a model call inside it would re-bill on each view and make renders
+  non-deterministic. The pass therefore runs **once, at submission**, and stores
+  its answer in a new `Submission.consensus` column as a grouping assignment of
+  `<model>#<index>` keys — the assignment only, not a copy of the findings, and
+  order-independent so it survives however Prisma returns the review rows.
+  Chose this over embeddings: same paraphrase handling, one call per submission
+  instead of one per finding, and no new dependency.
+  Three properties make it safe to leave on: it can only ever *fail soft* (a
+  timeout, missing key, or malformed response is logged and the lexical grouping
+  stands); malformed indices are dropped individually and any group the model
+  failed to place survives on its own, so the result is never worse than what it
+  started from; and groups the pass deliberately kept apart are exempted from
+  the lexical merge that follows, since deciding they are distinct is the whole
+  point. Off by default, so the deterministic path stays the default and the
+  tested one — every pre-existing consensus test passes unchanged.
+  **Verified against the captured 33-finding fixture** with
+  `google/gemini-3.5-flash`: 12 groups → 9, all 33 findings preserved. It
+  correctly merged three pairs lexical matching could not see — "Returns entire
+  user row" with "SELECT * may leak sensitive columns", and "Request body
+  parsing is not configured" with "Missing Body Parser Middleware" — none of
+  which share meaningful vocabulary.
+- **Found by that run, and fixed:** the pass over-merged on its first attempt,
+  fusing one model's "no check for user existence" and "no input validation on
+  email field" behind another model's broader "Missing Input Validation" title.
+  That is precisely the failure this design calls the dangerous direction. The
+  guard is cheap and strong: **two groups sharing a model are never merged.** A
+  model that filed them as two findings is asserting they are two issues, and
+  its own separation is better evidence than another model's grouping. With the
+  guard the same run yields 9 groups instead of 8, every group holds at most one
+  finding per model, and the three genuine merges above survive untouched.
+- **Remains:** Enabling it puts a model in the render path's *input*, so grouping
+  is no longer reproducible from the findings alone — the stored assignment is
+  the record of what was decided. Verified against the fixture but not yet
+  through a live end-to-end submission, so the wiring in the POST route is
+  covered only by its unit tests.
 
 ### Self-review pass — 2026-07-30
 
@@ -514,3 +586,62 @@ middleware and rate limiter, and the request pipeline, six models each.
   not included in that submission.
 - **Ground truth at close:** 77 tests passing, typecheck clean, lint clean,
   build succeeds, deployed and healthy.
+
+### Closing the self-review findings — 2026-07-30
+
+The five findings the app raised against its own code are now fixed. **Every
+tracked finding is resolved again.**
+
+Four of them share a root: the access gate and the rate limiter each trusted
+something they should not have. The cookie carried the master credential, the
+secret travelled in a URL, the rate-limit key was a client-supplied header, and
+the limiter's map never evicted. Past the access gate the rate limit is the only
+thing bounding spend, and rotating one header bypassed it entirely.
+
+- **Migrated `middleware.ts` → `proxy.ts`.** Next 16 deprecated the `middleware`
+  file convention; the codemod handled the rename, and S-6 and S-7 rewrote that
+  file anyway. `next build` now reports the route as `ƒ Proxy (Middleware)`.
+  Worth knowing for future work: **Proxy runs on the Node.js runtime** in Next 16
+  and the `runtime` config option throws, so `node:crypto` is available
+  synchronously — no Web Crypto workaround was needed for the HMAC.
+- **S-6** signed access token in the cookie instead of the secret, with
+  server-side expiry. **Pre-existing cookies hold the raw secret and no longer
+  verify** — anyone with an open session re-enters the secret once. That is the
+  fix working, not a regression.
+- **S-7** the query-param unlock now redirects to the same URL with the parameter
+  stripped, cookie set on the redirect. The strip applies to *any* granted
+  request carrying `?secret=`, not just the unlock — someone with a working
+  session who follows a shared link would otherwise leave the secret in their
+  address bar. Refused requests are not redirected: a 401 is the answer, and
+  redirecting first would only leak the attempt into one more log line.
+- **S-8** `X-Forwarded-For` is read from the right, plus a global spend ceiling
+  that holds regardless of what key a caller picks.
+- **R-6** empty windows dropped, a once-per-window sweep for idle keys, and a
+  10,000-key cap for the burst case the sweep cannot reach.
+- **C-7** opt-in model-assisted merge pass behind `CONSENSUS_MERGE_MODEL`, run
+  once at submission and stored in a new `Submission.consensus` column. It had
+  to move out of `groupFindings`: that runs on every render, so a model call
+  inside it would re-bill on each page view. Exercised against the real
+  33-finding fixture rather than shipped on unit tests alone — which was worth
+  doing, because the first run over-merged and produced the same-model guard now
+  in the code. See its Details entry.
+
+- **Ground truth at close:** 132 tests passing (up from 77), typecheck clean,
+  lint clean, production build succeeds, `check:models` reports 6/6 healthy,
+  `prisma migrate dev` applied cleanly.
+- **Verified against a running server, not just asserted:** 401 with no cookie;
+  `/api/health` still ungated; `?secret=` returns a 307 to the path with the
+  parameter removed and unrelated query params preserved; the issued cookie is a
+  `v1.` token that neither equals nor contains the secret; that cookie
+  authorises; a single flipped character in the signature returns 401; and the
+  raw secret presented as a cookie — the old format — is rejected. Home and
+  review pages render, with pre-existing rows (`consensus IS NULL`) falling back
+  to lexical grouping and still showing multi-model agreement.
+- **Not verified:** the merge pass was run against the captured fixture, not
+  through a live end-to-end submission, so its wiring in the POST route rests on
+  unit tests. Its *output quality* is now measured, which was the part that
+  mattered — and measuring it changed the code.
+- **Method note worth keeping:** the fixture was the right thing to test against,
+  not a fresh six-model submission. One model call instead of seven, run on the
+  exact data where fragmentation was originally observed, and reproducible
+  afterwards. Live verification does not have to mean an expensive one.

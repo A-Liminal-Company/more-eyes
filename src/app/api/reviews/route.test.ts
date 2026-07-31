@@ -26,10 +26,15 @@ vi.mock("@/lib/review", async () => {
 
 const { POST } = await import("./route");
 
-function postRequest(body: unknown) {
+function postRequest(body: unknown, forwardedFor?: string) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (forwardedFor) headers["x-forwarded-for"] = forwardedFor;
+
   return new NextRequest("http://localhost/api/reviews", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
 }
@@ -202,6 +207,26 @@ describe("POST /api/reviews", () => {
     }
 
     expect((await POST(postRequest(sixModels))).status).toBe(429);
+  });
+
+  it("does not let a rotating X-Forwarded-For reset the budget", async () => {
+    reviewWithModelsMock.mockResolvedValue([okResult]);
+    createMock.mockResolvedValue({ id: "abc123" });
+
+    // Every request claims a different origin, but the trusted proxy's own
+    // entry — the rightmost — is the same each time. Reading the leftmost, as
+    // this route used to, gave each request a fresh 30-call budget.
+    for (let i = 0; i < 30; i++) {
+      const res = await POST(
+        postRequest(validBody, `10.0.0.${i}, 203.0.113.5`)
+      );
+      expect(res.status).toBe(201);
+    }
+
+    const limited = await POST(
+      postRequest(validBody, "10.0.0.250, 203.0.113.5")
+    );
+    expect(limited.status).toBe(429);
   });
 
   it("rejects a body larger than the size guard before parsing", async () => {

@@ -14,6 +14,11 @@ model Submission {
   language    String
   code        String
   createdAt   DateTime @default(now())
+  // Grouping assignment from the optional model-assisted consensus pass, as
+  // { v, groups: string[][] } of "<model>#<findingIndex>" keys. Null when the
+  // pass is disabled or failed, in which case grouping falls back to the
+  // deterministic lexical clustering at render time.
+  consensus   Json?
   reviews     Review[]
 }
 
