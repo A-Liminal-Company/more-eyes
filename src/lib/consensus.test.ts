@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupFindings, type ModelFinding } from "./consensus";
+import { groupFindings, outlierSignal, type ModelFinding } from "./consensus";
 
 function finding(
   model: string,
@@ -159,5 +159,56 @@ describe("groupFindings", () => {
     for (const group of groups) {
       expect(group.models).toHaveLength(3);
     }
+  });
+});
+
+describe("outlierSignal", () => {
+  it("labels a single-model security finding", () => {
+    const [group] = groupFindings([
+      finding("claude", "Unsanitized input reaches eval", {
+        category: "security",
+        severity: "medium",
+      }),
+    ]);
+    expect(outlierSignal(group)).toBe("security outlier");
+  });
+
+  it("labels a single-model high-severity finding", () => {
+    const [group] = groupFindings([
+      finding("claude", "Data loss on concurrent write", { severity: "high" }),
+    ]);
+    expect(outlierSignal(group)).toBe("high-severity outlier");
+  });
+
+  it("security takes precedence over severity in the label", () => {
+    const [group] = groupFindings([
+      finding("claude", "Token leaks into logs", {
+        category: "security",
+        severity: "high",
+      }),
+    ]);
+    expect(outlierSignal(group)).toBe("security outlier");
+  });
+
+  it("returns null for corroborated groups", () => {
+    const [group] = groupFindings([
+      finding("claude", "Unsanitized input reaches eval", {
+        category: "security",
+      }),
+      finding("gpt", "Unsanitized input reaches eval call", {
+        category: "security",
+      }),
+    ]);
+    expect(outlierSignal(group)).toBeNull();
+  });
+
+  it("returns null for an uncorroborated low-signal finding", () => {
+    const [group] = groupFindings([
+      finding("claude", "Variable naming is inconsistent", {
+        severity: "low",
+        category: "style",
+      }),
+    ]);
+    expect(outlierSignal(group)).toBeNull();
   });
 });

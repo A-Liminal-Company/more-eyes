@@ -261,6 +261,66 @@ function seedFromAssignment(
   };
 }
 
+/**
+ * Why a single-model finding deserves attention despite lacking corroboration.
+ *
+ * Agreement counting has a known failure mode: models sharing training biases
+ * can converge on the same wrong answer while a lone dissenter holds the real
+ * insight. Rather than burying single-model groups as "just one opinion", the
+ * ones most likely to be a unique catch — security findings and high-severity
+ * calls — get labeled as outliers worth a second look.
+ */
+export function outlierSignal(group: FindingGroup): string | null {
+  if (group.models.length !== 1) return null;
+  if (group.category === "security") return "security outlier";
+  if (group.severity === "high") return "high-severity outlier";
+  return null;
+}
+
+/**
+ * Compares a resubmission's findings against the submission it re-reviews.
+ *
+ * `status` is index-aligned with `current`: `status[i]` describes `current[i]`.
+ * A current group is "persistent" when it matches at least one previous group
+ * by the same average-linkage test `mergeRelatedGroups` uses internally
+ * (`averageLinkage(...) >= MERGE_LINKAGE`), and "new" otherwise. `fixed` is
+ * every previous group that no current group matched — an issue that no longer
+ * shows up.
+ *
+ * `similarityScore` returns 0 across differing categories, so `averageLinkage`
+ * does too — the category check the design calls for falls out of the existing
+ * matcher rather than needing a separate condition.
+ *
+ * Matching is lexical, the same as `groupFindings`, so it inherits the same
+ * blind spot: a finding paraphrased differently between runs can fail to match
+ * its predecessor and get counted "new" even though it is the same issue.
+ * Over-reporting "new" (a miscount toward noise) is the safe failure mode here,
+ * the same way over-splitting is the safe failure mode for `groupFindings` —
+ * the alternative, wrongly marking a real regression "persistent" (or wrongly
+ * calling a real issue "fixed"), is the one that actually misleads.
+ */
+export function diffGroups(
+  current: FindingGroup[],
+  previous: FindingGroup[]
+): { status: ("new" | "persistent")[]; fixed: FindingGroup[] } {
+  const matchedPrevious = new Set<number>();
+
+  const status = current.map((currentGroup) => {
+    let persistent = false;
+    previous.forEach((previousGroup, i) => {
+      if (averageLinkage(currentGroup.findings, previousGroup.findings) >= MERGE_LINKAGE) {
+        persistent = true;
+        matchedPrevious.add(i);
+      }
+    });
+    return persistent ? "persistent" : "new";
+  }) as ("new" | "persistent")[];
+
+  const fixed = previous.filter((_, i) => !matchedPrevious.has(i));
+
+  return { status, fixed };
+}
+
 export function groupFindings(
   reviews: ModelFinding[],
   assignment?: ConsensusAssignment | null

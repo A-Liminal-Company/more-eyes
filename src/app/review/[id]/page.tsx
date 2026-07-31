@@ -1,22 +1,36 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
+  diffGroups,
   groupFindings,
   isConsensusAssignment,
+  type FindingGroup,
   type ModelFinding,
 } from "@/lib/consensus";
 import { modelLabel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 import { parseFindings } from "@/lib/types";
-import type { Finding } from "@/lib/validation";
+import { FindingsList, type DisplayFindingGroup } from "./findings-list";
 
 export const dynamic = "force-dynamic";
 
-const SEVERITY_STYLES: Record<Finding["severity"], string> = {
-  high: "bg-red-100 text-red-900 border-red-200 dark:bg-red-950 dark:text-red-100 dark:border-red-900",
-  medium: "bg-amber-100 text-amber-900 border-amber-200 dark:bg-amber-950 dark:text-amber-100 dark:border-amber-900",
-  low: "bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700",
-};
+/** Same groupFindings + parseFindings pipeline the current submission uses, so the two sides of a diff are comparable. */
+function groupsFor(submission: {
+  reviews: { status: string; model: string; findings: unknown }[];
+  consensus: unknown;
+}): FindingGroup[] {
+  const succeeded = submission.reviews.filter((r) => r.status === "ok");
+  const allFindings: ModelFinding[] = succeeded.flatMap((review) =>
+    parseFindings(review.findings).map((finding) => ({
+      ...finding,
+      model: review.model,
+    }))
+  );
+  return groupFindings(
+    allFindings,
+    isConsensusAssignment(submission.consensus) ? submission.consensus : null
+  );
+}
 
 export default async function ReviewPage({
   params,
@@ -27,7 +41,10 @@ export default async function ReviewPage({
 
   const submission = await prisma.submission.findUnique({
     where: { id },
-    include: { reviews: { orderBy: { createdAt: "asc" } } },
+    include: {
+      reviews: { orderBy: { createdAt: "asc" } },
+      previous: { include: { reviews: { orderBy: { createdAt: "asc" } } } },
+    },
   });
 
   if (!submission) {
@@ -37,18 +54,20 @@ export default async function ReviewPage({
   const succeeded = submission.reviews.filter((r) => r.status === "ok");
   const failed = submission.reviews.filter((r) => r.status !== "ok");
 
-  const allFindings: ModelFinding[] = succeeded.flatMap((review) =>
-    parseFindings(review.findings).map((finding) => ({
-      ...finding,
-      model: review.model,
-    }))
-  );
+  const groups = groupsFor(submission);
 
-  const groups = groupFindings(
-    allFindings,
-    isConsensusAssignment(submission.consensus) ? submission.consensus : null
-  );
-  const agreed = groups.filter((g) => g.models.length > 1).length;
+  // Delta tracking against the submission this one re-reviews, if any. Matching
+  // is lexical (same as groupFindings), so "new" is the safe over-reporting
+  // failure mode when a finding is merely paraphrased differently — see
+  // diffGroups' JSDoc in consensus.ts.
+  let displayGroups: DisplayFindingGroup[] = groups;
+  let fixedGroups: FindingGroup[] = [];
+  if (submission.previous) {
+    const previousGroups = groupsFor(submission.previous);
+    const { status, fixed } = diffGroups(groups, previousGroups);
+    displayGroups = groups.map((group, i) => ({ ...group, status: status[i] }));
+    fixedGroups = fixed;
+  }
 
   return (
     <main id="main" className="mx-auto max-w-3xl w-full px-6 py-12 flex-1">
@@ -57,11 +76,27 @@ export default async function ReviewPage({
       </Link>
 
       <h1 className="text-2xl font-semibold mt-2 mb-1">{submission.title}</h1>
-      <p className="text-sm text-gray-500 dark:text-gray-400 mb-8">
-        {submission.language} ·{" "}
-        {new Date(submission.createdAt).toLocaleString()} ·{" "}
+      <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">
+        {submission.format === "diff" ? "unified diff" : submission.language}{" "}
+        · {new Date(submission.createdAt).toLocaleString()} ·{" "}
         {succeeded.length} of {submission.reviews.length} model
         {submission.reviews.length === 1 ? "" : "s"} responded
+      </p>
+      <p className="text-sm text-gray-500 dark:text-gray-400 mb-8 flex flex-wrap gap-x-3">
+        {submission.previous && (
+          <Link
+            href={`/review/${submission.previous.id}`}
+            className="min-h-11 inline-flex items-center hover:underline"
+          >
+            ← Previous review
+          </Link>
+        )}
+        <Link
+          href={`/submit?previous=${submission.id}`}
+          className="min-h-11 inline-flex items-center hover:underline"
+        >
+          Re-review this code
+        </Link>
       </p>
 
       {failed.length > 0 && (
@@ -84,61 +119,26 @@ export default async function ReviewPage({
 
       {succeeded.length > 0 && (
         <>
-          <section className="mb-8">
-            <h2 className="text-sm font-semibold uppercase text-gray-500 dark:text-gray-400 mb-3">
-              Findings ({groups.length})
-              {agreed > 0 && (
-                <span className="ml-2 font-normal normal-case text-gray-500 dark:text-gray-400">
-                  · {agreed} flagged by more than one model
-                </span>
-              )}
-            </h2>
+          <FindingsList groups={displayGroups} />
 
-            {groups.length === 0 ? (
-              <p className="text-sm text-gray-500 dark:text-gray-400">No issues found.</p>
-            ) : (
-              <ul className="flex flex-col gap-3">
-                {groups.map((group, i) => (
-                  <li
-                    key={i}
-                    className={`rounded-md border px-4 py-3 ${
-                      SEVERITY_STYLES[group.severity]
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <span className="text-xs font-semibold uppercase tracking-wide">
-                        {group.severity}
-                      </span>
-                      <span className="text-xs uppercase tracking-wide opacity-70">
-                        {group.category}
-                      </span>
-                      <span className="text-xs font-medium">
-                        {group.models.length > 1
-                          ? `${group.models.length} models agree`
-                          : "1 model"}
-                      </span>
-                    </div>
-
-                    <p className="text-sm font-medium break-words">{group.title}</p>
-
-                    <ul className="mt-2 flex flex-col gap-2">
-                      {group.findings.map((finding, j) => (
-                        <li key={j} className="text-sm">
-                          <span className="font-medium opacity-80">
-                            {modelLabel(finding.model)}
-                            {finding.line != null && ` · line ${finding.line}`}
-                          </span>
-                          <span className="block opacity-90">
-                            {finding.description}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
+          {fixedGroups.length > 0 && (
+            <details className="mb-8 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-900 dark:bg-emerald-950">
+              <summary className="cursor-pointer text-sm font-semibold text-emerald-900 dark:text-emerald-100">
+                Fixed since last review ({fixedGroups.length})
+              </summary>
+              <ul className="mt-2 flex flex-col gap-1 text-sm text-emerald-900 dark:text-emerald-100">
+                {fixedGroups.map((group, i) => (
+                  <li key={i}>
+                    <span className="font-medium break-words">{group.title}</span>
+                    <span className="opacity-70">
+                      {" "}
+                      · {group.category} · {group.severity}
+                    </span>
                   </li>
                 ))}
               </ul>
-            )}
-          </section>
+            </details>
+          )}
 
           <section className="mb-8">
             <h2 className="text-sm font-semibold uppercase text-gray-500 dark:text-gray-400 mb-3">

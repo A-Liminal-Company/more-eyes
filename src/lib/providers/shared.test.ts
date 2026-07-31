@@ -59,4 +59,27 @@ describe("buildUserPrompt", () => {
     expect(prompt.trim().endsWith("</submission>")).toBe(true);
     expect(prompt).toContain("package main");
   });
+
+  it("tags the format as code by default", () => {
+    const prompt = buildUserPrompt({
+      title: "t",
+      description: "d",
+      language: "go",
+      code: "package main",
+    });
+
+    expect(prompt).toContain("<format>code</format>");
+  });
+
+  it("tags the format as unified-diff when format is diff", () => {
+    const prompt = buildUserPrompt({
+      title: "t",
+      description: "d",
+      language: "go",
+      code: "@@ -1,2 +1,2 @@",
+      format: "diff",
+    });
+
+    expect(prompt).toContain("<format>unified-diff</format>");
+  });
 });

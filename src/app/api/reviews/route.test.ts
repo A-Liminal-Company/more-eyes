@@ -4,12 +4,14 @@ import { resetRateLimit } from "@/lib/rate-limit";
 
 const createMock = vi.fn();
 const reviewWithModelsMock = vi.fn();
+const findUniqueMock = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     submission: {
       create: (...args: unknown[]) => createMock(...args),
       findMany: vi.fn().mockResolvedValue([]),
+      findUnique: (...args: unknown[]) => findUniqueMock(...args),
     },
   },
 }));
@@ -66,6 +68,7 @@ const okResult = {
 beforeEach(() => {
   vi.clearAllMocks();
   resetRateLimit();
+  findUniqueMock.mockResolvedValue(null);
 });
 
 describe("POST /api/reviews", () => {
@@ -227,6 +230,47 @@ describe("POST /api/reviews", () => {
       postRequest(validBody, "10.0.0.250, 203.0.113.5")
     );
     expect(limited.status).toBe(429);
+  });
+
+  it("persists previousSubmissionId when it resolves to an existing submission", async () => {
+    reviewWithModelsMock.mockResolvedValue([okResult]);
+    createMock.mockResolvedValue({ id: "abc123" });
+    findUniqueMock.mockResolvedValue({ id: "prev-1" });
+
+    await POST(
+      postRequest({ ...validBody, previousSubmissionId: "prev-1" })
+    );
+
+    expect(findUniqueMock).toHaveBeenCalledWith({
+      where: { id: "prev-1" },
+      select: { id: true },
+    });
+    expect(createMock.mock.calls[0][0].data.previousSubmissionId).toBe(
+      "prev-1"
+    );
+  });
+
+  it("persists null for a previousSubmissionId that does not exist, rather than 400ing", async () => {
+    reviewWithModelsMock.mockResolvedValue([okResult]);
+    createMock.mockResolvedValue({ id: "abc123" });
+    findUniqueMock.mockResolvedValue(null);
+
+    const res = await POST(
+      postRequest({ ...validBody, previousSubmissionId: "does-not-exist" })
+    );
+
+    expect(res.status).toBe(201);
+    expect(createMock.mock.calls[0][0].data.previousSubmissionId).toBeNull();
+  });
+
+  it("does not look up a predecessor when previousSubmissionId is absent", async () => {
+    reviewWithModelsMock.mockResolvedValue([okResult]);
+    createMock.mockResolvedValue({ id: "abc123" });
+
+    await POST(postRequest(validBody));
+
+    expect(findUniqueMock).not.toHaveBeenCalled();
+    expect(createMock.mock.calls[0][0].data.previousSubmissionId).toBeNull();
   });
 
   it("rejects a body larger than the size guard before parsing", async () => {

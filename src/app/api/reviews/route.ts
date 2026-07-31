@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { models, ...input } = parsed.data;
+  const { models, previousSubmissionId, ...input } = parsed.data;
 
   // Charged after validation so the cost reflects the real number of billed
   // model calls rather than treating every submission as equally expensive.
@@ -97,9 +97,22 @@ export async function POST(request: NextRequest) {
     allFindings
   );
 
+  // A predecessor that no longer exists (deleted, or just a bad id) shouldn't
+  // block this review — it just isn't linked. The route persists null rather
+  // than 400ing.
+  let verifiedPreviousSubmissionId: string | null = null;
+  if (previousSubmissionId) {
+    const previous = await prisma.submission.findUnique({
+      where: { id: previousSubmissionId },
+      select: { id: true },
+    });
+    verifiedPreviousSubmissionId = previous ? previous.id : null;
+  }
+
   const submission = await prisma.submission.create({
     data: {
       ...input,
+      previousSubmissionId: verifiedPreviousSubmissionId,
       consensus: consensus ?? undefined,
       reviews: {
         create: results.map((r) =>

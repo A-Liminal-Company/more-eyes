@@ -20,6 +20,16 @@ model Submission {
   // deterministic lexical clustering at render time.
   consensus   Json?
   reviews     Review[]
+
+  // Links a resubmission back to what it's re-reviewing, for delta tracking
+  // (new/persistent/fixed findings). SetNull rather than Cascade: deleting the
+  // predecessor shouldn't take a later, otherwise-independent submission with it.
+  previousSubmissionId String?
+  previous              Submission?  @relation("Resubmission", fields: [previousSubmissionId], references: [id], onDelete: SetNull)
+  followups             Submission[] @relation("Resubmission")
+
+  // "code" (default) or "diff" (a unified diff, reviewed hunk by hunk).
+  format String @default("code")
 }
 
 model Review {

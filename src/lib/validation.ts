@@ -19,6 +19,7 @@ export const submissionInputSchema = z.object({
     .string()
     .min(1, "Code is required")
     .max(MAX_CODE_LENGTH, `Code must be under ${MAX_CODE_LENGTH} characters`),
+  format: z.enum(["code", "diff"]).default("code"),
   models: z
     .array(z.enum(MODEL_IDS))
     .min(1, "Select at least one model")
@@ -28,6 +29,10 @@ export const submissionInputSchema = z.object({
     )
     // Duplicates would bill twice for the same opinion and break consensus counts.
     .transform((ids) => [...new Set(ids)]),
+  // Links a resubmission back to what it's re-reviewing. A missing/deleted
+  // predecessor is not an error here — see the route, which verifies existence
+  // and persists null rather than rejecting the submission.
+  previousSubmissionId: z.string().trim().min(1).max(64).optional(),
 });
 
 export type SubmissionInput = z.infer<typeof submissionInputSchema>;
@@ -44,9 +49,33 @@ export const findingSchema = z.object({
   title: z.string(),
   description: z.string(),
   line: z.number().int().positive().nullable().optional(),
+  // Models return null, omit it, or occasionally send garbage here; anything
+  // unusable degrades to "no assumption" rather than discarding the finding.
+  assumption: z
+    .unknown()
+    .optional()
+    .transform((v) => (typeof v === "string" && v.trim() ? v.trim() : undefined)),
+  // Same leniency as `assumption` — evidence for the finding, not a required field.
+  rationale: z
+    .unknown()
+    .optional()
+    .transform((v) => (typeof v === "string" && v.trim() ? v.trim() : undefined)),
 });
 
-export type Finding = z.infer<typeof findingSchema>;
+// The transform gives `assumption`/`rationale` an output type of
+// `string | undefined` but leaves the keys required, which would force every
+// hand-built Finding literal (tests, fixtures) to write `assumption: undefined`.
+// Re-declare them optional — `undefined` is assignable either way, so parsed
+// values still fit.
+export type Finding = Omit<
+  z.infer<typeof findingSchema>,
+  "assumption" | "rationale"
+> & {
+  /** Present only when the model stated a dependency on context the snippet cannot show. */
+  assumption?: string;
+  /** One sentence of concrete evidence the model cited for the finding. */
+  rationale?: string;
+};
 
 /**
  * Models sometimes return a nested structure JSON-encoded as a string rather

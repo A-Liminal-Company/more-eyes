@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { DEFAULT_MODEL_IDS, MODELS } from "@/lib/models";
 import {
   MAX_CODE_LENGTH,
@@ -10,19 +10,71 @@ import {
 } from "@/lib/validation";
 
 export default function SubmitPage() {
+  // useSearchParams needs a Suspense boundary during static prerendering, or
+  // the production build fails — see next/navigation's useSearchParams docs.
+  return (
+    <Suspense fallback={null}>
+      <SubmitForm />
+    </Suspense>
+  );
+}
+
+function SubmitForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const previousId = searchParams.get("previous");
+
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [language, setLanguage] = useState("typescript");
   const [code, setCode] = useState("");
+  const [isDiff, setIsDiff] = useState(false);
   const [models, setModels] = useState<string[]>(DEFAULT_MODEL_IDS);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const errorRef = useRef<HTMLParagraphElement>(null);
 
+  const [previousSubmissionId, setPreviousSubmissionId] = useState<
+    string | null
+  >(null);
+  const [previousTitle, setPreviousTitle] = useState<string | null>(null);
+  const [noteDismissed, setNoteDismissed] = useState(false);
+
   useEffect(() => {
     if (error) errorRef.current?.focus();
   }, [error]);
+
+  // Prefills the form from the submission being re-reviewed. A 404 (deleted
+  // predecessor, bad id) is not an error here — just proceed as a fresh
+  // submission, silently.
+  useEffect(() => {
+    if (!previousId) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/reviews/${previousId}`);
+        if (!res.ok || cancelled) return;
+
+        const data = await res.json();
+        const previous = data.submission;
+        if (cancelled) return;
+
+        setTitle(previous.title);
+        setDescription(previous.description);
+        setLanguage(previous.language);
+        setCode(previous.code);
+        setPreviousSubmissionId(previous.id);
+        setPreviousTitle(previous.title);
+      } catch {
+        // Network error — proceed as a fresh submission, same as a 404.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [previousId]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -33,7 +85,15 @@ export default function SubmitPage() {
       const res = await fetch("/api/reviews", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, description, language, code, models }),
+        body: JSON.stringify({
+          title,
+          description,
+          language,
+          code,
+          models,
+          format: isDiff ? "diff" : "code",
+          ...(previousSubmissionId ? { previousSubmissionId } : {}),
+        }),
       });
 
       const data = await res.json();
@@ -54,6 +114,22 @@ export default function SubmitPage() {
   return (
     <main id="main" className="mx-auto max-w-3xl w-full px-6 py-12 flex-1">
       <h1 className="text-2xl font-semibold mb-8">Submit code for review</h1>
+
+      {previousSubmissionId && previousTitle && !noteDismissed && (
+        <div className="mb-6 flex items-center justify-between gap-3 rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900">
+          <span>
+            Re-reviewing: <span className="font-medium">{previousTitle}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setNoteDismissed(true)}
+            aria-label="Dismiss"
+            className="min-h-11 min-w-11 shrink-0 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* Bottom padding clears the sticky submit button so it never covers the
           last reviewer row on a phone. */}
@@ -129,6 +205,16 @@ export default function SubmitPage() {
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
             {code.length}/{MAX_CODE_LENGTH} characters
           </p>
+          <label className="mt-2 flex min-h-11 items-center gap-2 text-sm">
+            <input
+              id="isDiff"
+              type="checkbox"
+              className="size-5 shrink-0"
+              checked={isDiff}
+              onChange={(e) => setIsDiff(e.target.checked)}
+            />
+            This is a unified diff
+          </label>
         </div>
 
         <fieldset>

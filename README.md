@@ -101,20 +101,26 @@ CI runs typecheck, lint, tests, and build on every push and PR.
 ```
 src/
   app/
-    page.tsx              submission history
-    submit/               the form
-    review/[id]/          consensus view + per-model summaries
-    api/reviews/          POST fans out to models, GET lists
+    page.tsx               submission history
+    models/                model quality — corroboration rate per reviewer
+    submit/                the form; also handles ?previous=<id> re-reviews
+    review/[id]/
+      page.tsx              consensus view + per-model summaries
+      findings-list.tsx      focused/all toggle, outlier and delta badges
+    api/reviews/            POST fans out to models, GET lists
   lib/
-    models.ts             the reviewer registry
-    providers/            shared prompt + Anthropic and OpenRouter clients
-    consensus.ts          groups findings that describe the same issue
-    validation.ts         zod schemas for input and model output
-    consensus-llm.ts      optional model-assisted merge pass, off by default
-    access-token.ts       issues and verifies the signed access cookie
-    client-key.ts         derives the rate-limit key from trusted proxy headers
-    rate-limit.ts         budget of 30 model calls per minute per client
-  proxy.ts                shared-secret gate (Next 16 renamed `middleware`)
+    models.ts               the reviewer registry
+    providers/               shared prompt + Anthropic and OpenRouter clients
+    consensus.ts             groups findings that describe the same issue,
+                              and diffs two submissions' groups for re-reviews
+    model-stats.ts           per-model corroboration rate for the models page
+    validation.ts            zod schemas for input and model output
+    consensus-llm.ts         optional model-assisted merge pass, off by default
+    access-token.ts          issues and verifies the signed access cookie
+    client-key.ts            derives the rate-limit key from trusted proxy headers
+    rate-limit.ts            budget of 30 model calls per minute per client
+  proxy.ts                  shared-secret gate (Next 16 renamed `middleware`)
+mcp-server/                 BYOK MCP server exposing the same review engine
 ```
 
 Three decisions worth knowing about, because each came from something that went
@@ -152,6 +158,81 @@ deliberately kept apart are not re-merged lexically afterwards, and **two groups
 sharing a model are never merged** — a model that filed them as two findings is
 telling you they are two issues, which is better evidence than another model's
 grouping. On the captured 33-finding fixture it takes 12 groups to 9.
+
+## Focused view
+
+A review page defaults to a **focused view**: findings that more than one model
+flagged, plus single-model security and high-severity findings. Everything else
+— uncorroborated medium/low findings — is hidden behind a "Show all" toggle.
+
+This exists for two reasons. Noise fatigue: a six-model run can return dozens
+of findings, most of them one model's opinion on a style nit, and burying real
+issues in that list trains people to stop reading review output at all. And the
+popularity trap: agreement is a useful signal but not the only one worth
+surfacing, so the focused view also keeps single-model **security** and
+**high-severity** findings rather than filtering purely on vote count — see
+`outlierSignal` in `src/lib/consensus.ts`, and the "single-model outlier" badge
+it drives on the review page.
+
+## Assumption and rationale
+
+Two optional fields ride along on each finding, both filled in by the model,
+both degrading to "not provided" rather than discarding the finding when a
+model sends something unusable (see the lenient parsing note above):
+
+- **`assumption`** — stated only when a finding depends on something the
+  snippet can't show (a definition elsewhere, runtime config, how a caller
+  behaves), so a finding that looks certain but is really conditional says so.
+- **`rationale`** — one sentence naming the concrete evidence the model saw,
+  shown behind a collapsed "Why flag this" disclosure under each finding. Meant
+  to separate "I saw X on line N" from a title that just restates itself.
+
+## Model quality
+
+`/models` aggregates corroboration rate per model across recent submissions —
+how often a given model's findings land in a group at least one other model
+also flagged, versus standing alone. A persistently low rate is a prompt to go
+look at that model's isolated findings, not a verdict by itself: single-model
+findings are sometimes noise and sometimes the one catch nobody else made (see
+Focused view above).
+
+## Re-review delta tracking
+
+"Re-review this code" on a review page links to `/submit?previous=<id>`,
+which prefills the form from that submission and, on submit, links the new
+submission back to it via `previousSubmissionId`. The new review page then
+shows, per finding group, whether it's **new since last review** or
+**persistent**, plus a collapsed "Fixed since last review" list of groups from
+the previous run that nothing in the new run matched.
+
+The matching is the same lexical, category-plus-token-overlap comparison
+`groupFindings` uses internally (`diffGroups` in `src/lib/consensus.ts`), so it
+inherits the same blind spot: a finding paraphrased differently between two
+runs can fail to match its predecessor and get counted "new" even though
+nothing regressed. That's the deliberately safe failure mode — over-reporting
+"new" just means an extra look at something already fixed; wrongly calling a
+real regression "persistent," or a real issue "fixed," would hide it.
+
+## Diff submissions
+
+The submit form has a "This is a unified diff" checkbox. Checked, the
+submission is tagged `format: "diff"` end to end — the review page shows
+"unified diff" instead of the language, and the prompt tells the model to treat
+`+`/`-` lines as the change, surrounding context lines as context rather than
+additional code to flag, and to cite line numbers from the new-file side of
+each hunk.
+
+## MCP server
+
+`mcp-server/` packages the same multi-model review engine as a standalone MCP
+tool (`review_code`) for any MCP-capable IDE or agent to call directly — see
+[`mcp-server/README.md`](mcp-server/README.md) for setup and the tool's
+input/output shape.
+
+It's **bring-your-own-key**: the MCP server reads `OPENROUTER_API_KEY` from its
+own process environment at call time. This web app's key is never involved —
+the two are separate processes with separate credentials, so running the MCP
+server costs nothing against this app's OpenRouter budget and vice versa.
 
 ## Review status
 

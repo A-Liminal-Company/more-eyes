@@ -83,6 +83,62 @@ describe("submissionInputSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("defaults format to code when omitted", () => {
+    const result = submissionInputSchema.safeParse({
+      title: "Webhook handler",
+      description: "desc",
+      language: "typescript",
+      code: "code",
+      models: ["claude-sonnet-5"],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.format).toBe("code");
+    }
+  });
+
+  it("accepts format: diff", () => {
+    const result = submissionInputSchema.safeParse({
+      title: "Webhook handler",
+      description: "desc",
+      language: "typescript",
+      code: "code",
+      format: "diff",
+      models: ["claude-sonnet-5"],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.format).toBe("diff");
+    }
+  });
+
+  it("rejects an unknown format", () => {
+    const result = submissionInputSchema.safeParse({
+      title: "Webhook handler",
+      description: "desc",
+      language: "typescript",
+      code: "code",
+      format: "patch",
+      models: ["claude-sonnet-5"],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts an optional previousSubmissionId", () => {
+    const result = submissionInputSchema.safeParse({
+      title: "Webhook handler",
+      description: "desc",
+      language: "typescript",
+      code: "code",
+      models: ["claude-sonnet-5"],
+      previousSubmissionId: "abc123",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.previousSubmissionId).toBe("abc123");
+    }
+  });
 });
 
 describe("reviewResultSchema", () => {
@@ -244,6 +300,96 @@ describe("reviewResultSchema", () => {
     if (result.success) {
       expect(result.data.findings).toEqual([]);
       expect(result.data.summary).toBe("x");
+    }
+  });
+
+  it("keeps a finding's assumption when it is a non-empty string", () => {
+    const result = reviewResultSchema.safeParse({
+      summary: "x",
+      findings: [
+        {
+          severity: "medium",
+          category: "bug",
+          title: "Possible double free",
+          description: "Freed in both branches.",
+          assumption: "Assumes cleanup() is not called by the caller.",
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.findings[0].assumption).toBe(
+        "Assumes cleanup() is not called by the caller."
+      );
+    }
+  });
+
+  it("degrades a null, empty, or non-string assumption to undefined", () => {
+    for (const assumption of [null, "", "   ", 42, { note: "x" }]) {
+      const result = reviewResultSchema.safeParse({
+        summary: "x",
+        findings: [
+          {
+            severity: "low",
+            category: "style",
+            title: "t",
+            description: "d",
+            assumption,
+          },
+        ],
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.findings).toHaveLength(1);
+        expect(result.data.findings[0].assumption).toBeUndefined();
+      }
+    }
+  });
+
+  it("keeps a finding's rationale when it is a non-empty string", () => {
+    const result = reviewResultSchema.safeParse({
+      summary: "x",
+      findings: [
+        {
+          severity: "medium",
+          category: "bug",
+          title: "Possible double free",
+          description: "Freed in both branches.",
+          rationale: "Both the try block and the finally block call close().",
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.findings[0].rationale).toBe(
+        "Both the try block and the finally block call close()."
+      );
+    }
+  });
+
+  it("degrades a null, empty, or non-string rationale to undefined", () => {
+    for (const rationale of [null, "", "   ", 42, { note: "x" }]) {
+      const result = reviewResultSchema.safeParse({
+        summary: "x",
+        findings: [
+          {
+            severity: "low",
+            category: "style",
+            title: "t",
+            description: "d",
+            rationale,
+          },
+        ],
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.findings).toHaveLength(1);
+        expect(result.data.findings[0].rationale).toBeUndefined();
+      }
     }
   });
 
