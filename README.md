@@ -234,6 +234,17 @@ own process environment at call time. This web app's key is never involved —
 the two are separate processes with separate credentials, so running the MCP
 server costs nothing against this app's OpenRouter budget and vice versa.
 
+## GitHub Action
+
+`action/` runs the same engine on pull requests: it reviews the PR diff and
+writes a job summary with agreement counts, optionally failing the run only
+for corroborated high-severity findings. Also bring-your-own-key, via the
+consuming repo's secrets — see [`action/README.md`](action/README.md) for
+usage and [`docs/pr-action-design.md`](docs/pr-action-design.md) for the
+design, including the parts not built yet (sticky-comment delta, inline
+comments). This repo dogfoods it on its own PRs via
+`.github/workflows/consensus-review.yml`.
+
 ## Review status
 
 [`CODE_REVIEW.md`](CODE_REVIEW.md) tracks every known issue with its current
