@@ -133,6 +133,8 @@ server.registerTool(
           description: finding.description,
           line: finding.line ?? null,
           severity: finding.severity,
+          file: finding.file ?? null,
+          assumption: finding.assumption ?? null,
           rationale: finding.rationale ?? null,
         })),
       })),

@@ -149,7 +149,13 @@ export function FindingsList({ groups }: { groups: DisplayFindingGroup[] }) {
                     <li key={j} className="text-sm">
                       <span className="font-medium opacity-80">
                         {modelLabel(finding.model)}
-                        {finding.line != null && ` · line ${finding.line}`}
+                        {finding.file && finding.line != null
+                          ? ` · ${finding.file} · line ${finding.line}`
+                          : finding.file
+                            ? ` · ${finding.file}`
+                            : finding.line != null
+                              ? ` · line ${finding.line}`
+                              : null}
                       </span>
                       <span className="block opacity-90">
                         {finding.description}

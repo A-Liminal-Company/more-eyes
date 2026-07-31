@@ -60,6 +60,13 @@ export const findingSchema = z.object({
     .unknown()
     .optional()
     .transform((v) => (typeof v === "string" && v.trim() ? v.trim() : undefined)),
+  // Same leniency as `assumption`/`rationale`. Only meaningful for diff-format
+  // submissions spanning multiple files — a model reviewing a single snippet has
+  // no file to name.
+  file: z
+    .unknown()
+    .optional()
+    .transform((v) => (typeof v === "string" && v.trim() ? v.trim() : undefined)),
 });
 
 // The transform gives `assumption`/`rationale` an output type of
@@ -69,12 +76,14 @@ export const findingSchema = z.object({
 // values still fit.
 export type Finding = Omit<
   z.infer<typeof findingSchema>,
-  "assumption" | "rationale"
+  "assumption" | "rationale" | "file"
 > & {
   /** Present only when the model stated a dependency on context the snippet cannot show. */
   assumption?: string;
   /** One sentence of concrete evidence the model cited for the finding. */
   rationale?: string;
+  /** Repo-relative path the finding is about — only set for diff-format submissions. */
+  file?: string;
 };
 
 /**

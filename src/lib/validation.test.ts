@@ -393,6 +393,49 @@ describe("reviewResultSchema", () => {
     }
   });
 
+  it("keeps a finding's file when it is a non-empty string", () => {
+    const result = reviewResultSchema.safeParse({
+      summary: "x",
+      findings: [
+        {
+          severity: "medium",
+          category: "bug",
+          title: "Possible double free",
+          description: "Freed in both branches.",
+          file: "src/lib/cleanup.ts",
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.findings[0].file).toBe("src/lib/cleanup.ts");
+    }
+  });
+
+  it("degrades a null, empty, or non-string file to undefined", () => {
+    for (const file of [null, "", "   ", 42, { note: "x" }]) {
+      const result = reviewResultSchema.safeParse({
+        summary: "x",
+        findings: [
+          {
+            severity: "low",
+            category: "style",
+            title: "t",
+            description: "d",
+            file,
+          },
+        ],
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.findings).toHaveLength(1);
+        expect(result.data.findings[0].file).toBeUndefined();
+      }
+    }
+  });
+
   it("accepts an empty findings array", () => {
     const result = reviewResultSchema.safeParse({
       summary: "No issues found.",

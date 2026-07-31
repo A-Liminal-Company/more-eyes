@@ -106,6 +106,8 @@ listing the valid ones.
           "description": "...",
           "line": 42,
           "severity": "high",
+          "file": "The repo-relative path this finding is about, or null — only models reviewing a multi-file unified diff set this.",
+          "assumption": "A stated dependency on context the snippet couldn't show, or null when the model didn't give one.",
           "rationale": "One sentence of concrete evidence for the finding, or null when the model didn't give one."
         }
       ]
