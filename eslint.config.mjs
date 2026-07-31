@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // The MCP subpackage's compiled output and vendored deps. Its source
+    // (mcp-server/src) stays linted.
+    "mcp-server/dist/**",
+    "mcp-server/node_modules/**",
   ]),
 ]);
 
