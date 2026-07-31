@@ -1,0 +1,59 @@
+name: "Code Review Consensus"
+description: >-
+  Reviews a pull request's diff with multiple LLMs via OpenRouter and reports
+  grouped findings with agreement counts. Bring-your-own-key: set
+  openrouter_api_key from a repo secret. Skips gracefully (never fails the
+  run) when no key is available, e.g. on a fork PR.
+author: "code-review-app"
+
+inputs:
+  openrouter_api_key:
+    description: >-
+      Your OpenRouter API key. Leave unset (e.g. on fork PRs, where secrets
+      are not available) and the review is skipped successfully with a note
+      in the job summary.
+    required: false
+    default: ""
+  models:
+    description: "Comma-separated model ids to run."
+    required: false
+    default: "claude-sonnet-5,gpt-5.5,gemini-3.5-flash"
+  max_chars:
+    description: "Per-batch character budget for diff chunking."
+    required: false
+    default: "30000"
+  include:
+    description: >-
+      Comma-separated glob(s) of files to review. Empty means every file not
+      excluded.
+    required: false
+    default: ""
+  exclude:
+    description: "Comma-separated glob(s) of files to skip."
+    required: false
+    default: "package-lock.json,*.lock,dist/**,*.min.*,vendor/**,vendored/**,node_modules/**"
+  comment_mode:
+    description: "summary | inline | both. Inline/both land in M3; M2 only writes the job summary."
+    required: false
+    default: "both"
+  fail_on_severity:
+    description: "none | high | medium. Minimum severity that can fail the run."
+    required: false
+    default: "none"
+  min_agreement:
+    description: >-
+      Minimum number of models that must agree on a finding before it can
+      fail the run under fail_on_severity. A single-model finding never
+      breaks the build, however severe.
+    required: false
+    default: "2"
+
+outputs:
+  findings_count:
+    description: "Total number of grouped findings reported."
+  skipped:
+    description: "true when the review was skipped (no key available, or the triggering event is not a pull request)."
+
+runs:
+  using: "node20"
+  main: "dist/index.js"

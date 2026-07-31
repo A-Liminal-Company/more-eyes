@@ -16,6 +16,10 @@ const eslintConfig = defineConfig([
     // (mcp-server/src) stays linted.
     "mcp-server/dist/**",
     "mcp-server/node_modules/**",
+    // Same for the GitHub Action subpackage: ncc's bundled dist is committed
+    // per Actions convention, but its source (action/src) stays linted.
+    "action/dist/**",
+    "action/node_modules/**",
   ]),
 ]);
 

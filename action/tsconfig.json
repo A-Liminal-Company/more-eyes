@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "rootDir": "..",
+    "outDir": "dist",
+    "declaration": false,
+    "sourceMap": false,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "noEmitOnError": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "../src/lib/models.ts",
+    "../src/lib/review.ts",
+    "../src/lib/validation.ts",
+    "../src/lib/consensus.ts",
+    "../src/lib/errors.ts",
+    "../src/lib/providers/openrouter.ts",
+    "../src/lib/providers/anthropic.ts",
+    "../src/lib/providers/shared.ts"
+  ],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}

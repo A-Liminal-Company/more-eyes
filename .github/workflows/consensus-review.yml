@@ -1,0 +1,24 @@
+name: Consensus Review
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # No `if: github.event.pull_request.head.repo.full_name == github.repository`
+      # guard here on purpose — the action itself detects a missing
+      # OPENROUTER_API_KEY (absent on fork PRs, where secrets aren't
+      # forwarded) and skips successfully. That graceful-skip behavior is
+      # the point of the fork-PR design, and this workflow dogfoods it.
+      - uses: ./action
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
