@@ -36,6 +36,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The root `tsc --noEmit` typechecks the mcp-server/ and action/
+      # subpackage sources too, which need their own deps installed. Their
+      # builds run further down as their real verification.
+      - run: npm ci --prefix mcp-server
+      - run: npm ci --prefix action
       - run: npx prisma generate
       # Applies migration history rather than pushing the schema, so a missing
       # or broken migration fails CI instead of surfacing on a real database.
@@ -44,3 +49,7 @@ jobs:
       - run: npx eslint .
       - run: npm test
       - run: npm run build
+      - run: npm run build --prefix mcp-server
+      # Confirms the committed ncc bundle can be rebuilt; drift between
+      # action/src and action/dist won't fail this, only a broken build will.
+      - run: npm run build --prefix action
