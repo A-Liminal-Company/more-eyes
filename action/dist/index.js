@@ -30944,6 +30944,7 @@ async function run() {
     }
     const files = (0, diff_1.filterFiles)((0, diff_1.parseDiffFiles)(rawDiff), include, exclude);
     const batches = (0, diff_1.chunkFiles)(files, maxChars);
+    core.info(`Reviewing ${files.length} files in ${batches.length} batch(es) with models: ${modelIds.join(", ")}`);
     const allGroups = [];
     for (const batch of batches) {
         const code = batch.join("\n\n");
@@ -30954,11 +30955,20 @@ async function run() {
             code,
             format: "diff",
         });
+        for (const review of reviews) {
+            if (review.status === "ok") {
+                core.info(`${review.modelId}: ${review.result.findings.length} finding(s)`);
+            }
+            else {
+                core.info(`${review.modelId}: failed - ${review.error}`);
+            }
+        }
         const modelFindings = reviews
             .filter((r) => r.status === "ok")
             .flatMap((review) => review.result.findings.map((finding) => ({ ...finding, model: review.modelId })));
         allGroups.push(...(0, consensus_1.groupFindings)(modelFindings));
     }
+    core.info(`Total: ${allGroups.length} grouped finding(s)`);
     await core.summary.addRaw((0, report_1.renderSummary)(allGroups, modelIds.length)).write();
     core.setOutput("findings_count", String(allGroups.length));
     core.setOutput("skipped", "false");

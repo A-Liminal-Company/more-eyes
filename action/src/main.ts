@@ -81,6 +81,10 @@ export async function run(): Promise<void> {
   const files = filterFiles(parseDiffFiles(rawDiff), include, exclude);
   const batches = chunkFiles(files, maxChars);
 
+  core.info(
+    `Reviewing ${files.length} files in ${batches.length} batch(es) with models: ${modelIds.join(", ")}`
+  );
+
   const allGroups: FindingGroup[] = [];
 
   for (const batch of batches) {
@@ -93,6 +97,14 @@ export async function run(): Promise<void> {
       format: "diff",
     });
 
+    for (const review of reviews) {
+      if (review.status === "ok") {
+        core.info(`${review.modelId}: ${review.result.findings.length} finding(s)`);
+      } else {
+        core.info(`${review.modelId}: failed - ${review.error}`);
+      }
+    }
+
     const modelFindings: ModelFinding[] = reviews
       .filter((r): r is Extract<typeof r, { status: "ok" }> => r.status === "ok")
       .flatMap((review) =>
@@ -101,6 +113,8 @@ export async function run(): Promise<void> {
 
     allGroups.push(...groupFindings(modelFindings));
   }
+
+  core.info(`Total: ${allGroups.length} grouped finding(s)`);
 
   await core.summary.addRaw(renderSummary(allGroups, modelIds.length)).write();
   core.setOutput("findings_count", String(allGroups.length));
