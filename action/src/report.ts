@@ -4,6 +4,7 @@
  * scope only: sticky/inline PR comments are M3 (see docs/pr-action-design.md).
  */
 import { outlierSignal, type FindingGroup, type ModelFinding } from "../../src/lib/consensus";
+import type { RedTeamResult } from "../../src/lib/redteam";
 
 export type Severity = "high" | "medium" | "low";
 export type FailOnSeverity = "none" | Severity;
@@ -27,6 +28,11 @@ export type GateResult = {
  * finding can only fail the run when its severity clears the threshold AND
  * at least `minAgreement` distinct models independently flagged it — a
  * single-model finding never breaks the build, however severe.
+ *
+ * Deliberately blind to red-team verdicts. Demonstrability is reported, never
+ * gated on: an undemonstrated finding can still be real, and a build that broke
+ * because one model wrote a convincing exploit would make the signal something
+ * to argue with rather than something to read.
  */
 export function evaluateGate(
   groups: FindingGroup[],
@@ -71,8 +77,18 @@ function findingLocation(finding: ModelFinding): string {
  * file·line and assumption/rationale when present. `totalModels` is the
  * number of models configured to run (the denominator in "K/N models"),
  * not the count that happened to succeed on any one batch.
+ *
+ * `redTeam` is index-aligned with `groups` and optional — absent entirely when
+ * the pass is off, and holding `undefined` for groups it skipped or failed on.
+ * Alignment is safe here, unlike in the web app: nothing is persisted and
+ * re-read, so the array is built against the very same group objects in one
+ * pass.
  */
-export function renderSummary(groups: FindingGroup[], totalModels: number): string {
+export function renderSummary(
+  groups: FindingGroup[],
+  totalModels: number,
+  redTeam?: (RedTeamResult | undefined)[]
+): string {
   const lines: string[] = ["## Code Review Consensus", ""];
 
   if (groups.length === 0) {
@@ -87,13 +103,19 @@ export function renderSummary(groups: FindingGroup[], totalModels: number): stri
     ""
   );
 
-  for (const group of groups) {
+  groups.forEach((group, i) => {
     const outlier = outlierSignal(group);
+    const verdict = redTeam?.[i];
     lines.push(`### [${group.severity.toUpperCase()}] ${group.title}`);
     lines.push("");
     lines.push(
       `*${group.category} · ${group.models.length}/${totalModels} models agree` +
-        `${outlier ? ` · ${outlier}` : ""}*`
+        `${outlier ? ` · ${outlier}` : ""}` +
+        `${
+          verdict
+            ? ` · ${verdict.demonstrated ? "exploit demonstrated" : "not demonstrated"}`
+            : ""
+        }*`
     );
     lines.push("");
 
@@ -104,8 +126,31 @@ export function renderSummary(groups: FindingGroup[], totalModels: number): stri
       if (finding.rationale) lines.push(`  - Why: ${finding.rationale}`);
     }
 
+    if (verdict) {
+      lines.push("");
+      lines.push(
+        `<details><summary>${
+          verdict.demonstrated
+            ? "How this is exploited"
+            : "Why this could not be demonstrated"
+        }</summary>`
+      );
+      lines.push("");
+      lines.push(verdict.reasoning);
+      // Fenced: exploit text is often a payload, and a fence keeps it from being
+      // rendered as markdown in the job summary.
+      if (verdict.exploit) {
+        lines.push("");
+        lines.push("```");
+        lines.push(verdict.exploit);
+        lines.push("```");
+      }
+      lines.push("");
+      lines.push("</details>");
+    }
+
     lines.push("");
-  }
+  });
 
   return lines.join("\n");
 }

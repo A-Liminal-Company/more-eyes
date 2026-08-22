@@ -5,6 +5,7 @@ import { resetRateLimit } from "@/lib/rate-limit";
 const createMock = vi.fn();
 const reviewWithModelsMock = vi.fn();
 const findUniqueMock = vi.fn();
+const redTeamGroupsMock = vi.fn();
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -23,6 +24,16 @@ vi.mock("@/lib/review", async () => {
   return {
     ...actual,
     reviewWithModels: (...args: unknown[]) => reviewWithModelsMock(...args),
+  };
+});
+
+vi.mock("@/lib/redteam", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/redteam")>(
+    "@/lib/redteam"
+  );
+  return {
+    ...actual,
+    redTeamGroups: (...args: unknown[]) => redTeamGroupsMock(...args),
   };
 });
 
@@ -69,6 +80,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetRateLimit();
   findUniqueMock.mockResolvedValue(null);
+  redTeamGroupsMock.mockResolvedValue(null);
+  delete process.env.REDTEAM_MODEL;
 });
 
 describe("POST /api/reviews", () => {
@@ -271,6 +284,93 @@ describe("POST /api/reviews", () => {
 
     expect(findUniqueMock).not.toHaveBeenCalled();
     expect(createMock.mock.calls[0][0].data.previousSubmissionId).toBeNull();
+  });
+
+  it("does not run the red-team pass when REDTEAM_MODEL is unset", async () => {
+    reviewWithModelsMock.mockResolvedValue([okResult]);
+    createMock.mockResolvedValue({ id: "abc123" });
+
+    await POST(postRequest(validBody));
+
+    expect(redTeamGroupsMock).not.toHaveBeenCalled();
+    expect(createMock.mock.calls[0][0].data.redTeam).toBeUndefined();
+  });
+
+  it("persists the assignment the red-team pass returns", async () => {
+    process.env.REDTEAM_MODEL = "some/model";
+    reviewWithModelsMock.mockResolvedValue([okResult]);
+    createMock.mockResolvedValue({ id: "abc123" });
+
+    const assignment = {
+      v: 1,
+      results: {
+        "claude-sonnet-5#0": {
+          demonstrated: true,
+          exploit: "Call with b = 0.",
+          reasoning: "The divisor is unchecked.",
+        },
+      },
+    };
+    redTeamGroupsMock.mockResolvedValue(assignment);
+
+    await POST(postRequest(validBody));
+
+    expect(createMock.mock.calls[0][0].data.redTeam).toEqual(assignment);
+  });
+
+  it("red-teams the grouped findings, not the raw findings", async () => {
+    process.env.REDTEAM_MODEL = "some/model";
+    reviewWithModelsMock.mockResolvedValue([okResult]);
+    createMock.mockResolvedValue({ id: "abc123" });
+
+    await POST(postRequest(validBody));
+
+    const [groups, allFindings, input] = redTeamGroupsMock.mock.calls[0];
+    // A group carries the models that flagged it; a raw finding does not.
+    expect(groups[0]).toMatchObject({
+      title: "Division by zero",
+      models: ["claude-sonnet-5"],
+    });
+    expect(allFindings[0]).toMatchObject({ model: "claude-sonnet-5" });
+    expect(input.code).toBe(validBody.code);
+  });
+
+  it("charges the red-team pass against the same budget the models use", async () => {
+    process.env.REDTEAM_MODEL = "some/model";
+    reviewWithModelsMock.mockResolvedValue([okResult]);
+    createMock.mockResolvedValue({ id: "abc123" });
+
+    // One model plus one qualifying finding is two billed calls, so the 30-call
+    // window affords 15 submissions rather than 30. Without the extra charge,
+    // red-team calls would be spent off the books entirely.
+    for (let i = 0; i < 15; i++) {
+      expect((await POST(postRequest(validBody))).status).toBe(201);
+    }
+
+    expect((await POST(postRequest(validBody))).status).toBe(429);
+  });
+
+  it("skips the red-team pass rather than failing when the budget is exhausted", async () => {
+    reviewWithModelsMock.mockResolvedValue([okResult]);
+    createMock.mockResolvedValue({ id: "abc123" });
+
+    // Burn the window down to exactly one call left, with the pass off so each
+    // submission costs one.
+    for (let i = 0; i < 29; i++) {
+      expect((await POST(postRequest(validBody))).status).toBe(201);
+    }
+
+    // Now the review itself still fits, but the red-team charge on top does not.
+    process.env.REDTEAM_MODEL = "some/model";
+    redTeamGroupsMock.mockClear();
+
+    const res = await POST(postRequest(validBody));
+
+    // The review succeeded, so it is persisted — only the enhancement is
+    // dropped. Rejecting here would fail a submission over an optional extra.
+    expect(res.status).toBe(201);
+    expect(redTeamGroupsMock).not.toHaveBeenCalled();
+    expect(createMock.mock.calls.at(-1)?.[0].data.redTeam).toBeUndefined();
   });
 
   it("rejects a body larger than the size guard before parsing", async () => {

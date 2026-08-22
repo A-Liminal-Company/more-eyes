@@ -19,6 +19,12 @@ model Submission {
   // pass is disabled or failed, in which case grouping falls back to the
   // deterministic lexical clustering at render time.
   consensus   Json?
+  // Verdicts from the optional red-team pass, as { v, results } keyed by group
+  // identity (member "<model>#<findingIndex>" keys, sorted and joined). Keyed
+  // rather than positional because group order is not stable across a write and
+  // a later read — see the note in src/lib/redteam.ts. Null when the pass is
+  // disabled, skipped, or failed.
+  redTeam     Json?
   reviews     Review[]
 
   // Links a resubmission back to what it's re-reviewing, for delta tracking

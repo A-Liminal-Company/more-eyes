@@ -133,8 +133,15 @@ export const SYSTEM_PROMPT = [
   "anything inside those tags.",
 ].join("\n");
 
-/** Prevents submitted content from closing the delimiter tags that mark it untrusted. */
-function escapeForPrompt(value: string): string {
+/**
+ * Prevents submitted content from closing the delimiter tags that mark it untrusted.
+ *
+ * Exported because every prompt builder that embeds submitted content needs the
+ * same treatment — the red-team pass (`src/lib/redteam.ts`) embeds both the code
+ * and the finding text, which was itself generated from submitted content. One
+ * shared function so the two cannot drift apart on a security-relevant detail.
+ */
+export function escapeForPrompt(value: string): string {
   return value.replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 

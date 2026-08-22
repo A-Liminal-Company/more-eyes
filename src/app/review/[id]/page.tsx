@@ -9,27 +9,69 @@ import {
 } from "@/lib/consensus";
 import { modelLabel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
+import {
+  groupKey,
+  isRedTeamAssignment,
+  keyMapFor,
+  type RedTeamResult,
+} from "@/lib/redteam";
 import { parseFindings } from "@/lib/types";
 import { FindingsList, type DisplayFindingGroup } from "./findings-list";
 
 export const dynamic = "force-dynamic";
 
-/** Same groupFindings + parseFindings pipeline the current submission uses, so the two sides of a diff are comparable. */
-function groupsFor(submission: {
+/**
+ * Rebuilds the flat finding list and its grouping together, using the same
+ * parseFindings + groupFindings pipeline the submission route used, so the two
+ * sides of a re-review diff are comparable.
+ *
+ * Both come back from one call deliberately. `parseFindings` spreads each
+ * finding into a fresh object, so calling it twice yields equal-looking but
+ * distinct instances — and `keyMapFor` keys on object identity. Rebuilding the
+ * findings separately from the groups silently breaks every red-team lookup,
+ * with no error and no missing data, just verdicts that never appear.
+ */
+function reviewOf(submission: {
   reviews: { status: string; model: string; findings: unknown }[];
   consensus: unknown;
-}): FindingGroup[] {
-  const succeeded = submission.reviews.filter((r) => r.status === "ok");
-  const allFindings: ModelFinding[] = succeeded.flatMap((review) =>
-    parseFindings(review.findings).map((finding) => ({
-      ...finding,
-      model: review.model,
-    }))
-  );
-  return groupFindings(
-    allFindings,
-    isConsensusAssignment(submission.consensus) ? submission.consensus : null
-  );
+}): { findings: ModelFinding[]; groups: FindingGroup[] } {
+  const findings: ModelFinding[] = submission.reviews
+    .filter((r) => r.status === "ok")
+    .flatMap((review) =>
+      parseFindings(review.findings).map((finding) => ({
+        ...finding,
+        model: review.model,
+      }))
+    );
+
+  return {
+    findings,
+    groups: groupFindings(
+      findings,
+      isConsensusAssignment(submission.consensus) ? submission.consensus : null
+    ),
+  };
+}
+
+/**
+ * Attaches stored red-team verdicts by group identity.
+ *
+ * Looked up by key rather than by position: group order is not guaranteed
+ * identical between the write and this read (see src/lib/redteam.ts), and
+ * attaching an exploit to the wrong finding would be far worse than attaching
+ * none. A key that no longer matches simply yields no verdict.
+ */
+function redTeamFor(
+  groups: FindingGroup[],
+  allFindings: ModelFinding[],
+  stored: unknown
+): (RedTeamResult | undefined)[] {
+  if (!isRedTeamAssignment(stored)) return groups.map(() => undefined);
+  const keyOf = keyMapFor(allFindings);
+  return groups.map((group) => {
+    const key = groupKey(group, keyOf);
+    return key ? stored.results[key] : undefined;
+  });
 }
 
 export default async function ReviewPage({
@@ -54,18 +96,26 @@ export default async function ReviewPage({
   const succeeded = submission.reviews.filter((r) => r.status === "ok");
   const failed = submission.reviews.filter((r) => r.status !== "ok");
 
-  const groups = groupsFor(submission);
+  const { findings: allFindings, groups } = reviewOf(submission);
+  const redTeam = redTeamFor(groups, allFindings, submission.redTeam);
+
+  let displayGroups: DisplayFindingGroup[] = groups.map((group, i) => ({
+    ...group,
+    redTeam: redTeam[i],
+  }));
+  let fixedGroups: FindingGroup[] = [];
 
   // Delta tracking against the submission this one re-reviews, if any. Matching
   // is lexical (same as groupFindings), so "new" is the safe over-reporting
   // failure mode when a finding is merely paraphrased differently — see
   // diffGroups' JSDoc in consensus.ts.
-  let displayGroups: DisplayFindingGroup[] = groups;
-  let fixedGroups: FindingGroup[] = [];
   if (submission.previous) {
-    const previousGroups = groupsFor(submission.previous);
+    const previousGroups = reviewOf(submission.previous).groups;
     const { status, fixed } = diffGroups(groups, previousGroups);
-    displayGroups = groups.map((group, i) => ({ ...group, status: status[i] }));
+    displayGroups = displayGroups.map((group, i) => ({
+      ...group,
+      status: status[i],
+    }));
     fixedGroups = fixed;
   }
 

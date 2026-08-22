@@ -57,6 +57,21 @@ through `env:` as shown above.
 | `comment_mode` | `both` | `summary` \| `inline` \| `both`. Reserved for M3 — no effect yet. |
 | `fail_on_severity` | `none` | `none` \| `high` \| `medium`. The run is advisory (never fails) by default. |
 | `min_agreement` | `2` | How many models must independently agree before a finding can fail the run. A single-model finding never breaks the build, however severe — it's surfaced and labeled instead. |
+| `redteam_model` | *(empty = off)* | Model id that attempts a concrete exploit per reported finding, labeling it demonstrated or not. Costs one extra call per reported finding. Never fails the run — see below. |
+| `redteam_categories` | `security,bug,reliability` | Which categories are worth an exploit attempt. Widening to `performance,style` mostly buys calls with no exploit to find. |
+
+### Demonstrability
+
+With `redteam_model` set, each reported finding gets one adversarial follow-up
+call asking for the concrete exploit — the input, the call, what goes wrong. The
+job summary then labels findings **exploit demonstrated** or **not
+demonstrated**, with the reasoning in a collapsed block.
+
+It is **static analysis only**: the model gets no execution tool and nothing is
+ever run in your runner. And it is **advisory** — `evaluateGate` ignores
+demonstrability entirely, so an undemonstrated finding can't fail a build and a
+demonstrated one can't newly break it. A model failing to write an exploit is a
+hint the finding may be a false positive, not proof of one.
 
 ## Outputs
 

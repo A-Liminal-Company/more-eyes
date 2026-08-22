@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { outlierSignal, type FindingGroup } from "@/lib/consensus";
+import { isFocused, outlierSignal, type FindingGroup } from "@/lib/consensus";
 import { modelLabel } from "@/lib/models";
+import type { RedTeamResult } from "@/lib/redteam";
 import type { Finding } from "@/lib/validation";
 
 const SEVERITY_STYLES: Record<Finding["severity"], string> = {
@@ -12,20 +13,6 @@ const SEVERITY_STYLES: Record<Finding["severity"], string> = {
 };
 
 /**
- * Focused view keeps corroborated findings plus the single-model ones research
- * says are worth surfacing anyway (security, high severity). What it hides is
- * the long tail of uncorroborated medium/low nitpicks — the noise that trains
- * people to ignore review tools.
- */
-function isFocused(group: FindingGroup): boolean {
-  return (
-    group.models.length > 1 ||
-    group.severity === "high" ||
-    group.category === "security"
-  );
-}
-
-/**
  * A finding group augmented with its delta status against the submission it
  * re-reviews, if any. Attached per-group (rather than as a parallel array
  * indexed like `diffGroups` returns it) so the status survives the focused/all
@@ -33,6 +20,8 @@ function isFocused(group: FindingGroup): boolean {
  */
 export type DisplayFindingGroup = FindingGroup & {
   status?: "new" | "persistent";
+  /** Verdict from the optional red-team pass. Absent when it did not run. */
+  redTeam?: RedTeamResult;
 };
 
 const STATUS_STYLES: Record<"new" | "persistent", string> = {
@@ -43,6 +32,18 @@ const STATUS_STYLES: Record<"new" | "persistent", string> = {
 const STATUS_LABEL: Record<"new" | "persistent", string> = {
   new: "new since last review",
   persistent: "persistent",
+};
+
+/**
+ * Demonstrability reads as a second, independent trust signal beside agreement:
+ * a model built a working exploit, or tried and could not. "Not demonstrated" is
+ * deliberately styled as neutral rather than as a dismissal — a model failing to
+ * write an exploit is a hint, not a verdict, and some real issues are simply not
+ * demonstrable from a snippet alone.
+ */
+const REDTEAM_STYLES: Record<"yes" | "no", string> = {
+  yes: "border-red-600 text-red-800 dark:border-red-500 dark:text-red-300",
+  no: "border-current opacity-70",
 };
 
 export function FindingsList({ groups }: { groups: DisplayFindingGroup[] }) {
@@ -129,6 +130,17 @@ export function FindingsList({ groups }: { groups: DisplayFindingGroup[] }) {
                       {STATUS_LABEL[group.status]}
                     </span>
                   )}
+                  {group.redTeam && (
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
+                        REDTEAM_STYLES[group.redTeam.demonstrated ? "yes" : "no"]
+                      }`}
+                    >
+                      {group.redTeam.demonstrated
+                        ? "exploit demonstrated"
+                        : "not demonstrated"}
+                    </span>
+                  )}
                 </div>
 
                 <p className="text-sm font-medium break-words">{group.title}</p>
@@ -176,6 +188,22 @@ export function FindingsList({ groups }: { groups: DisplayFindingGroup[] }) {
                     </li>
                   ))}
                 </ul>
+
+                {group.redTeam && (
+                  <details className="mt-2 text-xs opacity-80">
+                    <summary className="cursor-pointer select-none">
+                      {group.redTeam.demonstrated
+                        ? "How this is exploited"
+                        : "Why this could not be demonstrated"}
+                    </summary>
+                    <p className="mt-1">{group.redTeam.reasoning}</p>
+                    {group.redTeam.exploit && (
+                      <pre className="mt-1 overflow-x-auto whitespace-pre-wrap rounded bg-black/10 p-2 dark:bg-white/10">
+                        {group.redTeam.exploit}
+                      </pre>
+                    )}
+                  </details>
+                )}
               </li>
             );
           })}

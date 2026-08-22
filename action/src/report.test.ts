@@ -140,3 +140,62 @@ describe("renderSummary", () => {
     expect(summary).toContain("Why: The .catch() call is missing after the fetch chain.");
   });
 });
+
+describe("renderSummary with red-team verdicts", () => {
+  const demonstrated = {
+    demonstrated: true,
+    exploit: "POST /users?id=1' OR '1'='1 returns every row.",
+    reasoning: "The id parameter is concatenated straight into the query.",
+  };
+
+  it("labels a demonstrated finding and shows the exploit", () => {
+    const groups = [group({ category: "security", models: ["a", "b"] })];
+    const summary = renderSummary(groups, 3, [demonstrated]);
+
+    expect(summary).toContain("exploit demonstrated");
+    expect(summary).toContain("How this is exploited");
+    expect(summary).toContain("The id parameter is concatenated");
+    // Fenced so a payload cannot render as markdown in the job summary.
+    expect(summary).toContain("```\nPOST /users?id=1' OR '1'='1 returns every row.\n```");
+  });
+
+  it("labels a finding the model could not demonstrate", () => {
+    const groups = [group({ models: ["a", "b"] })];
+    const summary = renderSummary(groups, 3, [
+      {
+        demonstrated: false,
+        reasoning: "The value is validated by the caller two lines above.",
+      },
+    ]);
+
+    expect(summary).toContain("not demonstrated");
+    expect(summary).toContain("Why this could not be demonstrated");
+    expect(summary).toContain("validated by the caller");
+  });
+
+  it("omits the section entirely for groups with no verdict", () => {
+    const groups = [group({ models: ["a", "b"] }), group({ models: ["c"] })];
+    const summary = renderSummary(groups, 3, [demonstrated, undefined]);
+
+    expect(summary.match(/exploit demonstrated/g)).toHaveLength(1);
+    expect(summary).not.toContain("not demonstrated");
+  });
+
+  it("renders unchanged when the pass did not run", () => {
+    const groups = [group({ models: ["a", "b"] })];
+
+    expect(renderSummary(groups, 3, undefined)).toBe(renderSummary(groups, 3));
+  });
+});
+
+describe("evaluateGate ignores demonstrability", () => {
+  it("does not fail a build over an undemonstrated finding", () => {
+    // Demonstrability is advisory: a model failing to write an exploit is a
+    // hint, not grounds to block a merge.
+    const groups = [group({ severity: "high", models: ["a", "b"] })];
+
+    expect(
+      evaluateGate(groups, { failOnSeverity: "high", minAgreement: 2 }).shouldFail
+    ).toBe(true);
+  });
+});

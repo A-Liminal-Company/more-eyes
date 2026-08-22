@@ -47,6 +47,22 @@ inputs:
       breaks the build, however severe.
     required: false
     default: "2"
+  redteam_model:
+    description: >-
+      Model id used to attempt a concrete exploit for each reported finding,
+      adding a "demonstrated / not demonstrated" signal alongside agreement.
+      Empty (the default) disables the pass. Costs one extra call per reported
+      finding, and never fails the run — demonstrability is reported, not gated
+      on.
+    required: false
+    default: ""
+  redteam_categories:
+    description: >-
+      Comma-separated finding categories worth an exploit attempt. Add
+      performance and style to widen it, at the cost of calls that usually have
+      no exploit to find.
+    required: false
+    default: "security,bug,reliability"
 
 outputs:
   findings_count:

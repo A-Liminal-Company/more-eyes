@@ -1,6 +1,12 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
 import { groupFindings, type FindingGroup, type ModelFinding } from "../../src/lib/consensus";
+import {
+  groupKey,
+  keyMapFor,
+  redTeamGroups,
+  type RedTeamResult,
+} from "../../src/lib/redteam";
 import { reviewWithModels } from "../../src/lib/review";
 import { chunkFiles, filterFiles, parseDiffFiles } from "./diff";
 import { evaluateGate, renderSummary, type FailOnSeverity } from "./report";
@@ -58,6 +64,12 @@ export async function run(): Promise<void> {
   const failOnSeverity = (core.getInput("fail_on_severity") || "none") as FailOnSeverity;
   const minAgreement = Number(core.getInput("min_agreement")) || 2;
 
+  // Read by the shared library from the environment, same contract as the key.
+  const redteamModel = core.getInput("redteam_model").trim();
+  if (redteamModel) process.env.REDTEAM_MODEL = redteamModel;
+  const redteamCategories = core.getInput("redteam_categories").trim();
+  if (redteamCategories) process.env.REDTEAM_CATEGORIES = redteamCategories;
+
   const octokit = github.getOctokit(token);
   const { owner, repo } = context.repo;
   const pull_number = pullRequest.number;
@@ -86,6 +98,8 @@ export async function run(): Promise<void> {
   );
 
   const allGroups: FindingGroup[] = [];
+  // Index-aligned with allGroups: both are appended together, per batch.
+  const allRedTeam: (RedTeamResult | undefined)[] = [];
 
   for (const batch of batches) {
     const code = batch.join("\n\n");
@@ -111,12 +125,34 @@ export async function run(): Promise<void> {
         review.result.findings.map((finding) => ({ ...finding, model: review.modelId }))
       );
 
-    allGroups.push(...groupFindings(modelFindings));
+    const batchGroups = groupFindings(modelFindings);
+
+    // Red-teamed here rather than after the loop: groups accumulate across
+    // batches but each one describes its own batch's code, and an exploit built
+    // against the wrong source would be nonsense. Returns null when the pass is
+    // off, in which case every group in this batch simply has no verdict.
+    const verdicts = await redTeamGroups(batchGroups, modelFindings, {
+      code,
+      language: "mixed",
+      format: "diff",
+    });
+
+    const keyOf = keyMapFor(modelFindings);
+    allGroups.push(...batchGroups);
+    allRedTeam.push(
+      ...batchGroups.map((group) => {
+        if (!verdicts) return undefined;
+        const key = groupKey(group, keyOf);
+        return key ? verdicts.results[key] : undefined;
+      })
+    );
   }
 
   core.info(`Total: ${allGroups.length} grouped finding(s)`);
 
-  await core.summary.addRaw(renderSummary(allGroups, modelIds.length)).write();
+  await core.summary
+    .addRaw(renderSummary(allGroups, modelIds.length, allRedTeam))
+    .write();
   core.setOutput("findings_count", String(allGroups.length));
   core.setOutput("skipped", "false");
 
