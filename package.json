@@ -1,6 +1,6 @@
 {
-  "name": "code-review-app",
-  "version": "0.1.0",
+  "name": "more-eyes",
+  "version": "1.0.0",
   "private": true,
   "engines": {
     "node": ">=22"

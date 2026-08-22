@@ -1,9 +1,9 @@
 ---
-name: code-review-app-review
-description: Re-audit the code-review-app repo. Re-verifies every finding in CODE_REVIEW.md against the current code, sweeps for new issues across security, reliability, accessibility, test coverage, and code quality, runs the test suite and build for ground truth, and updates CODE_REVIEW.md's summary table and changelog. Report-only by default. Use when asked to re-review, re-audit, or check the health of this repo, or when CODE_REVIEW.md is mentioned.
+name: more-eyes-review
+description: Re-audit the More Eyes repo. Re-verifies every finding in CODE_REVIEW.md against the current code, sweeps for new issues across security, reliability, accessibility, test coverage, and code quality, runs the test suite and build for ground truth, and updates CODE_REVIEW.md's summary table and changelog. Report-only by default. Use when asked to re-review, re-audit, or check the health of this repo, or when CODE_REVIEW.md is mentioned.
 ---
 
-# Re-review code-review-app
+# Re-review More Eyes
 
 Audit this repo against `CODE_REVIEW.md` and update that document.
 

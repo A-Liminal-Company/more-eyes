@@ -1,8 +1,8 @@
-# Code Review Consensus Action
+# More Eyes Action
 
 A GitHub Action that reviews a pull request's diff with multiple LLMs via
 [OpenRouter](https://openrouter.ai) and reports grouped findings with
-agreement counts — the same consensus engine the code-review-app web UI and
+agreement counts — the same consensus engine the More Eyes web UI and
 `mcp-server` use, in CI.
 
 **Bring-your-own-key (BYOK):** the consuming repo sets `OPENROUTER_API_KEY`
@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: code-review-app/action@v1
+      - uses: A-Liminal-Company/more-eyes/action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

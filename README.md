@@ -1,4 +1,4 @@
-# code-review-app
+# More Eyes
 
 Paste code, get it reviewed by several AI models at once, and see where they
 agree. Built for catching bugs before they ship when you're moving fast.
@@ -292,7 +292,7 @@ comments). This repo dogfoods it on its own PRs via
 [`CODE_REVIEW.md`](CODE_REVIEW.md) tracks every known issue with its current
 status, what was done, and what remains.
 
-To re-audit, invoke the `code-review-app-review` skill in Claude Code. It
+To re-audit, invoke the `more-eyes-review` skill in Claude Code. It
 re-verifies each finding against the actual code rather than trusting the
 document, sweeps for new issues, runs the suite and build for ground truth, and
 updates the changelog. Report-only unless you ask it to fix things.

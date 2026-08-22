@@ -1,10 +1,10 @@
-name: "Code Review Consensus"
+name: "More Eyes"
 description: >-
   Reviews a pull request's diff with multiple LLMs via OpenRouter and reports
   grouped findings with agreement counts. Bring-your-own-key: set
   openrouter_api_key from a repo secret. Skips gracefully (never fails the
   run) when no key is available, e.g. on a fork PR.
-author: "code-review-app"
+author: "A-Liminal-Company"
 
 inputs:
   openrouter_api_key:

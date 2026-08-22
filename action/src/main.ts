@@ -23,7 +23,7 @@ function parseList(input: string): string[] {
 async function writeSkipSummary(reason: string): Promise<void> {
   core.info(`Review skipped: ${reason}`);
   await core.summary
-    .addHeading("Code Review Consensus")
+    .addHeading("More Eyes")
     .addRaw(`Review skipped: ${reason}.`)
     .write();
   core.setOutput("skipped", "true");

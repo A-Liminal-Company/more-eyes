@@ -107,7 +107,7 @@ export function renderSummary(
   totalModels: number,
   redTeam?: (RedTeamResult | undefined)[]
 ): string {
-  const lines: string[] = ["## Code Review Consensus", ""];
+  const lines: string[] = ["## More Eyes", ""];
 
   if (groups.length === 0) {
     lines.push("No findings.");

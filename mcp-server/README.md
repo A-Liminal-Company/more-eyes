@@ -1,15 +1,15 @@
-# code-review-consensus-mcp
+# more-eyes-mcp
 
-A standalone MCP (Model Context Protocol) server that exposes the code-review-app's
+A standalone MCP (Model Context Protocol) server that exposes More Eyes'
 multi-model review engine as a single tool: `review_code`. It runs a code
 snippet past several LLMs in parallel via [OpenRouter](https://openrouter.ai)
 and deterministically groups their findings into a consensus report — the
-same engine the code-review-app web UI uses, repackaged for any MCP-capable
+same engine the More Eyes web UI uses, repackaged for any MCP-capable
 AI tool or IDE to call directly.
 
 This is **bring-your-own-key (BYOK)**: the server reads `OPENROUTER_API_KEY`
 from its own process environment at call time. Nothing is proxied through
-code-review-app's infrastructure, and no key is bundled with the server.
+More Eyes' infrastructure, and no key is bundled with the server.
 
 ## Setup
 
@@ -39,7 +39,7 @@ server's own `env` block:
 ```json
 {
   "mcpServers": {
-    "code-review-consensus": {
+    "more-eyes": {
       "command": "node",
       "args": ["<abs path>/mcp-server/dist/mcp-server/src/index.js"],
       "env": {
@@ -60,7 +60,7 @@ source directly with `tsx` (available in the parent repo's `node_modules`):
 ```json
 {
   "mcpServers": {
-    "code-review-consensus": {
+    "more-eyes": {
       "command": "npx",
       "args": ["tsx", "<abs path>/mcp-server/src/index.ts"],
       "env": {

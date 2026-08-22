@@ -1,6 +1,6 @@
 {
-  "name": "code-review-consensus-action",
-  "version": "0.1.0",
+  "name": "more-eyes-action",
+  "version": "1.0.0",
   "private": true,
   "description": "GitHub Action that reviews a pull request's diff with multiple models via OpenRouter and reports grouped consensus findings.",
   "scripts": {
