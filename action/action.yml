@@ -63,6 +63,14 @@ inputs:
       no exploit to find.
     required: false
     default: "security,bug,reliability"
+  redteam_max_findings:
+    description: >-
+      Ceiling on exploit attempts for the whole run. A large diff is reviewed
+      in batches, and this budget is shared across them rather than applying to
+      each, so the cost of a run is bounded by this number regardless of how
+      many batches the diff splits into.
+    required: false
+    default: "10"
 
 outputs:
   findings_count:

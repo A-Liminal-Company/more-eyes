@@ -59,6 +59,7 @@ through `env:` as shown above.
 | `min_agreement` | `2` | How many models must independently agree before a finding can fail the run. A single-model finding never breaks the build, however severe — it's surfaced and labeled instead. |
 | `redteam_model` | *(empty = off)* | Model id that attempts a concrete exploit per reported finding, labeling it demonstrated or not. Costs one extra call per reported finding. Never fails the run — see below. |
 | `redteam_categories` | `security,bug,reliability` | Which categories are worth an exploit attempt. Widening to `performance,style` mostly buys calls with no exploit to find. |
+| `redteam_max_findings` | `10` | Ceiling on exploit attempts for the whole run. A large diff is reviewed in batches; this budget is shared across them, so it bounds the run's cost regardless of how many batches the diff splits into. |
 
 ### Demonstrability
 

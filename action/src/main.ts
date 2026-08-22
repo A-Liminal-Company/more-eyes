@@ -71,6 +71,8 @@ export async function run(): Promise<void> {
   if (redteamModel) process.env.REDTEAM_MODEL = redteamModel;
   const redteamCategories = core.getInput("redteam_categories").trim();
   if (redteamCategories) process.env.REDTEAM_CATEGORIES = redteamCategories;
+  const redteamMax = core.getInput("redteam_max_findings").trim();
+  if (redteamMax) process.env.REDTEAM_MAX_FINDINGS = redteamMax;
 
   const octokit = github.getOctokit(token);
   const { owner, repo } = context.repo;
