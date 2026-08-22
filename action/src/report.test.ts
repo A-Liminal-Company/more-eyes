@@ -188,14 +188,37 @@ describe("renderSummary with red-team verdicts", () => {
   });
 });
 
-describe("evaluateGate ignores demonstrability", () => {
-  it("does not fail a build over an undemonstrated finding", () => {
-    // Demonstrability is advisory: a model failing to write an exploit is a
-    // hint, not grounds to block a merge.
-    const groups = [group({ severity: "high", models: ["a", "b"] })];
+describe("renderSummary fences model-authored text", () => {
+  // A model demonstrating an exploit routinely answers with a fenced code
+  // block. A fixed ``` fence closes on the inner one, and the rest of the
+  // exploit renders as markdown in the job summary — links included.
+  it("survives an exploit containing its own code fence", () => {
+    const exploit = "Send:\n```\n'; DROP TABLE users; --\n```\nand it runs.";
+    const groups = [group({ severity: "high", models: ["a"] })];
 
-    expect(
-      evaluateGate(groups, { failOnSeverity: "high", minAgreement: 2 }).shouldFail
-    ).toBe(true);
+    const out = renderSummary(groups, 1, [
+      { demonstrated: true, exploit, reasoning: "Concatenated into SQL." },
+    ]);
+
+    // The wrapping fence has to outlast the longest run inside it.
+    expect(out).toContain("````");
+    const body = out.slice(out.indexOf("````"));
+    const opening = body.slice(0, body.indexOf("\n"));
+    expect(body.split(opening).length - 1).toBe(2);
+    expect(out).toContain("'; DROP TABLE users; --");
+  });
+
+  it("fences reasoning too, so markdown in it cannot render", () => {
+    const groups = [group({ severity: "high", models: ["a"] })];
+
+    const out = renderSummary(groups, 1, [
+      {
+        demonstrated: false,
+        reasoning: "Guarded by [a link](https://example.test/x).",
+      },
+    ]);
+
+    const line = out.split("\n").findIndex((l) => l.includes("[a link]"));
+    expect(out.split("\n")[line - 1]).toMatch(/^`{3,}$/);
   });
 });

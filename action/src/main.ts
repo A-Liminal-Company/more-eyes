@@ -5,6 +5,8 @@ import {
   groupKey,
   keyMapFor,
   redTeamGroups,
+  redTeamMaxFindings,
+  selectForRedTeam,
   type RedTeamResult,
 } from "../../src/lib/redteam";
 import { reviewWithModels } from "../../src/lib/review";
@@ -97,6 +99,9 @@ export async function run(): Promise<void> {
     `Reviewing ${files.length} files in ${batches.length} batch(es) with models: ${modelIds.join(", ")}`
   );
 
+  // Shared across every batch — see the note at the redTeamGroups call below.
+  let redTeamBudget = redTeamMaxFindings();
+
   const allGroups: FindingGroup[] = [];
   // Index-aligned with allGroups: both are appended together, per batch.
   const allRedTeam: (RedTeamResult | undefined)[] = [];
@@ -131,11 +136,20 @@ export async function run(): Promise<void> {
     // batches but each one describes its own batch's code, and an exploit built
     // against the wrong source would be nonsense. Returns null when the pass is
     // off, in which case every group in this batch simply has no verdict.
-    const verdicts = await redTeamGroups(batchGroups, modelFindings, {
-      code,
-      language: "mixed",
-      format: "diff",
-    });
+    //
+    // The cap is a budget shared across batches, not a per-batch allowance.
+    // Left to reset each iteration it would bill up to `cap x batches` while
+    // the setting says "per submission" — a silent overrun on the one knob
+    // that exists to bound spend. Selection is deterministic, so asking for
+    // the selection here yields exactly what redTeamGroups will attempt.
+    const attempting = selectForRedTeam(batchGroups, redTeamBudget).length;
+    const verdicts = await redTeamGroups(
+      batchGroups,
+      modelFindings,
+      { code, language: "mixed", format: "diff" },
+      redTeamBudget
+    );
+    redTeamBudget -= attempting;
 
     const keyOf = keyMapFor(modelFindings);
     allGroups.push(...batchGroups);

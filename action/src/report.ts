@@ -64,6 +64,24 @@ export function evaluateGate(
   };
 }
 
+/**
+ * Wraps model-authored text in a fence long enough to survive its own contents.
+ *
+ * A fixed ``` fence breaks on ordinary output, not just hostile output: a model
+ * asked to demonstrate an exploit routinely answers with a fenced code block, and
+ * the inner fence closes the outer one early. Everything after it then renders as
+ * markdown in the job summary — including any links it happens to contain. Both
+ * fields get this: reasoning is model-authored too, and was previously raw.
+ */
+function fence(text: string): string {
+  const longestRun = (text.match(/`+/g) ?? []).reduce(
+    (max, run) => Math.max(max, run.length),
+    0
+  );
+  const ticks = "`".repeat(Math.max(3, longestRun + 1));
+  return `${ticks}\n${text}\n${ticks}`;
+}
+
 function findingLocation(finding: ModelFinding): string {
   if (finding.file && finding.line != null) return `${finding.file} · line ${finding.line}`;
   if (finding.file) return finding.file;
@@ -136,14 +154,10 @@ export function renderSummary(
         }</summary>`
       );
       lines.push("");
-      lines.push(verdict.reasoning);
-      // Fenced: exploit text is often a payload, and a fence keeps it from being
-      // rendered as markdown in the job summary.
+      lines.push(fence(verdict.reasoning));
       if (verdict.exploit) {
         lines.push("");
-        lines.push("```");
-        lines.push(verdict.exploit);
-        lines.push("```");
+        lines.push(fence(verdict.exploit));
       }
       lines.push("");
       lines.push("</details>");

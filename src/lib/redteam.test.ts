@@ -151,6 +151,33 @@ describe("selectForRedTeam", () => {
   });
 });
 
+describe("selectForRedTeam budget", () => {
+  // The Action reviews a large diff batch by batch, calling the pass once per
+  // batch. If the cap reset each time, a 5-batch PR would bill 5x what the
+  // setting says — a silent overrun on the one knob that bounds spend.
+  // High severity so isFocused keeps them: the budget is what's under test,
+  // not the focused-view gate that runs before it.
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      group({ severity: "high", title: `Finding ${i}`, models: ["a"] })
+    );
+
+  it("honours a caller-supplied remainder instead of the configured cap", () => {
+    expect(selectForRedTeam(many(6), 2)).toHaveLength(2);
+  });
+
+  it("selects nothing once the shared budget is spent", () => {
+    expect(selectForRedTeam(many(6), 0)).toHaveLength(0);
+    expect(selectForRedTeam(many(6), -1)).toHaveLength(0);
+  });
+
+  it("still applies the configured cap when no remainder is given", () => {
+    process.env.REDTEAM_MAX_FINDINGS = "3";
+    expect(selectForRedTeam(many(6))).toHaveLength(3);
+    delete process.env.REDTEAM_MAX_FINDINGS;
+  });
+});
+
 describe("groupKey", () => {
   it("is stable when the underlying findings arrive in a different order", () => {
     const a = finding("claude", "Division by zero not handled");

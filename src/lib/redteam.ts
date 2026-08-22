@@ -155,11 +155,21 @@ export function keyMapFor(
  * submissions — a clean snippet costs nothing extra. Groups arrive sorted by
  * severity then agreement, so the cap keeps the most serious ones.
  */
-export function selectForRedTeam(groups: FindingGroup[]): FindingGroup[] {
+export function selectForRedTeam(
+  groups: FindingGroup[],
+  /**
+   * Overrides the configured ceiling. Callers that red-team in more than one
+   * pass (the Action reviews a large diff batch by batch) pass what is left of
+   * a shared budget, so the cap stays per submission rather than resetting on
+   * every call and billing `limit x batches`.
+   */
+  limit = redTeamMaxFindings()
+): FindingGroup[] {
+  if (limit <= 0) return [];
   const categories = redTeamCategories();
   return groups
     .filter((group) => isFocused(group) && categories.has(group.category))
-    .slice(0, redTeamMaxFindings());
+    .slice(0, limit);
 }
 
 const TOOL_NAME = "submit_exploit";
@@ -339,13 +349,15 @@ async function redTeamOne(
 export async function redTeamGroups(
   groups: FindingGroup[],
   allFindings: ModelFinding[],
-  input: { code: string; language: string; format?: "code" | "diff" }
+  input: { code: string; language: string; format?: "code" | "diff" },
+  /** Remaining share of a budget spanning several calls. See selectForRedTeam. */
+  limit?: number
 ): Promise<RedTeamAssignment | null> {
   const model = redTeamModel();
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!model || !apiKey) return null;
 
-  const selected = selectForRedTeam(groups);
+  const selected = selectForRedTeam(groups, limit);
   if (selected.length === 0) return null;
 
   try {

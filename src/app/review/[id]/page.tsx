@@ -25,11 +25,13 @@ export const dynamic = "force-dynamic";
  * parseFindings + groupFindings pipeline the submission route used, so the two
  * sides of a re-review diff are comparable.
  *
- * Both come back from one call deliberately. `parseFindings` spreads each
- * finding into a fresh object, so calling it twice yields equal-looking but
- * distinct instances — and `keyMapFor` keys on object identity. Rebuilding the
- * findings separately from the groups silently breaks every red-team lookup,
- * with no error and no missing data, just verdicts that never appear.
+ * Both come back from one call deliberately. The `.map` below spreads each
+ * finding into a fresh object to attach `model`, so running this pipeline twice
+ * yields equal-looking but distinct instances — and `keyMapFor` keys on object
+ * identity. Rebuilding the findings separately from the groups silently breaks
+ * every red-team lookup, with no error and no missing data, just verdicts that
+ * never appear. Anything that moves or duplicates that spread has to keep the
+ * findings handed to `groupFindings` the same objects returned here.
  */
 function reviewOf(submission: {
   reviews: { status: string; model: string; findings: unknown }[];
