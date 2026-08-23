@@ -1,10 +1,9 @@
 {
-  "name": "code-review-consensus-mcp",
-  "version": "0.1.0",
-  "private": true,
-  "description": "BYOK MCP server exposing multi-model code review consensus over OpenRouter.",
+  "name": "more-eyes-mcp",
+  "version": "1.0.0",
+  "description": "BYOK MCP server exposing More Eyes' multi-model code review consensus over OpenRouter.",
   "bin": {
-    "code-review-consensus-mcp": "dist/mcp-server/src/index.js"
+    "more-eyes-mcp": "dist/mcp-server/src/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

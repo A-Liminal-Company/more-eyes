@@ -278,6 +278,26 @@ export function outlierSignal(group: FindingGroup): string | null {
 }
 
 /**
+ * Whether a group survives the focused view: corroborated, or a single-model
+ * finding the research says is worth surfacing anyway (security, high severity).
+ * What it excludes is the long tail of uncorroborated medium/low nitpicks — the
+ * noise that trains people to ignore review tools.
+ *
+ * Shared rather than local to the review page because the red-team pass
+ * (`src/lib/redteam.ts`) gates on exactly this predicate server-side. Two copies
+ * would let the set of findings shown by default drift from the set that got an
+ * exploit attempt, so a finding could carry a demonstrability verdict the user
+ * never sees, or be shown without one it should have had.
+ */
+export function isFocused(group: FindingGroup): boolean {
+  return (
+    group.models.length > 1 ||
+    group.severity === "high" ||
+    group.category === "security"
+  );
+}
+
+/**
  * Compares a resubmission's findings against the submission it re-reviews.
  *
  * `status` is index-aligned with `current`: `status[i]` describes `current[i]`.

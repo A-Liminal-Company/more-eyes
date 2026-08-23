@@ -4,6 +4,12 @@ import { groupFindings, type ModelFinding } from "@/lib/consensus";
 import { proposeMerges } from "@/lib/consensus-llm";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/rate-limit";
+import {
+  redTeamGroups,
+  redTeamModel,
+  selectForRedTeam,
+  type RedTeamAssignment,
+} from "@/lib/redteam";
 import { reviewWithModels } from "@/lib/review";
 import { MAX_CODE_LENGTH, submissionInputSchema } from "@/lib/validation";
 
@@ -52,10 +58,12 @@ export async function POST(request: NextRequest) {
 
   const { models, previousSubmissionId, ...input } = parsed.data;
 
+  const clientKey = clientKeyFor(request);
+
   // Charged after validation so the cost reflects the real number of billed
   // model calls rather than treating every submission as equally expensive.
   const { allowed, retryAfterSeconds } = checkRateLimit(
-    clientKeyFor(request),
+    clientKey,
     models.length
   );
 
@@ -97,6 +105,33 @@ export async function POST(request: NextRequest) {
     allFindings
   );
 
+  // Regrouped with the assignment applied, because merging changes which groups
+  // qualify for a red-team attempt: two single-model groups becoming one
+  // corroborated group flips it into the focused view. Gating on the pre-merge
+  // lexical groups would pick the wrong set. This is also exactly what the
+  // review page recomputes at render time, so the keys line up.
+  const finalGroups = groupFindings(allFindings, consensus);
+
+  // Red-team calls are chosen server-side from the findings, so the charge above
+  // — which counts the models the client asked for — cannot see them. Charge
+  // them separately, and when the budget is gone skip the pass rather than
+  // rejecting: the review itself already succeeded, and this is an enhancement
+  // on top of it.
+  let redTeam: RedTeamAssignment | null = null;
+  const redTeamCount = redTeamModel()
+    ? selectForRedTeam(finalGroups).length
+    : 0;
+
+  if (redTeamCount > 0) {
+    if (checkRateLimit(clientKey, redTeamCount).allowed) {
+      redTeam = await redTeamGroups(finalGroups, allFindings, input);
+    } else {
+      console.warn(
+        `[redteam] skipped: ${redTeamCount} exploit attempts exceed the remaining rate-limit budget.`
+      );
+    }
+  }
+
   // A predecessor that no longer exists (deleted, or just a bad id) shouldn't
   // block this review — it just isn't linked. The route persists null rather
   // than 400ing.
@@ -114,6 +149,7 @@ export async function POST(request: NextRequest) {
       ...input,
       previousSubmissionId: verifiedPreviousSubmissionId,
       consensus: consensus ?? undefined,
+      redTeam: redTeam ?? undefined,
       reviews: {
         create: results.map((r) =>
           r.status === "ok"

@@ -1,4 +1,4 @@
-# code-review-app
+# More Eyes
 
 Paste code, get it reviewed by several AI models at once, and see where they
 agree. Built for catching bugs before they ship when you're moving fast.
@@ -40,6 +40,9 @@ Then fill in `.env`:
 | `TRUSTED_PROXY_HOPS` | No | How many proxies sit in front of the app. Default 1, which is right behind Railway. Only raise it if you add another proxy — see the rate-limiting note below. |
 | `RATE_LIMIT_GLOBAL_MAX` | No | Model calls per minute across all clients combined. Default 120. |
 | `CONSENSUS_MERGE_MODEL` | No | Enables the model-assisted consensus pass. Unset by default; see [Deterministic consensus](#how-it-works). |
+| `REDTEAM_MODEL` | No | Enables the red-team pass. Unset by default; see [Demonstrability](#demonstrability). Costs one call per reported finding. |
+| `REDTEAM_CATEGORIES` | No | Categories worth an exploit attempt. Default `security,bug,reliability`. |
+| `REDTEAM_MAX_FINDINGS` | No | Ceiling on exploit attempts per submission. Default 10, most severe first. |
 
 Create the database, then start it:
 
@@ -116,6 +119,7 @@ src/
     model-stats.ts           per-model corroboration rate for the models page
     validation.ts            zod schemas for input and model output
     consensus-llm.ts         optional model-assisted merge pass, off by default
+    redteam.ts               optional exploit-construction pass, off by default
     access-token.ts          issues and verifies the signed access cookie
     client-key.ts            derives the rate-limit key from trusted proxy headers
     rate-limit.ts            budget of 30 model calls per minute per client
@@ -187,6 +191,44 @@ model sends something unusable (see the lenient parsing note above):
   shown behind a collapsed "Why flag this" disclosure under each finding. Meant
   to separate "I saw X on line N" from a title that just restates itself.
 
+## Demonstrability
+
+Agreement answers "did other models say this too", which is a weak signal when
+models share training biases and converge on the same wrong answer. Setting
+`REDTEAM_MODEL` to a model slug adds an opt-in pass that answers something
+agreement cannot: **can the issue actually be shown?**
+
+For each finding the focused view keeps, that model is asked to construct the
+concrete exploit — the input, the call, the conditions, and what goes wrong.
+Findings come back labeled **exploit demonstrated** or **not demonstrated**,
+with the reasoning and any exploit behind a collapsed disclosure.
+
+The pass is **static only**. The model is given no execution tool and is told it
+cannot run anything, because a pasted snippet doesn't run standalone anyway.
+It's also told that failing to construct an exploit is a valuable answer rather
+than a failure — a finding nobody can demonstrate is worth knowing about. A
+`demonstrated: true` that arrives with no actual exploit text is downgraded to
+false: an unsubstantiated yes is precisely the confident-wrong answer this is
+meant to catch.
+
+**It annotates, never decides.** An undemonstrated finding keeps its place in
+the list and, in the Action, cannot fail a build. Some real issues simply aren't
+demonstrable from a snippet — treat it as a hint, not a verdict.
+
+Cost scales with issues rather than submissions: only findings that already
+survived the noise gate get a call, capped by `REDTEAM_MAX_FINDINGS` (10) and
+limited to `REDTEAM_CATEGORIES` (`security,bug,reliability` — asking for an
+exploit of a style nit bills real money for nonsense). A clean submission costs
+nothing extra. Red-team calls are charged against the same rate-limit budget as
+the reviewers; if the budget won't cover them the pass is skipped rather than
+failing the submission. Like the consensus merge pass, it runs **once, at
+submission**, and stores its verdicts on the row.
+
+Verdicts are stored keyed by finding identity rather than by position, because
+group order isn't guaranteed identical between the write and a later read.
+Attaching an exploit to the wrong finding would discredit the whole signal, so a
+key that no longer matches shows nothing at all — see `src/lib/redteam.ts`.
+
 ## Model quality
 
 `/models` aggregates corroboration rate per model across recent submissions —
@@ -250,7 +292,7 @@ comments). This repo dogfoods it on its own PRs via
 [`CODE_REVIEW.md`](CODE_REVIEW.md) tracks every known issue with its current
 status, what was done, and what remains.
 
-To re-audit, invoke the `code-review-app-review` skill in Claude Code. It
+To re-audit, invoke the `more-eyes-review` skill in Claude Code. It
 re-verifies each finding against the actual code rather than trusting the
 document, sweeps for new issues, runs the suite and build for ground truth, and
 updates the changelog. Report-only unless you ask it to fix things.

@@ -1,8 +1,8 @@
-# Code Review Consensus Action
+# More Eyes Action
 
 A GitHub Action that reviews a pull request's diff with multiple LLMs via
 [OpenRouter](https://openrouter.ai) and reports grouped findings with
-agreement counts — the same consensus engine the code-review-app web UI and
+agreement counts — the same consensus engine the More Eyes web UI and
 `mcp-server` use, in CI.
 
 **Bring-your-own-key (BYOK):** the consuming repo sets `OPENROUTER_API_KEY`
@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: code-review-app/action@v1
+      - uses: A-Liminal-Company/more-eyes/action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -57,6 +57,22 @@ through `env:` as shown above.
 | `comment_mode` | `both` | `summary` \| `inline` \| `both`. Reserved for M3 — no effect yet. |
 | `fail_on_severity` | `none` | `none` \| `high` \| `medium`. The run is advisory (never fails) by default. |
 | `min_agreement` | `2` | How many models must independently agree before a finding can fail the run. A single-model finding never breaks the build, however severe — it's surfaced and labeled instead. |
+| `redteam_model` | *(empty = off)* | Model id that attempts a concrete exploit per reported finding, labeling it demonstrated or not. Costs one extra call per reported finding. Never fails the run — see below. |
+| `redteam_categories` | `security,bug,reliability` | Which categories are worth an exploit attempt. Widening to `performance,style` mostly buys calls with no exploit to find. |
+| `redteam_max_findings` | `10` | Ceiling on exploit attempts for the whole run. A large diff is reviewed in batches; this budget is shared across them, so it bounds the run's cost regardless of how many batches the diff splits into. |
+
+### Demonstrability
+
+With `redteam_model` set, each reported finding gets one adversarial follow-up
+call asking for the concrete exploit — the input, the call, what goes wrong. The
+job summary then labels findings **exploit demonstrated** or **not
+demonstrated**, with the reasoning in a collapsed block.
+
+It is **static analysis only**: the model gets no execution tool and nothing is
+ever run in your runner. And it is **advisory** — `evaluateGate` ignores
+demonstrability entirely, so an undemonstrated finding can't fail a build and a
+demonstrated one can't newly break it. A model failing to write an exploit is a
+hint the finding may be a false positive, not proof of one.
 
 ## Outputs
 

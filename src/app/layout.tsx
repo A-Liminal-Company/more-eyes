@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Code Review",
+  title: "More Eyes",
   description: "Submit code, get an automated review before it ships.",
 };
 

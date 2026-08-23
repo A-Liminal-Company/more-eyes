@@ -1,9 +1,9 @@
-# Code Review — code-review-app
+# Code Review — More Eyes
 
 Last updated: 2026-07-30 · Self-review findings closed — all findings resolved
 
 Tracked findings across security, reliability, accessibility, test coverage, and
-code quality. Kept current by the `code-review-app-review` skill — run it to
+code quality. Kept current by the `more-eyes-review` skill — run it to
 re-verify every item below against the actual code and sweep for new issues.
 
 **ID prefixes:** `S` security · `R` reliability · `A11Y` accessibility ·

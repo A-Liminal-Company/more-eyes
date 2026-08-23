@@ -11,7 +11,7 @@ const DEFAULT_MODEL_IDS = ["claude-sonnet-5", "gpt-5.5", "gemini-3.5-flash"];
 const VALID_MODEL_IDS = new Set(MODELS.map((m) => m.id));
 
 const server = new McpServer({
-  name: "code-review-consensus-mcp",
+  name: "more-eyes-mcp",
   version: "0.1.0",
 });
 
@@ -166,6 +166,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("[code-review-consensus-mcp] fatal error:", err);
+  console.error("[more-eyes-mcp] fatal error:", err);
   process.exit(1);
 });

@@ -7,7 +7,7 @@ repo-awareness" at the end for how it layers on later.
 
 ## What it is
 
-A GitHub Action, `code-review-app/action`, that reviews a pull request's diff
+A GitHub Action, `more-eyes/action`, that reviews a pull request's diff
 with multiple models via OpenRouter and reports grouped findings with
 agreement counts — the same consensus engine the web app and MCP server use,
 in CI.
@@ -19,7 +19,7 @@ hosted component at all — the Action runs entirely in the consumer's runner.
 ## Why an Action and not a webhook bot
 
 - No hosting, no GitHub App registration, no key custody — the whole thing is
-  a directory in this repo, referenced as `uses: <owner>/code-review-app/action@v1`.
+  a directory in this repo, referenced as `uses: <owner>/more-eyes/action@v1`.
 - Fits BYOK: repo secrets are the natural home for the consumer's key.
 - The runner already has a checkout, which is exactly the seam repo-aware
   context needs later.
