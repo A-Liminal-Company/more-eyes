@@ -22,3 +22,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          # Dogfoods the red-team pass, which otherwise only ever runs in the
+          # web app. Costs one call per finding that survives the focused
+          # view, bounded by redteam_max_findings (default 10), so a PR that
+          # turns up nothing worth exploiting costs nothing extra.
+          redteam_model: anthropic/claude-sonnet-5
