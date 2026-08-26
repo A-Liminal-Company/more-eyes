@@ -38,6 +38,18 @@ is either useful or funny depending on the day.
 forwarded to fork PRs, so the Action detects the missing key and exits successfully
 rather than failing your build. That is deliberate, not a bug you need to fix.
 
+**If you touched anything under `action/src` or `src/lib`, rebuild the Action bundle:**
+
+```bash
+npm run build --prefix action && git add action/dist
+```
+
+`uses: <repo>@v1` executes `action/dist/index.js`, never `action/src`. A source change
+that is not rebuilt simply does not reach anyone using the Action. This is not
+theoretical: the jurisdiction pin in `src/lib/provider-policy.ts` landed in source while
+the committed bundle still routed PR diffs through unrestricted providers. CI now fails
+when `dist` does not match `src`.
+
 ## Invariants worth knowing before you change things
 
 These are the load-bearing decisions. Breaking one is fine if you have a reason, but say
@@ -89,11 +101,15 @@ change spans storage and rendering, load the page.
 Edit `src/lib/models.ts`, then:
 
 1. **Confirm it supports tool calling** at `https://openrouter.ai/api/v1/models`. Structured output depends on it.
-2. **Prefer a multi-provider slug.** A model served by a single provider returns a hard 404 if your account's data policy excludes that provider, with no fallback. This is why the list uses `qwen/qwen3-coder` rather than `qwen/qwen3-coder-plus`. Check with `https://openrouter.ai/api/v1/models/<slug>/endpoints`.
-3. Run `npm run check:models` to verify the registry against the live catalogue.
+2. **Check the jurisdiction.** Submitted code is unreleased work, and a review ships it verbatim to whichever provider serves the model. The roster excludes Chinese-lab models and every request pins `provider.only` to the allowlist in `src/lib/provider-policy.ts`. `npm run check:models` fails if your model is served by a provider outside it.
+3. **Prefer a multi-provider slug.** A model served by a single allowlisted provider has no fallback when that provider is degraded. Grok 4.5 is the current example, and `check:models` warns rather than fails on it. Check with `https://openrouter.ai/api/v1/models/<slug>/endpoints`.
+4. Run `npm run check:models` to verify the registry against the live catalogue.
 
 Diversity across labs is the point — models share blind spots with their own family, so a
-second opinion from the same lab is worth less than it looks.
+second opinion from the same lab is worth less than it looks. The jurisdiction filter cuts
+against that directly: it cost two labs. If you find yourself widening `ALLOWED_PROVIDERS`
+to make a red build go green, that is the wrong direction — drop the model instead, or
+change the policy deliberately and say so in the PR.
 
 ## Security
 
