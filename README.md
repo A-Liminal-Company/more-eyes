@@ -66,7 +66,7 @@ itself, so a captured cookie is not a captured master credential. Rotating
 
 ## Reviewers
 
-Six models across six labs, all verified to support tool calling:
+Four models across four labs, all verified to support tool calling:
 
 | Model | Lab |
 |---|---|
@@ -74,18 +74,41 @@ Six models across six labs, all verified to support tool calling:
 | GPT-5.5 | OpenAI |
 | Gemini 3.5 Flash | Google |
 | Grok 4.5 | xAI |
-| DeepSeek V3.1 | DeepSeek |
-| Qwen3 Coder | Qwen |
 
-Edit the list in `src/lib/models.ts`. Two things to know before adding one:
+### Where your code is allowed to go
+
+A review sends submitted code verbatim to whoever serves the model, and
+submitted code is by definition unreleased work. So the roster is constrained by
+jurisdiction as well as by capability: **no Chinese-lab models, and every
+request pins `provider.only` to an allowlist of US-headquartered providers with
+no CN/HK datacenters** (`src/lib/provider-policy.ts`).
+
+Both halves are needed. Picking a model is not the same decision as picking a
+jurisdiction — OpenRouter maps one slug to a shifting set of providers, so a
+roster that was clean when written can start routing elsewhere without a line
+changing here. DeepSeek V3.1 and Qwen3 Coder were removed for this reason;
+`qwen/qwen3-coder` was in fact being served by `alibaba`, whose published
+datacenter list includes `CN`.
+
+This costs real coverage — two labs' worth of independent opinions — and that
+trade is deliberate rather than incidental.
+
+`npm run check:models` enforces it against OpenRouter's live catalogue and fails
+if any rostered model has picked up a provider outside the allowlist. CI runs it
+on every PR and again weekly, since the catalogue changes on its own schedule.
+
+Edit the list in `src/lib/models.ts`. Three things to know before adding one:
 
 - **Confirm it reports `tools` support** at `https://openrouter.ai/api/v1/models`.
   Structured output depends on it.
-- **Prefer multi-provider slugs.** A model served by a single provider returns a
-  hard 404 if your account's data policy excludes that provider, with no
-  fallback. This is exactly why the list uses `qwen/qwen3-coder` rather than
-  `qwen/qwen3-coder-plus`, which only Alibaba serves. Check with
-  `https://openrouter.ai/api/v1/models/<slug>/endpoints`.
+- **Check the jurisdiction.** Run `npm run check:models` after adding it. If the
+  model is served by a provider outside the allowlist, decide deliberately
+  whether to drop the model or widen `ALLOWED_PROVIDERS` — do not do the latter
+  to make a red build go green.
+- **Prefer multi-provider slugs.** A model served by a single allowlisted
+  provider has no fallback when that provider is degraded. Grok 4.5 is the
+  current example — `check:models` warns about it rather than failing. Check
+  with `https://openrouter.ai/api/v1/models/<slug>/endpoints`.
 
 ## Commands
 
@@ -97,7 +120,10 @@ npm run build          # production build
 npm run check:models   # verify the registry against OpenRouter's catalogue
 ```
 
-CI runs typecheck, lint, tests, and build on every push and PR.
+CI runs typecheck, lint, tests, the jurisdiction check, and build on every push
+and PR, plus a weekly scheduled run. CodeQL (`security-extended`) analyses the
+same code on push, PR, and weekly; Dependabot covers all three package
+manifests.
 
 ## How it works
 

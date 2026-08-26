@@ -16,8 +16,17 @@ export type ModelOption = {
  * Deliberately spans different labs — models share blind spots with their own
  * family, so diversity is what makes a second opinion worth paying for.
  *
+ * Diversity stops at the jurisdiction line. Submitted code is unreleased work
+ * and a review ships it verbatim to whoever serves the model, so the roster
+ * excludes Chinese-lab models and every request pins routing to the allowlist
+ * in `provider-policy.ts`. DeepSeek V3.1 and Qwen3 Coder were removed for this
+ * reason — `qwen/qwen3-coder` was in fact served by `alibaba`, whose published
+ * datacenter list includes CN. Losing two labs costs real coverage; that is the
+ * trade being made knowingly, not an oversight.
+ *
  * To add one: confirm it reports `tools` support at
- * https://openrouter.ai/api/v1/models before adding it here.
+ * https://openrouter.ai/api/v1/models, then run `npm run check:models`, which
+ * fails if any provider serving the slug falls outside the allowlist.
  */
 export const MODELS: ModelOption[] = [
   {
@@ -52,28 +61,12 @@ export const MODELS: ModelOption[] = [
     provider: "openrouter",
     providerModel: "x-ai/grok-4.5",
   },
-  {
-    id: "deepseek-v3.1",
-    label: "DeepSeek V3.1",
-    lab: "DeepSeek",
-    provider: "openrouter",
-    providerModel: "deepseek/deepseek-chat-v3.1",
-  },
-  {
-    id: "qwen3-coder",
-    label: "Qwen3 Coder",
-    lab: "Qwen",
-    provider: "openrouter",
-    // Not the "-plus" variant: that one is served by Alibaba alone, so any
-    // account data policy excluding Alibaba leaves no endpoint and OpenRouter
-    // returns a hard 404. This slug has six providers to fall back through.
-    providerModel: "qwen/qwen3-coder",
-  },
 ];
 
 export const DEFAULT_MODEL_IDS = ["claude-sonnet-5"];
 
-export const MAX_MODELS_PER_SUBMISSION = 6;
+/** Every rostered model. Derived so trimming the roster cannot leave it stale. */
+export const MAX_MODELS_PER_SUBMISSION = MODELS.length;
 
 const BY_ID = new Map(MODELS.map((m) => [m.id, m]));
 

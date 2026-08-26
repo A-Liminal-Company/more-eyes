@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The jurisdiction check reads OpenRouter's live provider directory, which
+  # changes without anything in this repo changing. A weekly run catches a
+  # model that has picked up an out-of-policy provider on a quiet week.
+  schedule:
+    - cron: "17 5 * * 1"
 
 jobs:
   check:
@@ -48,6 +53,11 @@ jobs:
       - run: npx tsc --noEmit
       - run: npx eslint .
       - run: npm test
+      # Jurisdiction policy: fails if a rostered model is served by a provider
+      # outside the allowlist in src/lib/provider-policy.ts. Hits OpenRouter's
+      # public catalogue, so it needs no key — but it does need the network,
+      # and a failure here is a policy question, not a flaky test.
+      - run: npm run check:models
       - run: npm run build
       - run: npm run build --prefix mcp-server
       # Confirms the committed ncc bundle can be rebuilt; drift between

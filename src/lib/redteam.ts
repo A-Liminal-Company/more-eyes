@@ -11,6 +11,7 @@ import {
   escapeForPrompt,
   withDeadline,
 } from "./providers/shared";
+import { withProviderRouting } from "./provider-policy";
 import type { Finding } from "./validation";
 
 /**
@@ -309,7 +310,8 @@ async function redTeamOne(
   input: { code: string; language: string; format?: "code" | "diff" }
 ): Promise<RedTeamResult | null> {
   const completion = await withDeadline(
-    client.chat.completions.create({
+    client.chat.completions.create(
+      withProviderRouting({
       model,
       max_tokens: 2048,
       tools: [
@@ -327,7 +329,8 @@ async function redTeamOne(
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: buildPrompt(group, input) },
       ],
-    }),
+      })
+    ),
     `red team (${model})`
   );
 

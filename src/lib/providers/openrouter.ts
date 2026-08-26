@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { ReviewError } from "../errors";
+import { withProviderRouting } from "../provider-policy";
 import {
   isUsableReview,
   reviewResultSchema,
@@ -35,7 +36,8 @@ export async function reviewWithOpenRouter(
   let completion;
   try {
     completion = await withDeadline(
-      client.chat.completions.create({
+      client.chat.completions.create(
+        withProviderRouting({
         model: providerModel,
         max_tokens: 4096,
         tools: [
@@ -56,7 +58,8 @@ export async function reviewWithOpenRouter(
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: buildUserPrompt(input) },
         ],
-      }),
+        })
+      ),
       providerModel
     );
   } catch (err) {
