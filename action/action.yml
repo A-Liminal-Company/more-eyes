@@ -29,9 +29,12 @@ inputs:
     required: false
     default: ""
   exclude:
-    description: "Comma-separated glob(s) of files to skip."
+    description: >-
+      Comma-separated glob(s) of files to skip. A pattern containing a slash is
+      anchored to the repo root, so nested build output needs its own `**/`
+      form — `dist/**` alone does not match `action/dist/index.js`.
     required: false
-    default: "package-lock.json,*.lock,dist/**,*.min.*,vendor/**,vendored/**,node_modules/**"
+    default: "package-lock.json,*.lock,dist/**,**/dist/**,*.min.*,vendor/**,**/vendor/**,vendored/**,**/vendored/**,node_modules/**,**/node_modules/**"
   comment_mode:
     description: "summary | inline | both. Inline/both land in M3; M2 only writes the job summary."
     required: false

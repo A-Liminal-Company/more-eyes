@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_EXCLUDE_GLOBS, chunkFiles, filterFiles, parseDiffFiles } from "./diff";
 
@@ -194,5 +196,65 @@ describe("chunkFiles", () => {
 
   it("returns no batches for an empty file list", () => {
     expect(chunkFiles([], 1000)).toEqual([]);
+  });
+});
+
+describe("filterFiles — nested build output", () => {
+  const filter = (paths: string[]) =>
+    filterFiles(
+      paths.map((path) => ({ path, hunkText: "@@ -1 +1 @@\n+x" })),
+      [],
+      DEFAULT_EXCLUDE_GLOBS
+    ).map((f) => f.path);
+
+  it("excludes build output at the repo root and at any depth", () => {
+    // `dist/**` is anchored to the root and does not match action/dist. This
+    // repo commits a 3MB bundle there, so the anchored form alone sent it to
+    // every model on every PR that touched it.
+    expect(
+      filter([
+        "dist/a.js",
+        "action/dist/index.js",
+        "mcp-server/dist/src/lib/review.js",
+        "node_modules/x/index.js",
+        "action/node_modules/y/index.js",
+      ])
+    ).toEqual([]);
+  });
+
+  it("still reviews source under a directory that also holds build output", () => {
+    expect(
+      filter([
+        "src/lib/provider-policy.ts",
+        "action/src/diff.ts",
+        "mcp-server/src/index.ts",
+      ])
+    ).toEqual([
+      "src/lib/provider-policy.ts",
+      "action/src/diff.ts",
+      "mcp-server/src/index.ts",
+    ]);
+  });
+
+  it("excludes lockfiles wherever they live, via the basename rule", () => {
+    expect(filter(["package-lock.json", "action/package-lock.json"])).toEqual(
+      []
+    );
+  });
+
+  it("keeps action.yml's exclude default identical to DEFAULT_EXCLUDE_GLOBS", () => {
+    // main.ts reads the Action input, so action.yml is what takes effect;
+    // DEFAULT_EXCLUDE_GLOBS is only ever exercised by tests. Two copies of one
+    // list, and the tested copy is not the live one — they had already drifted
+    // in intent before this test existed.
+    // Resolved from cwd rather than import.meta.url: vitest's transform does
+    // not give this module a file: URL.
+    const actionYml = readFileSync(
+      resolve(process.cwd(), "action/action.yml"),
+      "utf8"
+    );
+    const match = actionYml.match(/default:\s*"([^"]*dist[^"]*)"/);
+    expect(match, "exclude default not found in action.yml").toBeTruthy();
+    expect(match![1].split(",")).toEqual(DEFAULT_EXCLUDE_GLOBS);
   });
 });
