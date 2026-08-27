@@ -47,6 +47,8 @@ or reused, even once resolved, so changelog entries stay meaningful.
 | S-13 | Security | High | Submitted code routed to a Chinese-controlled provider | ✅ Fixed | `src/lib/provider-policy.ts`, `src/lib/models.ts`, `scripts/check-models.ts` |
 | S-14 | Security | Medium | Providers permitted to store and train on submissions | 🟡 Partial | `src/lib/provider-policy.ts` |
 | R-8 | Reliability | Medium | Nested build output not excluded from Action reviews | ✅ Fixed | `action/src/diff.ts`, `action/action.yml` |
+| R-9 | Reliability | High | Fixed `max_tokens` starves reasoning models before the tool call | 🔴 Open | `src/lib/providers/openrouter.ts`, `src/lib/models.ts` |
+| R-10 | Reliability | Medium | Gemini 3.5 Flash returns no structured review | 🔴 Open | `src/lib/models.ts`, `scripts/check-models.ts` |
 | C-8 | Code quality | High | `action/dist` not reproducible from `action/src` | ✅ Fixed | `action/dist/index.js`, `.github/workflows/ci.yml` |
 | S-11 | Security | Medium | Model-authored text fenced in one place, raw in another | 🔴 Open | `action/src/report.ts` |
 | A11Y-5 | Accessibility | Medium | `opacity-70` text fails WCAG AA on high/medium cards | 🔴 Open | `src/app/review/[id]/findings-list.tsx` |
@@ -57,7 +59,7 @@ or reused, even once resolved, so changelog entries stay meaningful.
 | C-10 | Code quality | Low | `comment_mode` defaults to `both` but does nothing | 🔴 Open | `action/action.yml` |
 | C-11 | Code quality | Low | `.env.example` misrepresents `ANTHROPIC_API_KEY` | 🔴 Open | `.env.example` |
 
-**30 fixed · 2 partial · 7 open** — the 25 findings from passes 1–2 all still
+**30 fixed · 2 partial · 9 open** — the 25 findings from passes 1–2 all still
 hold (re-verified against the code, not the doc). Pass 3 added 12: the four
 High ones are fixed, the rest are open by choice pending a go-ahead on Medium
 priority. See the note on what "0 open" did and did not mean at the end of the
@@ -1232,3 +1234,92 @@ Qwen3 Coder: exits 1 with `alibaba (hq=SG, dc=SG/CN)`.
 - **Not verified:** Inkling has served no live review. It is also the second
   model whose only allowlisted provider is a single endpoint, so a DeepInfra
   outage removes it entirely.
+
+### R-9 — Fixed `max_tokens` starves reasoning models before the tool call
+- **Priority:** High · **Status:** 🔴 Open
+- **Files:** `src/lib/providers/openrouter.ts` (`max_tokens: 4096`), `src/lib/models.ts`
+- **Found:** Inkling failed on all three batches of the first live run with
+  "did not return a structured review". Reproduced against the real diff: at
+  the shipped `max_tokens: 4096` it spends **4,258 reasoning tokens**, hits
+  `finish_reason: "length"`, and returns zero content and no tool call. The same
+  call with `reasoning: {effort: "low"}` returns a tool call in 237 completion
+  tokens; with `max_tokens: 16000` it returns one after 6,442 reasoning tokens.
+- **Why it matters:** The budget is a single constant shared by every model, and
+  it silently does not account for reasoning tokens. This is not an Inkling
+  quirk — it is a design assumption that stops holding for any reasoning model,
+  and reasoning models are what the frontier is made of now. Grok 4.5 also timed
+  out at 90s on one batch, which is plausibly the same cause wearing a different
+  error message. The failure is total and silent: the model is billed, produces
+  nothing usable, and the review reports success one voice short.
+- **Done:** Nothing yet — reported, per the standing instruction to report
+  rather than fix.
+- **Remains:** All of it. Three candidate directions, in ascending order of
+  work: set `reasoning: {effort: "low"}` for reasoning models, which is also
+  **5.7× cheaper** here ($0.0047 vs $0.027 per call) and reads as the right
+  default for a structured-extraction task; raise `max_tokens` per model rather
+  than globally; or make `ModelOption` carry its own token budget so the
+  constant stops being one-size-fits-all. Whichever is chosen, `finish_reason:
+  "length"` deserves a distinct error message — "did not return a structured
+  review" sent the first investigation toward the tool schema rather than the
+  budget.
+
+### R-10 — Gemini 3.5 Flash returns no structured review
+- **Priority:** Medium · **Status:** 🔴 Open
+- **Files:** `src/lib/models.ts`, `scripts/check-models.ts`
+- **Found:** Failed all three batches of the first live run. Probed directly
+  with no provider constraints, with `provider.only`, and with
+  `data_collection: "deny"`: identical in all three — routes to Google, returns
+  empty content and no tool call.
+- **Why it matters:** A rostered model has been contributing nothing. Worse, it
+  fails *quietly* — the review page shows "N of M models responded", so the
+  consensus silently rests on fewer voices than the roster implies, and every
+  agreement count is measured against a denominator that includes a model that
+  never answers.
+- **Not caused by this pass.** The identical failure with no provider
+  constraints at all rules out `provider.only` and `data_collection`. It is
+  pre-existing roster rot that the first live multi-model run surfaced.
+- **Done:** Nothing yet — reported.
+- **Remains:** Determine whether the tool schema needs adjusting for Gemini or
+  whether the entry should move to a working slug, then decide. The wider gap is
+  in `check:models`: it verifies a model *advertises* `tools` support in the
+  catalogue and never that it actually honours a forced `tool_choice`. That is
+  exactly the difference between what the catalogue claims and what the model
+  does, which is the same class of gap S-13 turned on. A periodic live smoke
+  call per model — one tiny request, asserting a tool call comes back — would
+  close it for cents.
+
+### First live run — 2026-08-27
+
+The PR opened against `main` is the first time the full roster ran against real
+traffic, and the first exercise of `provider.only` and `data_collection:
+"deny"`. All four checks passed; the interesting results are underneath that.
+
+**What it verified — S-13 and S-14 both close their runtime gaps:**
+
+- The provider pin routes successfully. Claude, GPT-5.5, Grok, Mistral and Nova
+  all returned reviews through it, so `data_collection: "deny"` does not leave
+  the roster unroutable — the failure mode S-14 flagged as unconfirmed.
+- **Mistral Large 3 works** — 8 findings on the first batch.
+- **Nova 2 Lite works** — 4 findings on the first batch.
+- 29 grouped findings across 19 files in 3 batches.
+
+**What it found — two models on the roster do not work:**
+
+- **Inkling: 0 for 3.** Diagnosed to R-9, a fixed `max_tokens` that reasoning
+  models exhaust before emitting the tool call. Added earlier the same day and
+  never exercised, which is exactly what "not verified" meant in that entry.
+- **Gemini 3.5 Flash: 0 for 3.** Diagnosed to R-10 and pre-existing.
+
+Both failures were invisible before this run, and neither is the kind of thing
+the test suite can catch — 248 tests pass with two of seven reviewers dead.
+
+**Dependabot reported 24 vulnerabilities on `main`** the moment the branch was
+pushed (9 high, 12 moderate, 3 low), which is S-10 doing its job before the PR
+even opened.
+
+- **Method note worth keeping:** every finding in this entry came from live
+  execution, and none of them from reading code. The roster looks correct in
+  `models.ts`, `check:models` passes, and the type system is satisfied. Two of
+  seven reviewers still return nothing. Dogfooding is not a nicety here — it is
+  the only instrument that measures the thing the product actually sells.
+- **Cost:** the PR review run plus roughly $0.05 of diagnostic probes.
