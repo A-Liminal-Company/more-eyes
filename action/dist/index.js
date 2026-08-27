@@ -31747,14 +31747,35 @@ exports.EXCLUDED_JURISDICTIONS = exports.SECONDARY_JURISDICTION_SIGNAL;
 /**
  * Routing constraints attached to every OpenRouter chat completion.
  *
+ * `only` answers *who* may receive the code. `data_collection` answers the
+ * separate question of *whether they may keep it* — a provider can be entirely
+ * above suspicion on control and still retain submissions and train on them.
+ * The allowlist alone does not address that, and OpenRouter's default for this
+ * field is `"allow"`, so leaving it unset opts into the permissive behaviour.
+ *
  * `allow_fallbacks` stays true so a request can still move between allowlisted
  * providers when one is degraded — the constraint is *which* providers may
  * serve it, not that a single one must. With `only` set, fallback cannot
  * escape the list.
+ *
+ * **Failure mode worth knowing:** if `deny` leaves a model with no eligible
+ * provider, that model's request fails rather than silently downgrading. That
+ * is the correct direction — no provider willing to commit to not storing the
+ * code means the code should not be sent — and `reviewWithModels` already
+ * degrades a single model failure into a recorded `status: "failed"` shown on
+ * the review page, so a submission still returns whatever else succeeded.
+ *
+ * Not used here: OpenRouter also accepts `zdr: true`, restricting routing to
+ * Zero Data Retention endpoints. It is stricter than this and currently far too
+ * strict to apply globally — of the six rostered models only Grok (`xai/zdr`)
+ * and Mistral Large 3 (`mistral/zdr`) publish ZDR endpoints, so enabling it
+ * would fail the other four outright. Worth revisiting per-model if a
+ * maximum-assurance tier is ever wanted.
  */
 exports.PROVIDER_ROUTING = {
     only: [...exports.ALLOWED_PROVIDERS],
     allow_fallbacks: true,
+    data_collection: "deny",
 };
 /**
  * OpenRouter accepts a top-level `provider` object that the OpenAI SDK's types

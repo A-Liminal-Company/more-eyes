@@ -45,6 +45,7 @@ or reused, even once resolved, so changelog entries stay meaningful.
 | S-9 | Security | High | 9 high-severity CVEs in the dependency tree | ✅ Fixed | `package.json`, `package-lock.json` |
 | S-10 | Security | High | No automated security net on a public repo | ✅ Fixed | `.github/dependabot.yml`, `.github/workflows/codeql.yml` |
 | S-13 | Security | High | Submitted code routed to a Chinese-controlled provider | ✅ Fixed | `src/lib/provider-policy.ts`, `src/lib/models.ts`, `scripts/check-models.ts` |
+| S-14 | Security | Medium | Providers permitted to store and train on submissions | 🟡 Partial | `src/lib/provider-policy.ts` |
 | C-8 | Code quality | High | `action/dist` not reproducible from `action/src` | ✅ Fixed | `action/dist/index.js`, `.github/workflows/ci.yml` |
 | S-11 | Security | Medium | Model-authored text fenced in one place, raw in another | 🔴 Open | `action/src/report.ts` |
 | A11Y-5 | Accessibility | Medium | `opacity-70` text fails WCAG AA on high/medium cards | 🔴 Open | `src/app/review/[id]/findings-list.tsx` |
@@ -55,7 +56,7 @@ or reused, even once resolved, so changelog entries stay meaningful.
 | C-10 | Code quality | Low | `comment_mode` defaults to `both` but does nothing | 🔴 Open | `action/action.yml` |
 | C-11 | Code quality | Low | `.env.example` misrepresents `ANTHROPIC_API_KEY` | 🔴 Open | `.env.example` |
 
-**29 fixed · 1 partial · 7 open** — the 25 findings from passes 1–2 all still
+**29 fixed · 2 partial · 7 open** — the 25 findings from passes 1–2 all still
 hold (re-verified against the code, not the doc). Pass 3 added 12: the four
 High ones are fixed, the rest are open by choice pending a go-ahead on Medium
 priority. See the note on what "0 open" did and did not mean at the end of the
@@ -1052,10 +1053,9 @@ findings are short.
   so its behaviour under the forced `tool_choice` contract rests on the
   catalogue reporting `tools` support. Worth one real submission before trusting
   its findings.
-- **Still open at the level above the code:** OpenRouter exposes a
-  `data_collection: "deny"` provider preference that targets "may this provider
-  store or train on inputs" directly — closer to the actual concern than either
-  test used here. Unverified against the live API and not implemented.
+- **Since closed:** the `data_collection: "deny"` preference noted here as
+  unverified was confirmed against OpenRouter's provider-routing documentation
+  and implemented — see the S-14 entry below.
 - **Lesson worth keeping:** the check was passing, the roster was clean, and the
   reasoning was still wrong. A control can enforce the right thing for the wrong
   reason, and it stays correct only by accident — the next person to extend it
@@ -1105,3 +1105,61 @@ and still be the wrong reviewer.
   exercised against the forced `tool_choice` contract, and neither has a
   corroboration rate on `/models` yet. Their value here is asserted, not
   measured — one real six-model submission would settle both.
+
+### S-14 — Providers permitted to store and train on submissions
+- **Priority:** Medium · **Status:** 🟡 Partial
+- **Files:** `src/lib/provider-policy.ts`
+- **Found:** S-13 pinned `provider.only`, which controls *who* receives
+  submitted code. It says nothing about whether they may keep it. OpenRouter's
+  `data_collection` field defaults to `"allow"`, so every request this app made
+  was opting into providers that may store inputs — including under the fixed
+  allowlist. A provider can pass every question about corporate control and
+  still retain submissions and train on them.
+- **Why it matters:** It is the closest available control to the actual concern
+  — that submitted code becomes someone else's asset. Neither the allowlist nor
+  the region check addresses retention at all, so this was the gap they left.
+- **Done:** `data_collection: "deny"` added to `PROVIDER_ROUTING`, with a test
+  asserting it, since an unset field silently reverts to permissive. Verified
+  against OpenRouter's provider-routing documentation, which lists the field as
+  `"allow" | "deny"` defaulting to `"allow"`.
+- **Remains:** **Not verified at runtime.** OpenRouter's public API does not
+  expose per-endpoint data-collection policy — confirmed by dumping the full
+  endpoint object, which carries pricing, uptime, quantization and supported
+  parameters but nothing about retention. So there is no way to determine
+  statically which providers survive the filter, and no way to know whether any
+  rostered model is left with zero eligible providers. That failure mode is
+  safe by construction (`reviewWithModels` records a per-model failure and the
+  review page shows it) but it is unconfirmed. One live submission across all
+  six models would settle it.
+  `zdr: true` is the stricter sibling and was deliberately not used: of the six
+  rostered models only Grok (`xai/zdr`) and Mistral Large 3 (`mistral/zdr`)
+  publish ZDR endpoints, so enabling it globally would fail the other four.
+  Worth revisiting per-model for a maximum-assurance tier.
+
+### Provider data policies read — 2026-08-26
+
+Prompted by evaluating Thinking Machines' Inkling, which is served only by
+intermediary GPU resellers rather than by the lab itself. Reading the three
+providers' actual policies changed two conclusions.
+
+**Baseten had been the recommendation, on 1M context and uptime. That was
+wrong** — those are performance criteria applied to a data-governance question.
+Its privacy policy says nothing whatsoever about model inputs, prompts, or
+training on inference data. Every occurrence of "inference" and "train" in it is
+either footer navigation or a CCPA category list ("Inferences drawn from other
+personal information"). It is a generic website privacy template.
+
+- **DeepInfra** — the only unconditional commitment of the three: will not
+  store, sell, or train on API inputs and outputs absent explicit consent.
+- **Together** — a real Zero Data Retention mode, but **opt-in through an
+  account setting**, and the account is OpenRouter's rather than ours.
+- **Baseten** — silent.
+
+**The structural point outlasts the specific findings: we are not these
+providers' customer.** OpenRouter is. Their policies describe what is possible,
+not what is configured for our traffic, and the toggles they describe are not
+ours to set. That is what moved the fix from "pick the provider with the best
+policy" to "set the routing parameter", and it is why S-14 exists at all.
+
+If Inkling is ever added, it should be through DeepInfra rather than Baseten —
+the reverse of the earlier recommendation.

@@ -91,6 +91,18 @@ cloud (`src/lib/provider-policy.ts`). In both cases the counterparty is a US or
 EU entity with enterprise data terms and a legal system the code's owner can
 actually reach.
 
+Requests also set **`data_collection: "deny"`**, which is a separate question
+from the allowlist: `only` decides *who* receives the code, `data_collection`
+decides *whether they may keep it*. A provider can be entirely above suspicion
+on control and still retain submissions and train on them. OpenRouter's default
+for this field is `"allow"`, so leaving it unset opts into the permissive
+behaviour.
+
+If that leaves a model with no eligible provider, that model's request fails
+rather than quietly downgrading — which is the right direction. One model
+failing is already handled: the review page shows which models failed and
+returns whatever else succeeded.
+
 The pin is the load-bearing part. Picking a model is not the same decision as
 picking a counterparty — OpenRouter maps one slug to a shifting set of
 providers, so a roster that was clean when written can start routing elsewhere

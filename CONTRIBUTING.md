@@ -55,6 +55,12 @@ committed bundle still routed PR diffs through unrestricted providers. CI now fa
 These are the load-bearing decisions. Breaking one is fine if you have a reason, but say
 so in the PR, because each of these exists because the alternative bit us.
 
+**`PROVIDER_ROUTING` carries two independent controls, not one.** `only` decides who may
+receive submitted code; `data_collection: "deny"` decides whether they may keep it. It is
+easy to read the second as redundant once the first is in place — it is not. A provider
+can pass every question about corporate control and still retain and train on what you
+send it, and OpenRouter's default for that field is `"allow"`.
+
 **Grouping stays deterministic.** `groupFindings` in `src/lib/consensus.ts` is plain code
 — category match plus token overlap — and it runs on every page render. A model call in
 that path would re-bill on every page view and make renders non-deterministic. Anything

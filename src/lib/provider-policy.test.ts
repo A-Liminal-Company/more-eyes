@@ -27,6 +27,15 @@ describe("provider policy", () => {
     expect(PROVIDER_ROUTING.allow_fallbacks).toBe(true);
   });
 
+  it("refuses providers that may store submissions", () => {
+    // Distinct from the allowlist, which answers *who* receives the code. This
+    // answers whether they may keep it — a provider can pass on corporate
+    // control and still retain and train on submissions. OpenRouter's default
+    // is "allow", so an unset field is an opt-in to the permissive behaviour,
+    // which is why this is asserted rather than left to a comment.
+    expect(PROVIDER_ROUTING.data_collection).toBe("deny");
+  });
+
   it("attaches routing without disturbing the caller's params", () => {
     const params = { model: "anthropic/claude-sonnet-5", max_tokens: 42 };
     const routed = withProviderRouting(params) as typeof params & {
