@@ -66,16 +66,17 @@ itself, so a captured cookie is not a captured master credential. Rotating
 
 ## Reviewers
 
-Six models across six labs, all verified to support tool calling:
+Seven models across seven labs, all verified to support tool calling:
 
-| Model | Lab |
-|---|---|
-| Claude Sonnet 5 | Anthropic |
-| GPT-5.5 | OpenAI |
-| Gemini 3.5 Flash | Google |
-| Grok 4.5 | xAI |
-| Mistral Large 3 | Mistral |
-| Nova 2 Lite | Amazon |
+| Model | Lab | Served by |
+|---|---|---|
+| Claude Sonnet 5 | Anthropic | Anthropic, Bedrock, Azure, Vertex |
+| GPT-5.5 | OpenAI | OpenAI, Azure, Bedrock |
+| Gemini 3.5 Flash | Google | AI Studio, Vertex |
+| Grok 4.5 | xAI | xAI |
+| Mistral Large 3 | Mistral | Mistral |
+| Nova 2 Lite | Amazon | Bedrock |
+| Inkling | Thinking Machines | DeepInfra |
 
 ### Who is allowed to receive your code
 
@@ -90,6 +91,14 @@ the lab that built the model, serving it directly, or a first-party hyperscaler
 cloud (`src/lib/provider-policy.ts`). In both cases the counterparty is a US or
 EU entity with enterprise data terms and a legal system the code's owner can
 actually reach.
+
+**One exception, admitted deliberately:** DeepInfra, an intermediary rather than
+a first party. Thinking Machines serves no endpoint for Inkling, so reaching it
+at all meant accepting a reseller. Of the three that serve it, DeepInfra is the
+only one whose privacy policy unconditionally commits not to store, sell, or
+train on API inputs and outputs. Together's equivalent is opt-in through an
+account setting that belongs to OpenRouter rather than to us; Baseten's policy
+says nothing about model inputs at all.
 
 Requests also set **`data_collection: "deny"`**, which is a separate question
 from the allowlist: `only` decides *who* receives the code, `data_collection`

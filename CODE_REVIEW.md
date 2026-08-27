@@ -46,6 +46,7 @@ or reused, even once resolved, so changelog entries stay meaningful.
 | S-10 | Security | High | No automated security net on a public repo | ✅ Fixed | `.github/dependabot.yml`, `.github/workflows/codeql.yml` |
 | S-13 | Security | High | Submitted code routed to a Chinese-controlled provider | ✅ Fixed | `src/lib/provider-policy.ts`, `src/lib/models.ts`, `scripts/check-models.ts` |
 | S-14 | Security | Medium | Providers permitted to store and train on submissions | 🟡 Partial | `src/lib/provider-policy.ts` |
+| R-8 | Reliability | Medium | Nested build output not excluded from Action reviews | ✅ Fixed | `action/src/diff.ts`, `action/action.yml` |
 | C-8 | Code quality | High | `action/dist` not reproducible from `action/src` | ✅ Fixed | `action/dist/index.js`, `.github/workflows/ci.yml` |
 | S-11 | Security | Medium | Model-authored text fenced in one place, raw in another | 🔴 Open | `action/src/report.ts` |
 | A11Y-5 | Accessibility | Medium | `opacity-70` text fails WCAG AA on high/medium cards | 🔴 Open | `src/app/review/[id]/findings-list.tsx` |
@@ -56,7 +57,7 @@ or reused, even once resolved, so changelog entries stay meaningful.
 | C-10 | Code quality | Low | `comment_mode` defaults to `both` but does nothing | 🔴 Open | `action/action.yml` |
 | C-11 | Code quality | Low | `.env.example` misrepresents `ANTHROPIC_API_KEY` | 🔴 Open | `.env.example` |
 
-**29 fixed · 2 partial · 7 open** — the 25 findings from passes 1–2 all still
+**30 fixed · 2 partial · 7 open** — the 25 findings from passes 1–2 all still
 hold (re-verified against the code, not the doc). Pass 3 added 12: the four
 High ones are fixed, the rest are open by choice pending a go-ahead on Medium
 priority. See the note on what "0 open" did and did not mean at the end of the
@@ -1163,3 +1164,71 @@ policy" to "set the routing parameter", and it is why S-14 exists at all.
 
 If Inkling is ever added, it should be through DeepInfra rather than Baseten —
 the reverse of the earlier recommendation.
+
+### R-8 — Nested build output not excluded from Action reviews
+- **Priority:** Medium · **Status:** ✅ Fixed
+- **Files:** `action/src/diff.ts`, `action/action.yml`, `action/src/diff.test.ts`
+- **Found:** The default exclude list carried `dist/**`, and a pattern
+  containing a slash is matched against the full repo-relative path. So it
+  matched `dist/a.js` and never `action/dist/index.js` or `mcp-server/dist/**`.
+  This repo commits a 3MB ncc bundle to the first of those.
+- **Why it matters:** Every PR touching the bundle sent it to every configured
+  model — bounded only by per-batch truncation, and displacing real changed
+  files from the review. A reviewer looking at 30KB of minified output is worse
+  than one model fewer, because the run still reports as a success.
+- **Done:** `**/` forms added alongside the anchored ones for `dist`, `vendor`,
+  `vendored` and `node_modules`. The matcher's anchoring is deliberate and
+  gitignore-consistent, so it was left alone — the defect was the list.
+- **Underneath it:** `DEFAULT_EXCLUDE_GLOBS` in `diff.ts` and the `exclude`
+  default in `action.yml` are two copies of one list, and **only the yaml takes
+  effect** — `main.ts` reads the Action input and never the constant. So the
+  copy under test was not the live copy, and they had already drifted in intent.
+  Both corrected, and a test now asserts they are identical.
+- **Remains:** Nothing for this defect. The duplication itself is structural —
+  an Action's inputs must be declared in `action.yml` — so the test is the fix
+  rather than deduplication.
+- **How it was found:** Not by reading the code. By testing the exclusion
+  against this repo's actual paths while sizing what a dogfood PR would cost.
+  The glob looks correct in isolation and is correct by its own documented
+  semantics; only the combination of that semantics with this repo's layout is
+  wrong.
+
+### Inkling added, DeepInfra admitted — 2026-08-26
+
+The first intermediary provider on the allowlist, and the first admission made
+deliberately rather than by default.
+
+Thinking Machines serves no first-party endpoint for Inkling, so reaching the
+newest model available at all — released roughly seven months after anything
+else on the roster — required accepting a reseller. Reading the three that serve
+it decided which:
+
+- **DeepInfra** — unconditional: will not store, sell, or train on API inputs
+  and outputs without explicit consent. Admitted.
+- **Together** — real Zero Data Retention, but opt-in through an account
+  setting, and the account is OpenRouter's rather than ours. Not admitted.
+- **Baseten** — silent on model inputs entirely. Not admitted.
+
+**The check's severity model had to change, and that is the interesting part.**
+`check:models` previously failed whenever any non-allowlisted provider served a
+rostered model. That was right while the allowlist was entirely first-party: an
+unknown provider meant the pin had silently started doing real work. With a
+deliberate partial admission, partial coverage becomes the normal case — Inkling
+is served by DeepInfra *and* by Together and Baseten, which are pinned out — so
+the old rule would have failed the policy for working as designed.
+
+Now: **FAIL** when no allowlisted provider serves the model (unroutable), or
+when a provider in a flagged region serves it — that one still never receives
+code, but it means the serving set now reaches somewhere the policy exists to
+avoid, which deserves a person rather than a line of scrollback. **WARN** for
+benign non-allowlisted providers, naming them. Negative-tested by re-adding
+Qwen3 Coder: exits 1 with `alibaba (hq=SG, dc=SG/CN)`.
+
+- **Watch on `/models`:** Thinking Machines was founded largely by ex-OpenAI
+  researchers, so Inkling's errors may correlate with GPT-5.5's more than a
+  nominally separate lab implies. A consensus is worth what its independence is
+  worth, and corroboration rate is the measurement that would show it. Recorded
+  as something to check rather than something assumed either way.
+- **Not verified:** Inkling has served no live review. It is also the second
+  model whose only allowlisted provider is a single endpoint, so a DeepInfra
+  outage removes it entirely.

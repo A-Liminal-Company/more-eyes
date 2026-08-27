@@ -119,7 +119,9 @@ describe("provider policy", () => {
     // is a separate judgement about retention and training terms. Adding one
     // should be a deliberate act that breaks this test first.
     for (const slug of [
-      "deepinfra",
+      // deepinfra is deliberately absent from this list — see the admission
+      // test below. Adding a reseller should require editing a test that says
+      // out loud why, which is the point of both.
       "together",
       "baseten",
       "novita",
@@ -132,6 +134,20 @@ describe("provider policy", () => {
     ]) {
       expect(ALLOWED_PROVIDERS as readonly string[]).not.toContain(slug);
     }
+  });
+
+  it("admits DeepInfra only, and only alongside the retention control", () => {
+    // The single intermediary on the list. It is here because Thinking
+    // Machines serves no first-party endpoint for Inkling and DeepInfra is the
+    // only one of its three resellers with an unconditional written commitment
+    // not to store or train on inference data.
+    //
+    // Paired with data_collection: "deny" on purpose. The written policy is a
+    // statement by a company we are not the customer of; the routing parameter
+    // is enforcement. Removing the second would leave this admission resting on
+    // the weaker of the two, so this test fails if that happens.
+    expect(ALLOWED_PROVIDERS as readonly string[]).toContain("deepinfra");
+    expect(PROVIDER_ROUTING.data_collection).toBe("deny");
   });
 
   it("rosters at least two labs, so the policy has not collapsed diversity", () => {

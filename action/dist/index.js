@@ -31646,6 +31646,23 @@ exports.MODELS = [
         // comes in low.
         providerModel: "amazon/nova-2-lite-v1",
     },
+    {
+        id: "inkling",
+        label: "Inkling",
+        lab: "Thinking Machines",
+        provider: "openrouter",
+        // The newest model on the roster by roughly seven months, and the only
+        // entry requiring an intermediary provider: Thinking Machines serves no
+        // first-party endpoint, so this rides on DeepInfra. See the admission note
+        // in provider-policy.ts for why that one and not Together or Baseten.
+        //
+        // Worth watching on /models rather than assuming: the lab was founded
+        // largely by ex-OpenAI researchers, so its errors may correlate with
+        // GPT-5.5's more than a nominally separate lab suggests. A consensus is
+        // only worth what its independence is worth, and corroboration rate is the
+        // measurement that would show it.
+        providerModel: "thinkingmachines/inkling",
+    },
 ];
 exports.DEFAULT_MODEL_IDS = ["claude-sonnet-5"];
 /** Every rostered model. Derived so trimming the roster cannot leave it stale. */
@@ -31718,10 +31735,12 @@ exports.withProviderRouting = withProviderRouting;
  * be screened automatically, which is exactly why the list is kept short enough
  * to re-derive by hand rather than grown to whatever passes a check.
  *
- * Intermediary GPU resellers (DeepInfra, Together, Baseten, Novita and similar)
- * are absent not because they are Chinese — most are not — but because each one
- * adds a counterparty whose retention and training terms would need reading.
- * That is a decision to make deliberately per provider, not a gap to fill.
+ * Intermediary GPU resellers are excluded by default — not because they are
+ * Chinese, most are not, but because each adds a counterparty whose retention
+ * and training terms need reading first. That is a per-provider decision to
+ * make deliberately, not a gap to fill. DeepInfra is the sole admission so far
+ * and carries its reasoning inline below; Together, Baseten, Novita and the
+ * rest remain out.
  */
 exports.ALLOWED_PROVIDERS = [
     // First-party: the lab that built the model, serving it itself.
@@ -31735,6 +31754,27 @@ exports.ALLOWED_PROVIDERS = [
     "azure",
     "amazon-bedrock",
     "claude-on-aws",
+    /**
+     * The one intermediary, admitted deliberately rather than by drift.
+     *
+     * Thinking Machines does not serve Inkling itself — no first-party endpoint
+     * exists — so reaching the newest model available at all required accepting a
+     * reseller. Of the three that serve it, DeepInfra is the only one whose
+     * privacy policy makes an unconditional commitment about inference data: it
+     * will not store, sell, or train on API inputs and outputs without explicit
+     * consent. Together's equivalent is real but opt-in through an account
+     * setting, and the account is OpenRouter's rather than ours. Baseten's policy
+     * says nothing about model inputs at all — every mention of "inference" or
+     * "train" in it is page navigation or a CCPA category list.
+     *
+     * Two caveats worth keeping visible. First, this list is global rather than
+     * per-model, so DeepInfra is now eligible for any rostered model it happens
+     * to serve — none today, but that can change without notice here. Second, we
+     * are not DeepInfra's customer; OpenRouter is. Their policy describes what is
+     * possible, not what is configured for our traffic, which is why
+     * `data_collection: "deny"` below matters more than this reading does.
+     */
+    "deepinfra",
 ];
 /**
  * A corroborating geographic signal, **not** the primary test.

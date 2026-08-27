@@ -112,6 +112,23 @@ export const MODELS: ModelOption[] = [
     // comes in low.
     providerModel: "amazon/nova-2-lite-v1",
   },
+  {
+    id: "inkling",
+    label: "Inkling",
+    lab: "Thinking Machines",
+    provider: "openrouter",
+    // The newest model on the roster by roughly seven months, and the only
+    // entry requiring an intermediary provider: Thinking Machines serves no
+    // first-party endpoint, so this rides on DeepInfra. See the admission note
+    // in provider-policy.ts for why that one and not Together or Baseten.
+    //
+    // Worth watching on /models rather than assuming: the lab was founded
+    // largely by ex-OpenAI researchers, so its errors may correlate with
+    // GPT-5.5's more than a nominally separate lab suggests. A consensus is
+    // only worth what its independence is worth, and corroboration rate is the
+    // measurement that would show it.
+    providerModel: "thinkingmachines/inkling",
+  },
 ];
 
 export const DEFAULT_MODEL_IDS = ["claude-sonnet-5"];

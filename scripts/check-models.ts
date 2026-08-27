@@ -95,48 +95,65 @@ async function main() {
       .catch(() => []);
 
     const slugs = [...new Set(endpoints.map(slugOf).filter(Boolean))];
-    const disallowed = slugs.filter((s) => !ALLOWED.has(s));
     const servable = slugs.filter((s) => ALLOWED.has(s));
+    const other = slugs.filter((s) => !ALLOWED.has(s));
 
-    // A provider outside the allowlist is not itself a breach — requests pin
-    // provider.only, so it never receives code. It is reported as a failure
-    // because it means the pin is now doing real work silently, and whoever
-    // owns the roster should decide whether to keep the model or admit the
-    // provider deliberately, having read its retention and training terms.
-    // Admitting one is a judgement about corporate control that this script
-    // cannot make; it can only say the list no longer covers the roster.
-    if (disallowed.length > 0) {
-      const detail = disallowed
-        .map((s) => {
-          const info = providers.get(s);
-          if (!info) return `${s} (unknown provider)`;
-          const dcs = info.datacenters ?? [];
-          // Corroborating only — the failure above is triggered by absence
-          // from the allowlist, not by this. Most providers publish no
-          // datacenter list at all, so a quiet result here means nothing.
-          const flagged =
-            FLAGGED_REGIONS.has(info.headquarters ?? "") ||
-            dcs.some((d) => FLAGGED_REGIONS.has(d));
-          return `${s} (hq=${info.headquarters ?? "?"}${
-            dcs.length ? `, dc=${dcs.join("/")}` : ""
-          })${flagged ? " ← excluded jurisdiction" : ""}`;
-        })
-        .join(", ");
+    const describe = (slug: string): string => {
+      const info = providers.get(slug);
+      if (!info) return `${slug} (unknown provider)`;
+      const dcs = info.datacenters ?? [];
+      return `${slug} (hq=${info.headquarters ?? "?"}${
+        dcs.length ? `, dc=${dcs.join("/")}` : ""
+      })`;
+    };
+
+    const inFlaggedRegion = (slug: string): boolean => {
+      const info = providers.get(slug);
+      if (!info) return false;
+      return (
+        FLAGGED_REGIONS.has(info.headquarters ?? "") ||
+        (info.datacenters ?? []).some((d) => FLAGGED_REGIONS.has(d))
+      );
+    };
+
+    // Unroutable: the pin would leave the request nowhere to go, so every
+    // review from this model fails at runtime. The one unambiguous failure.
+    if (servable.length === 0) {
       console.error(
-        `FAIL   ${model.id} — served by non-allowlisted provider(s): ${detail}`
+        `FAIL   ${model.id} — no allowlisted provider serves this slug; provider.only leaves it unroutable`
       );
       failures++;
       continue;
     }
 
-    // Every provider is allowlisted, but none can serve it — the pin would
-    // leave the request with nowhere to go, i.e. every review from this model
-    // fails at runtime.
-    if (servable.length === 0) {
+    // A non-allowlisted provider in a flagged region still never receives code
+    // — provider.only sees to that — but it is worth a person's attention
+    // rather than a line of scrollback, because it means the model's serving
+    // set now reaches somewhere the policy exists to avoid.
+    const flagged = other.filter(inFlaggedRegion);
+    if (flagged.length > 0) {
       console.error(
-        `FAIL   ${model.id} — no allowlisted provider serves this slug; provider.only would leave it unroutable`
+        `FAIL   ${model.id} — a provider in a flagged region now serves this slug: ${flagged
+          .map(describe)
+          .join(", ")}. Pinning blocks it, but decide whether to keep the model.`
       );
       failures++;
+      continue;
+    }
+
+    // Everything else non-allowlisted is informational. This used to fail, and
+    // that was right while the allowlist was entirely first-party: any unknown
+    // provider meant the pin had silently started doing real work. Partial
+    // coverage is now the normal case — DeepInfra is admitted for Inkling while
+    // Together and Baseten serving the same slug are not — so failing here
+    // would report the policy working as designed.
+    if (other.length > 0) {
+      console.warn(
+        `WARN   ${model.id} — ${servable.length} allowlisted (${servable.join(
+          ", "
+        )}); not used: ${other.map(describe).join(", ")}`
+      );
+      warnings++;
       continue;
     }
 
