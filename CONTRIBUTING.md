@@ -102,12 +102,15 @@ Edit `src/lib/models.ts`, then:
 
 1. **Confirm it supports tool calling** at `https://openrouter.ai/api/v1/models`. Structured output depends on it.
 2. **Check who would serve it.** Submitted code is unreleased work, and a review ships it verbatim to whichever provider serves the model. The test is corporate control — which legal entity holds the code and what its terms let it do with it — so `ALLOWED_PROVIDERS` in `src/lib/provider-policy.ts` lists only labs serving their own models and first-party hyperscaler clouds. `npm run check:models` fails if your model is served by anything else.
-3. **Prefer a multi-provider slug.** A model served by a single allowlisted provider has no fallback when that provider is degraded. Grok 4.5 and Mistral Large 3 are both in this position, and `check:models` warns rather than fails on it. Check with `https://openrouter.ai/api/v1/models/<slug>/endpoints`.
-4. Run `npm run check:models` to verify the registry against the live catalogue.
+3. **Check the knowledge cutoff.** A reviewer whose training predates the framework versions you ship will produce confident, wrong findings about current APIs. This is what ruled Meta's models out — every Llama on an allowlisted provider states a 2024-08-31 cutoff or earlier, against 2025-12 for the rest of the roster.
+4. **Prefer a multi-provider slug.** A model served by a single allowlisted provider has no fallback when that provider is degraded. Grok 4.5, Mistral Large 3 and Nova 2 Lite are all in this position, and `check:models` warns rather than fails on it. Check with `https://openrouter.ai/api/v1/models/<slug>/endpoints`.
+5. Run `npm run check:models` to verify the registry against the live catalogue.
 
 Diversity across labs is the point — models share blind spots with their own family, so a
 second opinion from the same lab is worth less than it looks. The provider policy cuts
-against that directly: it cost DeepSeek and Qwen, and Mistral Large 3 bought one back.
+against that directly: it cost DeepSeek and Qwen. Mistral Large 3 and Nova 2 Lite bought
+both back — the latter through a provider already on the allowlist, which is the cheapest
+kind of addition and the first place to look.
 
 If you find yourself widening `ALLOWED_PROVIDERS` to make a red build go green, that is
 the wrong direction. Drop the model instead — or admit the provider deliberately, having

@@ -66,7 +66,7 @@ itself, so a captured cookie is not a captured master credential. Rotating
 
 ## Reviewers
 
-Five models across five labs, all verified to support tool calling:
+Six models across six labs, all verified to support tool calling:
 
 | Model | Lab |
 |---|---|
@@ -75,6 +75,7 @@ Five models across five labs, all verified to support tool calling:
 | Gemini 3.5 Flash | Google |
 | Grok 4.5 | xAI |
 | Mistral Large 3 | Mistral |
+| Nova 2 Lite | Amazon |
 
 ### Who is allowed to receive your code
 
@@ -106,8 +107,16 @@ only about a quarter of providers publish a datacenter list at all, so "no CN
 datacenter listed" usually just means "nothing listed".
 
 This costs real coverage. Losing DeepSeek and Qwen cost two labs on an app whose
-premise is cross-lab disagreement; Mistral Large 3 restores one. That trade is
-deliberate rather than incidental.
+premise is cross-lab disagreement; Mistral Large 3 and Nova 2 Lite restore both —
+the latter through Bedrock, which was already allowlisted, so at no policy cost.
+
+Meta was considered and rejected on capability rather than policy. Every Llama
+available on an allowlisted provider states a knowledge cutoff of 2024-08-31 or
+earlier, against 2025-12 and 2025-01 for the rest of the roster. This tool
+reviews code written against framework versions two years newer than that, and a
+reviewer that confidently misremembers current APIs is worse than absent here —
+the outlier badge invites a second look at exactly its false positives. Worth
+revisiting when Meta ships something current on Bedrock or Vertex.
 
 `npm run check:models` enforces the allowlist against OpenRouter's live
 catalogue and fails if a rostered model has picked up a provider outside it. CI
@@ -125,9 +134,13 @@ Edit the list in `src/lib/models.ts`. Three things to know before adding one:
   is no field anywhere for "who ultimately controls this entity", and
   registration country is actively misleading, so this judgement needs a person.
 - **Prefer multi-provider slugs.** A model served by a single allowlisted
-  provider has no fallback when that provider is degraded. Grok 4.5 and Mistral
-  Large 3 are both in this position — `check:models` warns rather than failing.
-  Check with `https://openrouter.ai/api/v1/models/<slug>/endpoints`.
+  provider has no fallback when that provider is degraded. Grok 4.5, Mistral
+  Large 3 and Nova 2 Lite are all in this position — `check:models` warns rather
+  than failing. Check with
+  `https://openrouter.ai/api/v1/models/<slug>/endpoints`.
+- **Check the knowledge cutoff.** A reviewer whose training predates the
+  framework versions you actually ship will produce confident, wrong findings
+  about current APIs. This is what ruled out Meta's models here.
 
 ## Commands
 

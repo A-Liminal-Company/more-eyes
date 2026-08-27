@@ -437,7 +437,9 @@ closing pass below — it applies just as much to these counts.
   it is kept short enough to re-derive by hand. Amazon Nova and Llama 4 remain
   available through already-allowlisted providers at zero policy cost if more
   labs are wanted; the US GPU resellers (DeepInfra, Together, Baseten) are a
-  per-provider terms-reading decision that has not been made.
+  per-provider terms-reading decision that has not been made. Amazon was
+  subsequently taken up (Nova 2 Lite); Meta was rejected on capability rather
+  than policy — see the roster note below.
 
 ### C-8 — `action/dist` not reproducible from `action/src`
 - **Priority:** High · **Status:** ✅ Fixed
@@ -1058,3 +1060,48 @@ findings are short.
   reasoning was still wrong. A control can enforce the right thing for the wrong
   reason, and it stays correct only by accident — the next person to extend it
   reasons from the stated rationale, not from the outcome.
+
+### Roster restored to six labs — 2026-08-26
+
+Nova 2 Lite added via `amazon-bedrock`, which was already on the allowlist — so
+this cost no policy change and no new counterparty. That is the cheapest kind of
+addition and the first place to look when the roster needs widening.
+
+Nova 2 Lite rather than Nova Premier: Premier is the more capable tier but the
+older generation, and bills $2.50/$12.50 per M against Lite's $0.30/$2.50, which
+would have made it the most expensive reviewer on the roster by a wide margin.
+For a supplementary voice in a consensus rather than a primary one, the newer
+generation at an eighth the input price is the better trade. The `/models` page
+tracks corroboration rate per model, so this is a decision that can be revisited
+on evidence rather than argued about.
+
+**Meta was considered and rejected — on capability, not policy.** Llama 4
+Maverick and Scout are both reachable through `google-vertex` and would also
+have cost no policy change. Every Llama available on an allowlisted provider
+states a knowledge cutoff of **2024-08-31** (Llama 4) or **2023-12-31**
+(Llama 3.3), against 2025-12 for GPT-5.5 and 2025-01 for Gemini 3.5 Flash.
+
+That gap is disqualifying for this specific tool rather than merely
+unattractive. This repo's own `AGENTS.md` opens with "This is NOT the Next.js
+you know — APIs, conventions, and file structure may all differ from your
+training data", which is an admission that stale framework knowledge is the
+known failure mode here. A reviewer two years behind will produce confident,
+specific, wrong findings about current APIs — and the UI makes that worse rather
+than better: `outlierSignal` badges a single-model finding with "often a unique
+catch rather than noise — worth a second look before dismissing", which is
+exactly the wrong advice for a stale-knowledge false positive. Adding Llama
+would have degraded the agreement signal the product is built on.
+
+Worth revisiting when Meta ships something current on Bedrock or Vertex. The
+general lesson is now written into the contributor checklist: **check the
+knowledge cutoff**, because a model can pass every policy and capability gate
+and still be the wrong reviewer.
+
+- **Ground truth:** typecheck clean, lint clean, 242 tests passing,
+  `check:models` reports 6 models / 0 failing / 3 warning (Grok, Mistral and
+  Nova all single-provider), production build succeeds, `action/dist` rebuilt.
+- **Not verified:** neither Mistral Large 3 nor Nova 2 Lite has served a live
+  review. Both report `tools` support in the catalogue, but neither has been
+  exercised against the forced `tool_choice` contract, and neither has a
+  corroboration rate on `/models` yet. Their value here is asserted, not
+  measured — one real six-model submission would settle both.

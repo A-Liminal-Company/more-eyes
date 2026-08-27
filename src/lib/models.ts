@@ -25,9 +25,21 @@ export type ModelOption = {
  * legal obligations put the code beyond its owner's reach — not that a rack
  * happens to sit in a particular country.
  *
- * Losing DeepSeek and Qwen cost two labs on an app whose whole premise is
- * cross-lab disagreement. Mistral Large 3 restores one from a French lab
- * serving its own model. That is the trade being made knowingly.
+  * Losing DeepSeek and Qwen cost two labs on an app whose whole premise is
+ * cross-lab disagreement. Mistral Large 3 and Nova 2 Lite restore both, from a
+ * French lab serving its own model and from Amazon via Bedrock respectively —
+ * the latter at no policy cost, since Bedrock was already allowlisted.
+ *
+ * Meta was considered and rejected, which is worth recording so it is not
+ * re-litigated: every Llama available on an allowlisted provider states a
+ * knowledge cutoff of 2024-08-31 or earlier, against 2025-12 and 2025-01 for
+ * the rest of the roster. This repo reviews code written against framework
+ * versions that postdate that by two years — see AGENTS.md, which exists
+ * precisely because models carry stale framework knowledge. A reviewer that
+ * confidently misremembers current APIs does not merely add nothing; the
+ * outlier badge on single-model findings actively invites a second look at its
+ * false positives. Revisit when Meta ships something current on Bedrock or
+ * Vertex.
  *
  * To add one: confirm it reports `tools` support at
  * https://openrouter.ai/api/v1/models, then run `npm run check:models`, which
@@ -82,6 +94,23 @@ export const MODELS: ModelOption[] = [
     // also the cheapest of the three on input tokens, which is the side that
     // dominates here — submissions are long, findings are short.
     providerModel: "mistralai/mistral-large-2512",
+  },
+  {
+    id: "nova-2-lite",
+    label: "Nova 2 Lite",
+    lab: "Amazon",
+    provider: "openrouter",
+    // Served by amazon-bedrock, already on the allowlist — this entry cost no
+    // policy change at all, which is the cheapest way to buy back a lab.
+    //
+    // Nova 2 Lite rather than Nova Premier despite Premier being the more
+    // capable tier: Premier is the older generation and bills $2.50/$12.50 per
+    // M against Lite's $0.30/$2.50, which would make it the most expensive
+    // reviewer on the roster by a wide margin. As a supplementary voice in a
+    // consensus — not a primary — the newer generation at an eighth the input
+    // price is the better trade. Revisit if its corroboration rate on /models
+    // comes in low.
+    providerModel: "amazon/nova-2-lite-v1",
   },
 ];
 
