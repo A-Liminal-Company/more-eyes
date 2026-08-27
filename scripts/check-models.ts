@@ -23,7 +23,7 @@
 import { MODELS } from "../src/lib/models";
 import {
   ALLOWED_PROVIDERS,
-  EXCLUDED_JURISDICTIONS,
+  SECONDARY_JURISDICTION_SIGNAL,
 } from "../src/lib/provider-policy";
 
 type CatalogueModel = { id: string; supported_parameters?: string[] };
@@ -36,7 +36,7 @@ type ProviderInfo = {
 };
 
 const ALLOWED = new Set<string>(ALLOWED_PROVIDERS);
-const EXCLUDED = new Set<string>(EXCLUDED_JURISDICTIONS);
+const FLAGGED_REGIONS = new Set<string>(SECONDARY_JURISDICTION_SIGNAL);
 
 /** Provider slug for an endpoint. Tags are "<slug>" or "<slug>/<variant>". */
 function slugOf(endpoint: Endpoint): string {
@@ -101,17 +101,22 @@ async function main() {
     // A provider outside the allowlist is not itself a breach — requests pin
     // provider.only, so it never receives code. It is reported as a failure
     // because it means the pin is now doing real work silently, and whoever
-    // owns the roster should decide whether to keep the model or widen the
-    // list deliberately.
+    // owns the roster should decide whether to keep the model or admit the
+    // provider deliberately, having read its retention and training terms.
+    // Admitting one is a judgement about corporate control that this script
+    // cannot make; it can only say the list no longer covers the roster.
     if (disallowed.length > 0) {
       const detail = disallowed
         .map((s) => {
           const info = providers.get(s);
           if (!info) return `${s} (unknown provider)`;
           const dcs = info.datacenters ?? [];
+          // Corroborating only — the failure above is triggered by absence
+          // from the allowlist, not by this. Most providers publish no
+          // datacenter list at all, so a quiet result here means nothing.
           const flagged =
-            EXCLUDED.has(info.headquarters ?? "") ||
-            dcs.some((d) => EXCLUDED.has(d));
+            FLAGGED_REGIONS.has(info.headquarters ?? "") ||
+            dcs.some((d) => FLAGGED_REGIONS.has(d));
           return `${s} (hq=${info.headquarters ?? "?"}${
             dcs.length ? `, dc=${dcs.join("/")}` : ""
           })${flagged ? " ← excluded jurisdiction" : ""}`;

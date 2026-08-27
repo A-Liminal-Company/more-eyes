@@ -16,13 +16,18 @@ export type ModelOption = {
  * Deliberately spans different labs — models share blind spots with their own
  * family, so diversity is what makes a second opinion worth paying for.
  *
- * Diversity stops at the jurisdiction line. Submitted code is unreleased work
- * and a review ships it verbatim to whoever serves the model, so the roster
- * excludes Chinese-lab models and every request pins routing to the allowlist
- * in `provider-policy.ts`. DeepSeek V3.1 and Qwen3 Coder were removed for this
- * reason — `qwen/qwen3-coder` was in fact served by `alibaba`, whose published
- * datacenter list includes CN. Losing two labs costs real coverage; that is the
- * trade being made knowingly, not an oversight.
+ * Diversity stops where corporate control does. Submitted code is unreleased
+ * work and a review ships it verbatim to whoever serves the model, so every
+ * entry must be servable by a provider in `provider-policy.ts` — a lab serving
+ * its own model, or a first-party hyperscaler cloud. DeepSeek V3.1 and Qwen3
+ * Coder were removed for that reason: `qwen/qwen3-coder` was served by Alibaba
+ * Cloud, and the objection is that Alibaba is a Chinese company whose terms and
+ * legal obligations put the code beyond its owner's reach — not that a rack
+ * happens to sit in a particular country.
+ *
+ * Losing DeepSeek and Qwen cost two labs on an app whose whole premise is
+ * cross-lab disagreement. Mistral Large 3 restores one from a French lab
+ * serving its own model. That is the trade being made knowingly.
  *
  * To add one: confirm it reports `tools` support at
  * https://openrouter.ai/api/v1/models, then run `npm run check:models`, which
@@ -60,6 +65,23 @@ export const MODELS: ModelOption[] = [
     lab: "xAI",
     provider: "openrouter",
     providerModel: "x-ai/grok-4.5",
+  },
+  {
+    id: "mistral-large-3",
+    label: "Mistral Large 3",
+    lab: "Mistral",
+    provider: "openrouter",
+    // Served only by `mistral` itself — a French lab serving its own model, so
+    // the counterparty is the lab and the jurisdiction is the EU. Single
+    // provider means no fallback if Mistral is degraded; check:models warns
+    // about this rather than failing, same as Grok.
+    //
+    // Chosen over devstral-2512 and codestral-2508 despite both being
+    // code-specialised: those are tuned for writing and completing code, and
+    // reviewing it is a reasoning task rather than an editing one. Large 3 is
+    // also the cheapest of the three on input tokens, which is the side that
+    // dominates here — submissions are long, findings are short.
+    providerModel: "mistralai/mistral-large-2512",
   },
 ];
 

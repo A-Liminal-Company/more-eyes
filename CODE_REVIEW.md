@@ -1,6 +1,6 @@
 # Code Review — More Eyes
 
-Last updated: 2026-08-26 · Pass 3 — baseline security net added; 4 of 12 new findings fixed
+Last updated: 2026-08-26 · Pass 3 — baseline security net added; 4 of 12 new findings fixed; S-13 reframed around corporate control
 
 Tracked findings across security, reliability, accessibility, test coverage, and
 code quality. Kept current by the `more-eyes-review` skill — run it to
@@ -44,7 +44,7 @@ or reused, even once resolved, so changelog entries stay meaningful.
 
 | S-9 | Security | High | 9 high-severity CVEs in the dependency tree | ✅ Fixed | `package.json`, `package-lock.json` |
 | S-10 | Security | High | No automated security net on a public repo | ✅ Fixed | `.github/dependabot.yml`, `.github/workflows/codeql.yml` |
-| S-13 | Security | High | Submitted code routed through Chinese jurisdiction | ✅ Fixed | `src/lib/provider-policy.ts`, `src/lib/models.ts`, `scripts/check-models.ts` |
+| S-13 | Security | High | Submitted code routed to a Chinese-controlled provider | ✅ Fixed | `src/lib/provider-policy.ts`, `src/lib/models.ts`, `scripts/check-models.ts` |
 | C-8 | Code quality | High | `action/dist` not reproducible from `action/src` | ✅ Fixed | `action/dist/index.js`, `.github/workflows/ci.yml` |
 | S-11 | Security | Medium | Model-authored text fenced in one place, raw in another | 🔴 Open | `action/src/report.ts` |
 | A11Y-5 | Accessibility | Medium | `opacity-70` text fails WCAG AA on high/medium cards | 🔴 Open | `src/app/review/[id]/findings-list.tsx` |
@@ -379,7 +379,7 @@ closing pass below — it applies just as much to these counts.
   they were outside what was asked for, not because they were judged unhelpful.
   No CodeQL run has completed yet, so the first results are unreviewed.
 
-### S-13 — Submitted code routed through Chinese jurisdiction
+### S-13 — Submitted code routed to a Chinese-controlled provider
 - **Priority:** High · **Status:** ✅ Fixed
 - **Files:** `src/lib/provider-policy.ts` (new), `src/lib/models.ts`,
   `src/lib/providers/openrouter.ts`, `src/lib/consensus-llm.ts`,
@@ -404,14 +404,40 @@ closing pass below — it applies just as much to these counts.
   `check:models` now enforces the policy against the live catalogue and runs in
   CI per-PR and weekly. Verified by re-adding both models: exits 1 and names
   `alibaba (hq=SG, dc=SG/CN) ← excluded jurisdiction` as the reason.
+- **Reframed after review:** the fix was right, the stated rationale was not.
+  It was written around **datacenter geography**, and the correct test is
+  **corporate control** — which legal entity holds the code, what its terms
+  permit, and whose government can compel disclosure. The two are genuinely
+  different, and leading with geography got both directions wrong. It
+  *over-flags*: data in China is reachable by PRC process whoever owns the
+  server, which is precisely why the hyperscalers partition (AWS China is a
+  separate Chinese entity that AWS Global never routes into), so a CN region on
+  a vendor's org chart says nothing about this app. And it *under-flags*, which
+  is worse: only ~25% of providers in OpenRouter's directory publish a
+  datacenter list, so "no CN datacenter" usually means "nothing listed".
+  Alibaba was correctly caught, but because Alibaba Cloud is a Chinese company —
+  the `dc=CN` was corroboration, not the reason. `ALLOWED_PROVIDERS` was already
+  correct under the better test (all entries are labs serving their own models
+  or first-party hyperscaler clouds), so enforcement did not change; the
+  rationale, the region list's role, and the docs did.
+  `EXCLUDED_JURISDICTIONS` is now `SECONDARY_JURISDICTION_SIGNAL`, kept as a
+  corroborating annotation with a deprecated alias.
 - **Remains:** The cost is real — two labs' worth of independent opinions on an
-  app whose premise is cross-lab disagreement. A test asserts at least two labs
-  remain so the filter cannot quietly collapse the roster to one. Grok 4.5 now
-  has a single allowlisted provider (`xai`), so an xAI outage removes it
-  entirely; `check:models` warns rather than fails on this. `headquarters` is
-  also a weaker signal than it looks — several Chinese-founded providers
-  register in SG — which is why the check screens datacenters too and why the
-  allowlist is kept short enough to re-derive by hand.
+  app whose premise is cross-lab disagreement. Mistral Large 3 restores one:
+  a French lab serving its own model, so the counterparty is the lab and the
+  jurisdiction is the EU. A test asserts at least two labs remain so the policy
+  cannot quietly collapse the roster to one, and another asserts no intermediary
+  GPU reseller has been admitted without a deliberate decision. Grok 4.5 and
+  Mistral Large 3 both have a single allowlisted provider, so an outage at
+  either removes that reviewer; `check:models` warns rather than fails. The
+  deeper limitation is unfixable by tooling: there is no field anywhere for
+  "who ultimately controls this entity", and registration country misleads —
+  several Chinese-founded providers register in SG, and one with Hong Kong
+  roots reports a US headquarters. The allowlist needs a person, which is why
+  it is kept short enough to re-derive by hand. Amazon Nova and Llama 4 remain
+  available through already-allowlisted providers at zero policy cost if more
+  labs are wanted; the US GPU resellers (DeepInfra, Together, Baseten) are a
+  per-provider terms-reading decision that has not been made.
 
 ### C-8 — `action/dist` not reproducible from `action/src`
 - **Priority:** High · **Status:** ✅ Fixed
@@ -973,3 +999,62 @@ production build succeeds, `mcp-server` and `action` both build, and
   rebuilt and diffed. A review confined to the source tree would have found
   neither, which is an argument for keeping `check:models` and the dist check in
   CI rather than treating them as review-time chores.
+
+### S-13 reframed — 2026-08-26
+
+Same day, after review. The fix stood; the reasoning behind it did not.
+
+S-13 was written around **datacenter geography** — "US-headquartered providers
+with no CN/HK datacenters". Challenged on whether that is really the concern,
+and it is not. The concern is **corporate control**: a Chinese company can
+retain submitted code, train on it, and be compelled to produce it, and that is
+a different thing from a Western company with enterprise data terms operating a
+datacenter somewhere.
+
+The geographic test was wrong in both directions:
+
+- **Over-flags.** Data in China is reachable by PRC process regardless of who
+  owns the server — which is exactly why AWS China (Sinnet/NWCD) and Azure
+  China (21Vianet) are *separate Chinese legal entities* rather than regions of
+  the global clouds. Traffic to `amazon-bedrock` never enters them. A CN region
+  existing on a vendor's org chart says nothing about this app.
+- **Under-flags, which is worse.** 26 of 103 providers publish a datacenter
+  list. For the other 77, the check is silent — and silence read as "clean" is
+  how a control becomes decoration.
+
+Alibaba was caught correctly, but for the reason that actually matters: Alibaba
+Cloud is a Chinese company. The `dc=[SG,CN]` was corroboration after the fact.
+
+**Nothing about the enforcement changed**, which is the useful part of the
+finding: `ALLOWED_PROVIDERS` was already exactly right under the better test,
+because every entry is a lab serving its own model or a first-party hyperscaler
+cloud. What changed is the rationale in the code and docs, the demotion of the
+region list to `SECONDARY_JURISDICTION_SIGNAL` (with a deprecated alias), and
+an added test asserting no intermediary GPU reseller has been admitted — those
+are excluded as *unreviewed*, not as untrustworthy, and admitting one should
+break a test before it reaches production.
+
+**Mistral Large 3 added**, restoring a fifth lab. Served only by `mistral`
+itself — a French lab serving its own model, so the counterparty is the lab and
+the jurisdiction is the EU. Chosen over `devstral-2512` and `codestral-2508`
+despite both being code-specialised: those are tuned for writing and completing
+code, while reviewing it is a reasoning task. It is also the cheapest of the
+three on input tokens, the side that dominates when submissions are long and
+findings are short.
+
+- **Ground truth:** typecheck clean, lint clean, **242 tests passing**,
+  `check:models` reports 5 models / 0 failing / 2 warning (Grok and Mistral both
+  single-provider), production build succeeds, mcp-server and action build,
+  `action/dist` rebuilt and verified to carry the new roster.
+- **Not verified:** no live review has been run through the `mistral` provider,
+  so its behaviour under the forced `tool_choice` contract rests on the
+  catalogue reporting `tools` support. Worth one real submission before trusting
+  its findings.
+- **Still open at the level above the code:** OpenRouter exposes a
+  `data_collection: "deny"` provider preference that targets "may this provider
+  store or train on inputs" directly — closer to the actual concern than either
+  test used here. Unverified against the live API and not implemented.
+- **Lesson worth keeping:** the check was passing, the roster was clean, and the
+  reasoning was still wrong. A control can enforce the right thing for the wrong
+  reason, and it stays correct only by accident — the next person to extend it
+  reasons from the stated rationale, not from the outcome.

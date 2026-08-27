@@ -66,7 +66,7 @@ itself, so a captured cookie is not a captured master credential. Rotating
 
 ## Reviewers
 
-Four models across four labs, all verified to support tool calling:
+Five models across five labs, all verified to support tool calling:
 
 | Model | Lab |
 |---|---|
@@ -74,41 +74,60 @@ Four models across four labs, all verified to support tool calling:
 | GPT-5.5 | OpenAI |
 | Gemini 3.5 Flash | Google |
 | Grok 4.5 | xAI |
+| Mistral Large 3 | Mistral |
 
-### Where your code is allowed to go
+### Who is allowed to receive your code
 
 A review sends submitted code verbatim to whoever serves the model, and
-submitted code is by definition unreleased work. So the roster is constrained by
-jurisdiction as well as by capability: **no Chinese-lab models, and every
-request pins `provider.only` to an allowlist of US-headquartered providers with
-no CN/HK datacenters** (`src/lib/provider-policy.ts`).
+submitted code is by definition unreleased work. The risk being managed is
+therefore **corporate control**: which legal entity ends up holding the code,
+what its terms permit it to do with it, and whose government can compel it to
+hand the code over.
 
-Both halves are needed. Picking a model is not the same decision as picking a
-jurisdiction — OpenRouter maps one slug to a shifting set of providers, so a
-roster that was clean when written can start routing elsewhere without a line
-changing here. DeepSeek V3.1 and Qwen3 Coder were removed for this reason;
-`qwen/qwen3-coder` was in fact being served by `alibaba`, whose published
-datacenter list includes `CN`.
+Every request pins `provider.only` to an allowlist where each entry is either
+the lab that built the model, serving it directly, or a first-party hyperscaler
+cloud (`src/lib/provider-policy.ts`). In both cases the counterparty is a US or
+EU entity with enterprise data terms and a legal system the code's owner can
+actually reach.
 
-This costs real coverage — two labs' worth of independent opinions — and that
-trade is deliberate rather than incidental.
+The pin is the load-bearing part. Picking a model is not the same decision as
+picking a counterparty — OpenRouter maps one slug to a shifting set of
+providers, so a roster that was clean when written can start routing elsewhere
+without a line changing here. DeepSeek V3.1 and Qwen3 Coder were removed under
+this test: `qwen/qwen3-coder` was being served by Alibaba Cloud, and the
+objection is that Alibaba is a Chinese company whose terms and legal obligations
+put the code beyond its owner's reach.
 
-`npm run check:models` enforces it against OpenRouter's live catalogue and fails
-if any rostered model has picked up a provider outside the allowlist. CI runs it
-on every PR and again weekly, since the catalogue changes on its own schedule.
+**Geography is a secondary signal, not the test.** Data physically in China is
+reachable by PRC legal process whoever owns the server — which is exactly why
+the hyperscalers partition rather than extend, AWS China being a separate
+Chinese entity that AWS Global never routes into. And in the other direction,
+only about a quarter of providers publish a datacenter list at all, so "no CN
+datacenter listed" usually just means "nothing listed".
+
+This costs real coverage. Losing DeepSeek and Qwen cost two labs on an app whose
+premise is cross-lab disagreement; Mistral Large 3 restores one. That trade is
+deliberate rather than incidental.
+
+`npm run check:models` enforces the allowlist against OpenRouter's live
+catalogue and fails if a rostered model has picked up a provider outside it. CI
+runs it on every PR and again weekly, since the catalogue changes on its own
+schedule.
 
 Edit the list in `src/lib/models.ts`. Three things to know before adding one:
 
 - **Confirm it reports `tools` support** at `https://openrouter.ai/api/v1/models`.
   Structured output depends on it.
-- **Check the jurisdiction.** Run `npm run check:models` after adding it. If the
-  model is served by a provider outside the allowlist, decide deliberately
-  whether to drop the model or widen `ALLOWED_PROVIDERS` — do not do the latter
-  to make a red build go green.
+- **Check who would serve it.** Run `npm run check:models`. If the model is
+  served by a provider outside the allowlist, decide deliberately whether to
+  drop the model or admit the provider having read its retention and training
+  terms — do not widen `ALLOWED_PROVIDERS` to make a red build go green. There
+  is no field anywhere for "who ultimately controls this entity", and
+  registration country is actively misleading, so this judgement needs a person.
 - **Prefer multi-provider slugs.** A model served by a single allowlisted
-  provider has no fallback when that provider is degraded. Grok 4.5 is the
-  current example — `check:models` warns about it rather than failing. Check
-  with `https://openrouter.ai/api/v1/models/<slug>/endpoints`.
+  provider has no fallback when that provider is degraded. Grok 4.5 and Mistral
+  Large 3 are both in this position — `check:models` warns rather than failing.
+  Check with `https://openrouter.ai/api/v1/models/<slug>/endpoints`.
 
 ## Commands
 

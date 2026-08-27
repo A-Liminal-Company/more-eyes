@@ -2,21 +2,24 @@ import { describe, expect, it } from "vitest";
 import { MODELS } from "./models";
 import {
   ALLOWED_PROVIDERS,
-  EXCLUDED_JURISDICTIONS,
   PROVIDER_ROUTING,
+  SECONDARY_JURISDICTION_SIGNAL,
   withProviderRouting,
 } from "./provider-policy";
 
 /**
  * These are policy tests, not behaviour tests. They exist so that removing the
- * routing pin, or quietly re-adding a model whose lab is out of policy, fails
- * here rather than being noticed months later in a provider's access log.
+ * routing pin, or quietly re-adding a model whose provider is out of policy,
+ * fails here rather than being noticed months later in a provider's access log.
  *
- * The live-catalogue half of the policy — which providers actually serve each
- * slug today — cannot be asserted offline and is checked by
- * `npm run check:models`, which CI runs separately.
+ * The policy's actual test is **corporate control** — which legal entity ends
+ * up holding submitted code and what it may do with it. That is a judgement no
+ * assertion can make, so what is testable is narrower: that the pin exists,
+ * that known out-of-policy providers stay off the list, and that the roster has
+ * not drifted. The live-catalogue half — which providers actually serve each
+ * slug today — is checked by `npm run check:models`, which CI runs separately.
  */
-describe("jurisdiction policy", () => {
+describe("provider policy", () => {
   it("pins every request to the allowlist, with fallback confined to it", () => {
     expect(PROVIDER_ROUTING.only).toEqual([...ALLOWED_PROVIDERS]);
     // Fallback stays on so an outage at one allowlisted provider is survivable;
@@ -37,14 +40,22 @@ describe("jurisdiction policy", () => {
     expect(params).not.toHaveProperty("provider");
   });
 
-  it("excludes the PRC data-access jurisdictions, not just the mainland", () => {
-    expect([...EXCLUDED_JURISDICTIONS].sort()).toEqual(["CN", "HK", "MO"]);
+  it("keeps the region list as a secondary signal covering the PRC data-access jurisdictions", () => {
+    // Corroborating only. The enforcement is ALLOWED_PROVIDERS; this list just
+    // annotates *why* something outside it is worth a second look, and it is
+    // silent for the ~75% of providers that publish no datacenter list.
+    expect([...SECONDARY_JURISDICTION_SIGNAL].sort()).toEqual([
+      "CN",
+      "HK",
+      "MO",
+    ]);
   });
 
-  it("keeps known out-of-policy providers off the allowlist", () => {
+  it("keeps providers under Chinese corporate control off the allowlist", () => {
     // Slugs observed serving the two models removed from the roster. `alibaba`
-    // is the one that mattered: OpenRouter lists a CN datacenter for it, and it
-    // was serving qwen3-coder.
+    // is the one that mattered — it was serving qwen3-coder, and Alibaba Cloud
+    // is a Chinese company. The CN datacenter OpenRouter lists for it was
+    // corroboration, not the reason.
     for (const slug of [
       "alibaba",
       "deepseek",
@@ -88,6 +99,29 @@ describe("jurisdiction policy", () => {
         expect(lab, `${model.id} lab`).not.toContain(excluded);
         expect(namespace, `${model.id} slug namespace`).not.toContain(excluded);
       }
+    }
+  });
+
+  it("admits no intermediary resellers, only labs and hyperscaler clouds", () => {
+    // The allowlist's defining property is that each entry is either the lab
+    // that built the model or a first-party hyperscaler cloud — so the
+    // counterparty holding the code is one whose terms are already known.
+    // GPU resellers are excluded not as untrustworthy but as unreviewed: each
+    // is a separate judgement about retention and training terms. Adding one
+    // should be a deliberate act that breaks this test first.
+    for (const slug of [
+      "deepinfra",
+      "together",
+      "baseten",
+      "novita",
+      "parasail",
+      "nebius",
+      "crusoe",
+      "venice",
+      "atlas-cloud",
+      "chutes",
+    ]) {
+      expect(ALLOWED_PROVIDERS as readonly string[]).not.toContain(slug);
     }
   });
 

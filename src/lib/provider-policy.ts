@@ -1,69 +1,110 @@
 /**
- * Jurisdiction policy for where submitted code is allowed to be processed.
+ * Who is allowed to receive submitted code.
  *
- * Submitted code is by definition unreleased work, and a review sends it
- * verbatim to whichever provider OpenRouter picks. Choosing a model is
- * therefore not the same decision as choosing a jurisdiction: OpenRouter routes
- * a model *slug* across many independent providers, and the set of providers
- * serving a slug changes over time without the slug changing at all.
+ * Submitted code is unreleased work, and a review ships it verbatim to whoever
+ * serves the model. The risk being managed is therefore **corporate control**:
+ * which legal entity ends up holding the code, what its terms permit it to do
+ * with it, and whose government can compel it to hand the code over.
  *
- * Two things follow, and both are needed:
+ * That is not the same question as where a datacenter sits, and conflating the
+ * two gets both answers wrong. See ALLOWED_PROVIDERS for the primary test and
+ * SECONDARY_JURISDICTION_SIGNAL for why geography is kept only as a
+ * corroborating hint.
  *
- *  1. The reviewer roster in `models.ts` excludes Chinese-lab models.
- *  2. Every OpenRouter request pins `provider.only` to this allowlist, so a
- *     provider added to a slug later cannot silently start receiving code.
+ * Two mechanisms enforce this, and both are needed:
  *
- * Point 2 is the load-bearing one. Observed at the time of writing:
- * `qwen/qwen3-coder` was served by the `alibaba` provider, whose published
- * datacenter list includes `CN` — so the roster change alone fixes today while
- * the pin is what keeps it fixed.
+ *  1. The reviewer roster in `models.ts` only lists models whose providers pass.
+ *  2. Every OpenRouter request pins `provider.only` to the allowlist below, so
+ *     a provider added to a slug later cannot silently start receiving code.
+ *
+ * Mechanism 2 is the load-bearing one. OpenRouter maps a model slug to a
+ * changing set of providers, so a roster that was clean when written can start
+ * routing somewhere new without a single line changing here.
  */
 
 /**
  * OpenRouter provider slugs permitted to receive submitted code.
  *
- * An allowlist rather than a blocklist of Chinese providers, deliberately. A
- * blocklist silently fails open every time OpenRouter onboards a provider; this
- * fails closed, which is the correct direction when the cost of being wrong is
- * someone's unreleased source code sitting in an unintended jurisdiction.
+ * **The test is corporate control, not geography.** Every entry is either the
+ * lab that built the model serving it directly, or a first-party hyperscaler
+ * cloud. In both cases the counterparty is a US or EU entity with enterprise
+ * data terms, a contractual position on training, and a legal system that the
+ * code's owner can actually reach.
  *
- * Every entry is US-headquartered with no CN/HK datacenter in OpenRouter's
- * published provider metadata, verified via `npm run check:models`. These are
- * exactly the providers that serve the current roster — kept tight on purpose,
- * since a wider list only helps once a model needs it.
+ * Excluded by the same test: providers under Chinese corporate control, whose
+ * terms may permit training on inputs and which are subject to compulsion under
+ * PRC law. Alibaba Cloud, DeepSeek, SiliconFlow and Tencent are the ones this
+ * repo has actually encountered — see models.ts for what that cost.
  *
- * Note that headquarters is a weaker signal than it looks: several
- * Chinese-founded providers register in SG. `check:models` screens on
- * datacenters as well, and this list is short enough to re-derive by hand.
+ * An allowlist rather than a blocklist, deliberately. A blocklist fails open
+ * every time OpenRouter onboards a provider; this fails closed, which is the
+ * right direction when being wrong means someone's unreleased source code is
+ * held by an entity they did not choose.
+ *
+ * **This list needs a human.** There is no field in OpenRouter's directory for
+ * "who ultimately controls this entity", and registration country is actively
+ * misleading — several Chinese-founded providers register in SG, and at least
+ * one with Hong Kong roots reports a US headquarters. Corporate control cannot
+ * be screened automatically, which is exactly why the list is kept short enough
+ * to re-derive by hand rather than grown to whatever passes a check.
+ *
+ * Intermediary GPU resellers (DeepInfra, Together, Baseten, Novita and similar)
+ * are absent not because they are Chinese — most are not — but because each one
+ * adds a counterparty whose retention and training terms would need reading.
+ * That is a decision to make deliberately per provider, not a gap to fill.
  */
 export const ALLOWED_PROVIDERS = [
+  // First-party: the lab that built the model, serving it itself.
   "anthropic",
   "openai",
-  "google-vertex",
   "google-ai-studio",
   "xai",
+  "mistral",
+  // First-party hyperscaler clouds.
+  "google-vertex",
   "azure",
   "amazon-bedrock",
   "claude-on-aws",
 ] as const;
 
 /**
- * ISO codes treated as out of policy, checked against both a provider's
- * headquarters and its datacenter list.
+ * A corroborating geographic signal, **not** the primary test.
  *
- * HK and MO are included alongside CN: both are within the same national
- * security law jurisdiction for data access purposes, which is the thing being
- * excluded here rather than the mainland border as such.
+ * Demoted deliberately. It was originally the main screen, which was a mistake
+ * on two counts:
+ *
+ * - **It over-flags.** Data physically in China is reachable by PRC legal
+ *   process regardless of who owns the server, which is precisely why the
+ *   hyperscalers partition rather than extend: AWS China is operated by
+ *   Sinnet/NWCD and Azure China by 21Vianet, as separate Chinese legal
+ *   entities, because the US parent cannot maintain control there. Traffic to
+ *   `amazon-bedrock` or `azure` never enters those partitions, so a CN region
+ *   existing somewhere in the vendor's org chart says nothing about this app.
+ *
+ * - **It under-flags, and this is the worse failure.** Only about a quarter of
+ *   providers in OpenRouter's directory publish a datacenter list at all, so
+ *   "no CN datacenter listed" usually means "nothing listed". A screen that is
+ *   silent on three quarters of its inputs is not a control.
+ *
+ * Kept because when it does fire it is worth reading: Alibaba was the provider
+ * serving `qwen/qwen3-coder`, and `dc=[SG,CN]` is a useful corroboration of a
+ * conclusion that corporate control had already reached on its own.
+ *
+ * HK and MO sit alongside CN: the concern is the data-access jurisdiction, not
+ * the mainland border as such.
  */
-export const EXCLUDED_JURISDICTIONS = ["CN", "HK", "MO"] as const;
+export const SECONDARY_JURISDICTION_SIGNAL = ["CN", "HK", "MO"] as const;
+
+/** @deprecated Use SECONDARY_JURISDICTION_SIGNAL — the name overstated its role. */
+export const EXCLUDED_JURISDICTIONS = SECONDARY_JURISDICTION_SIGNAL;
 
 /**
  * Routing constraints attached to every OpenRouter chat completion.
  *
- * `allow_fallbacks` stays true so the request can still move between the
- * allowlisted providers when one is degraded — the constraint is *which*
- * providers may serve it, not that a single one must. With `only` set,
- * fallback cannot escape the list.
+ * `allow_fallbacks` stays true so a request can still move between allowlisted
+ * providers when one is degraded — the constraint is *which* providers may
+ * serve it, not that a single one must. With `only` set, fallback cannot
+ * escape the list.
  */
 export const PROVIDER_ROUTING = {
   only: [...ALLOWED_PROVIDERS],
@@ -71,11 +112,10 @@ export const PROVIDER_ROUTING = {
 } as const;
 
 /**
- * OpenRouter accepts a top-level `provider` object that the OpenAI SDK's
- * types do not model, since it is an OpenRouter extension. The SDK forwards
- * unknown body properties as-is, so this spreads cleanly into a params object;
- * the cast is confined here rather than repeated at each of the three call
- * sites.
+ * OpenRouter accepts a top-level `provider` object that the OpenAI SDK's types
+ * do not model, since it is an OpenRouter extension. The SDK forwards unknown
+ * body properties as-is, so this spreads cleanly into a params object; the cast
+ * is confined here rather than repeated at each of the three call sites.
  */
 export function withProviderRouting<T extends object>(params: T): T {
   return { ...params, provider: PROVIDER_ROUTING } as T;

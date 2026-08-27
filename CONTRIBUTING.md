@@ -46,9 +46,9 @@ npm run build --prefix action && git add action/dist
 
 `uses: <repo>@v1` executes `action/dist/index.js`, never `action/src`. A source change
 that is not rebuilt simply does not reach anyone using the Action. This is not
-theoretical: the jurisdiction pin in `src/lib/provider-policy.ts` landed in source while
-the committed bundle still routed PR diffs through unrestricted providers. CI now fails
-when `dist` does not match `src`.
+theoretical: the provider pin in `src/lib/provider-policy.ts` landed in source while the
+committed bundle still routed PR diffs through unrestricted providers. CI now fails when
+`dist` does not match `src`.
 
 ## Invariants worth knowing before you change things
 
@@ -101,15 +101,20 @@ change spans storage and rendering, load the page.
 Edit `src/lib/models.ts`, then:
 
 1. **Confirm it supports tool calling** at `https://openrouter.ai/api/v1/models`. Structured output depends on it.
-2. **Check the jurisdiction.** Submitted code is unreleased work, and a review ships it verbatim to whichever provider serves the model. The roster excludes Chinese-lab models and every request pins `provider.only` to the allowlist in `src/lib/provider-policy.ts`. `npm run check:models` fails if your model is served by a provider outside it.
-3. **Prefer a multi-provider slug.** A model served by a single allowlisted provider has no fallback when that provider is degraded. Grok 4.5 is the current example, and `check:models` warns rather than fails on it. Check with `https://openrouter.ai/api/v1/models/<slug>/endpoints`.
+2. **Check who would serve it.** Submitted code is unreleased work, and a review ships it verbatim to whichever provider serves the model. The test is corporate control — which legal entity holds the code and what its terms let it do with it — so `ALLOWED_PROVIDERS` in `src/lib/provider-policy.ts` lists only labs serving their own models and first-party hyperscaler clouds. `npm run check:models` fails if your model is served by anything else.
+3. **Prefer a multi-provider slug.** A model served by a single allowlisted provider has no fallback when that provider is degraded. Grok 4.5 and Mistral Large 3 are both in this position, and `check:models` warns rather than fails on it. Check with `https://openrouter.ai/api/v1/models/<slug>/endpoints`.
 4. Run `npm run check:models` to verify the registry against the live catalogue.
 
 Diversity across labs is the point — models share blind spots with their own family, so a
-second opinion from the same lab is worth less than it looks. The jurisdiction filter cuts
-against that directly: it cost two labs. If you find yourself widening `ALLOWED_PROVIDERS`
-to make a red build go green, that is the wrong direction — drop the model instead, or
-change the policy deliberately and say so in the PR.
+second opinion from the same lab is worth less than it looks. The provider policy cuts
+against that directly: it cost DeepSeek and Qwen, and Mistral Large 3 bought one back.
+
+If you find yourself widening `ALLOWED_PROVIDERS` to make a red build go green, that is
+the wrong direction. Drop the model instead — or admit the provider deliberately, having
+read its retention and training terms, and say so in the PR. No automated check can make
+that judgement: there is no field for "who ultimately controls this entity", and
+registration country is misleading (several Chinese-founded providers register in
+Singapore, and one with Hong Kong roots reports a US headquarters).
 
 ## Security
 
