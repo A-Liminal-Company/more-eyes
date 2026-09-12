@@ -313,8 +313,9 @@ does and does not mean at the end of the closing pass below.
 - **Done:** `npm run check:models` verifies each entry against the public
   catalogue: slug still exists, still reports tool support, and has more than one
   provider. The single-provider warning would have caught the qwen3-coder-plus
-  404 before a user hit it. Needs no API key. Current run: 6 models, 0 failing,
-  0 warnings.
+  404 before a user hit it. Needs no API key. Run at the time: 6 models, 0 failing,
+  0 warnings — the registry has since grown a seventh entry that this script has
+  not yet been run against, see the 2026-09-12 changelog entry.
 - **Remains:** Not wired into CI — it depends on a live external API, and a
   provider outage should not fail an unrelated build. Run it manually when
   touching the registry.
@@ -645,3 +646,49 @@ thing bounding spend, and rotating one header bypassed it entirely.
   not a fresh six-model submission. One model call instead of seven, run on the
   exact data where fragmentation was originally observed, and reproducible
   afterwards. Live verification does not have to mean an expensive one.
+
+### Reviewer registry — GLM 5.3 Flash on trial — 2026-09-12
+
+Feature work, not a review pass. Added a seventh entry to `src/lib/models.ts`
+after being asked whether "Ox Alpha" was worth testing.
+
+- **What Ox Alpha turned out to be:** an anonymous stealth listing
+  (`stealth/ox-alpha`) that ran on OpenRouter 20-26 August 2026 and was revealed
+  as Z.ai's GLM-5.3-Flash. The stealth slug is retired, so the registry points at
+  `z-ai/glm-5.3-flash`. Anything still referencing the old slug will 404.
+- **Why it passes the registry's two rules:** it reports `tools`/`tool_choice`
+  and `response_format`, and roughly twenty providers serve it — far clear of the
+  single-provider trap that broke `qwen3-coder-plus`.
+- **Why the cap stayed at 6:** `MAX_MODELS_PER_SUBMISSION` is now deliberately
+  one below `MODELS.length`. Trying the new model means swapping it in for one of
+  the six incumbents, which is the comparison worth running; raising the cap
+  instead would add a seventh bill and a seventh voice to every consensus count
+  before the model had earned either. Every "six-model run" claim elsewhere in
+  this document and the README stays true as a result.
+- **The open question is diversity, not capability.** It is the third reviewer
+  from a Chinese lab, alongside DeepSeek V3.1 and Qwen3 Coder, and this registry
+  is worth its cost only while entries have independent blind spots. A separate
+  lineage (320B-A18B, newly trained base) is a reason to expect independence, not
+  evidence of it. `/models` already computes the corroboration rate that settles
+  it — that is the instrument, and it needs submissions to run on before it says
+  anything.
+- **Second thing to watch:** it reasons before answering, so it is the entry most
+  likely to hit the 90s `REVIEW_DEADLINE_MS` on a long paste. A timeout is
+  recorded as a failed review rather than lost, so its failure count is the place
+  that will show it.
+- **New surface:** `src/lib/models.test.ts` — guards id and slug uniqueness, and
+  that the cap never exceeds the registry size (a cap *below* it is the trial
+  posture and is allowed).
+- **Ground truth at close:** 239 tests passing (up from 235), typecheck clean,
+  lint clean, production build succeeds.
+- **Not verified — and it matters here:** `npm run check:models` could not run.
+  Outbound requests to `openrouter.ai` are blocked in the environment this change
+  was made in, so the script failed at the catalogue fetch with HTTP 403 for
+  *every* entry, not just the new one. That is no evidence either way about the
+  GLM slug. The tool support and provider count above come from published
+  sources, not from the catalogue API. **Run `npm run check:models` from a
+  machine with OpenRouter access before trusting the new entry**, and expect the
+  registry's first live call to be the real test.
+- **Also unverified:** no live review has been run through GLM 5.3 Flash. Its
+  latency under this app's prompt, its behaviour against the tool schema, and
+  whether its findings duplicate DeepSeek's are all unmeasured.

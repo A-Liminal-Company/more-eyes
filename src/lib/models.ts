@@ -69,10 +69,37 @@ export const MODELS: ModelOption[] = [
     // returns a hard 404. This slug has six providers to fall back through.
     providerModel: "qwen/qwen3-coder",
   },
+  {
+    id: "glm-5.3-flash",
+    label: "GLM 5.3 Flash",
+    lab: "Z.ai",
+    provider: "openrouter",
+    // The model that ran as the anonymous `stealth/ox-alpha` preview in August
+    // 2026. That slug was retired when Z.ai claimed it and is not a working
+    // alias — point at the named one. Around twenty providers serve it, so the
+    // single-provider failure mode described above does not apply here.
+    //
+    // On trial. It is the third reviewer from a Chinese lab, alongside DeepSeek
+    // and Qwen, and this registry is worth its cost only while the entries have
+    // independent blind spots. A separate lineage (320B-A18B, newly trained
+    // base) is a reason to expect independence, not evidence of it — the
+    // corroboration rates on `/models` are what settle whether it earns a
+    // standing seat. It also reasons before answering, which makes it the entry
+    // most likely to hit `REVIEW_DEADLINE_MS` on a long paste, so watch its
+    // failure count too.
+    providerModel: "z-ai/glm-5.3-flash",
+  },
 ];
 
 export const DEFAULT_MODEL_IDS = ["claude-sonnet-5"];
 
+/**
+ * Deliberately one below `MODELS.length` while GLM 5.3 Flash is on trial: a
+ * submission picks six of the seven, so trying the new entry means swapping it
+ * for one of the incumbents and comparing, rather than quietly adding a seventh
+ * bill and a seventh voice to every consensus count. Raise it to
+ * `MODELS.length` once the trial resolves either way.
+ */
 export const MAX_MODELS_PER_SUBMISSION = 6;
 
 const BY_ID = new Map(MODELS.map((m) => [m.id, m]));

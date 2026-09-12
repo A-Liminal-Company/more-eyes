@@ -66,16 +66,32 @@ itself, so a captured cookie is not a captured master credential. Rotating
 
 ## Reviewers
 
-Six models across six labs, all verified to support tool calling:
+Seven models across seven labs, all verified to support tool calling:
 
-| Model | Lab |
-|---|---|
-| Claude Sonnet 5 | Anthropic |
-| GPT-5.5 | OpenAI |
-| Gemini 3.5 Flash | Google |
-| Grok 4.5 | xAI |
-| DeepSeek V3.1 | DeepSeek |
-| Qwen3 Coder | Qwen |
+| Model | Lab | Status |
+|---|---|---|
+| Claude Sonnet 5 | Anthropic | |
+| GPT-5.5 | OpenAI | |
+| Gemini 3.5 Flash | Google | |
+| Grok 4.5 | xAI | |
+| DeepSeek V3.1 | DeepSeek | |
+| Qwen3 Coder | Qwen | |
+| GLM 5.3 Flash | Z.ai | On trial |
+
+A submission still selects at most **six** of them
+(`MAX_MODELS_PER_SUBMISSION`). That gap is deliberate while GLM 5.3 Flash is on
+trial: running it means swapping it in for one of the six and comparing
+corroboration rates on `/models`, rather than adding a seventh bill and a seventh
+voice to every consensus count. If it earns a standing seat, raise the cap to
+seven; if it does not, delete the entry.
+
+GLM 5.3 Flash is the model that ran as the anonymous `stealth/ox-alpha` preview
+in August 2026. That slug is retired and is not a working alias — the registry
+points at `z-ai/glm-5.3-flash`. Two things to watch on it specifically: it
+reasons before answering, so it is the likeliest entry to hit
+`REVIEW_DEADLINE_MS` on a long paste, and it is the third reviewer from a
+Chinese lab, so its value rests on whether its findings are independent of
+DeepSeek's and Qwen's rather than on its benchmark scores.
 
 Edit the list in `src/lib/models.ts`. Two things to know before adding one:
 
