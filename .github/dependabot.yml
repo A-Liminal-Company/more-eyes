@@ -24,6 +24,23 @@ updates:
         dependency-type: development
       production-dependencies:
         dependency-type: production
+    # Majors that failed a local trial on 2026-09-27 (build, lint or install
+    # broke). Each is a planned migration, not a weekly bump, so Dependabot
+    # stops proposing them; minor and patch updates still flow. @types/node
+    # tracks the Node major CI runs (node-version: 22), not the newest types.
+    ignore:
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
+      - dependency-name: vitest
+        update-types: ["version-update:semver-major"]
+      - dependency-name: prisma
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@prisma/client"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /mcp-server
@@ -36,6 +53,13 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    # Both majors broke the ncc bundle in a local trial on 2026-09-27 — a
+    # planned migration, not a weekly bump.
+    ignore:
+      - dependency-name: "@actions/core"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@actions/github"
+        update-types: ["version-update:semver-major"]
 
   # The workflows pin actions by major tag (actions/checkout@v4). Those tags
   # move, but only within a major — this catches the majors.
