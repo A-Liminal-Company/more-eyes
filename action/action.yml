@@ -72,11 +72,42 @@ inputs:
     required: false
     default: "10"
 
+  diff_path:
+    description: >-
+      Path to a unified diff file on the runner. When set, that diff is reviewed
+      instead of the pull request's, on any event, and GITHUB_TOKEN is not needed.
+      Built for release vetting: the workflow generates the upstream diff between
+      two pinned versions and reviews that, not the one-line version bump.
+    required: false
+    default: ""
+  review_title:
+    description: "Title given to the models. Defaults to the PR number, or the diff file path."
+    required: false
+    default: ""
+  review_description:
+    description: >-
+      Context given to the models. Defaults to the PR title. For release vetting,
+      say what is being upgraded, from which version to which.
+    required: false
+    default: ""
+  max_batches:
+    description: >-
+      Cap on diff batches reviewed (each costs one call per model). 0 = no cap.
+      Anything dropped is reported in the summary and the `truncated` output.
+    required: false
+    default: "0"
+  fail_on_truncation:
+    description: "true = fail the run when max_batches left part of the diff unreviewed."
+    required: false
+    default: "false"
+
 outputs:
   findings_count:
     description: "Total number of grouped findings reported."
   skipped:
-    description: "true when the review was skipped (no key available, or the triggering event is not a pull request)."
+    description: "true when the review was skipped (no key available, or the triggering event is not a pull request and no diff_path was given)."
+  truncated:
+    description: "true when max_batches left part of the diff unreviewed."
 
 runs:
   # node20 is deprecated on GitHub runners (they already force node24); the
