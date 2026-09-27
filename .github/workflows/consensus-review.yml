@@ -10,7 +10,7 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # No `if: github.event.pull_request.head.repo.full_name == github.repository`
       # guard here on purpose — the action itself detects a missing
