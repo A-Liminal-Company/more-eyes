@@ -1,0 +1,45 @@
+# Dependency updates for every package manifest in the repo.
+#
+# There are three: the root Next.js app, the MCP server, and the GitHub Action.
+# The Action's is the one that matters most — its `dist/` bundle is what
+# consumers execute, so a stale transitive dependency ships to them directly.
+#
+# Security updates are enabled at the repository level (Settings → Advanced
+# Security), not here; this file governs the scheduled *version* updates. Both
+# are needed: security updates only fire on a published advisory, while version
+# updates keep the tree close enough to current that a security PR applies
+# cleanly instead of demanding a major upgrade under time pressure.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR per ecosystem-week rather than per-package. A framework bump
+      # usually moves several @types and eslint-config packages with it, and
+      # splitting those across PRs means none of them pass CI alone.
+      dev-dependencies:
+        dependency-type: development
+      production-dependencies:
+        dependency-type: production
+
+  - package-ecosystem: npm
+    directory: /mcp-server
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: npm
+    directory: /action
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+
+  # The workflows pin actions by major tag (actions/checkout@v4). Those tags
+  # move, but only within a major — this catches the majors.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

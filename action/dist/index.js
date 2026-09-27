@@ -30664,14 +30664,35 @@ exports.parseDiffFiles = parseDiffFiles;
 exports.filterFiles = filterFiles;
 exports.chunkFiles = chunkFiles;
 /** Mirrors the design doc's stated default excludes: lockfiles, generated/vendored code. */
+/**
+ * Files not worth spending a model call on: lockfiles, build output, vendored
+ * code.
+ *
+ * **Every directory pattern needs both forms.** A pattern containing a slash is
+ * anchored to the repo root (see `matchesGlob`), so `dist/**` matches
+ * `dist/a.js` and *not* `action/dist/index.js`. This repo keeps build output at
+ * two nested paths and commits a 3MB bundle to one of them, so the anchored
+ * form alone silently sent that bundle to every model on every PR that touched
+ * it — bounded only by per-batch truncation, and displacing real files from the
+ * review. The anchoring is deliberate and gitignore-consistent; the defect was
+ * this list.
+ *
+ * Mirrored by the `exclude` default in `action.yml`, which is what actually
+ * takes effect at runtime — `main.ts` reads the input, never this constant.
+ * A test asserts the two are identical, because they had already drifted.
+ */
 exports.DEFAULT_EXCLUDE_GLOBS = [
     "package-lock.json",
     "*.lock",
     "dist/**",
+    "**/dist/**",
     "*.min.*",
     "vendor/**",
+    "**/vendor/**",
     "vendored/**",
+    "**/vendored/**",
     "node_modules/**",
+    "**/node_modules/**",
 ];
 function stripDiffPathPrefix(raw) {
     // "+++ b/path/to/file.ts" (git sometimes trails a tab + timestamp).
@@ -31609,8 +31630,34 @@ exports.modelLabel = modelLabel;
  * Deliberately spans different labs — models share blind spots with their own
  * family, so diversity is what makes a second opinion worth paying for.
  *
+ * Diversity stops where corporate control does. Submitted code is unreleased
+ * work and a review ships it verbatim to whoever serves the model, so every
+ * entry must be servable by a provider in `provider-policy.ts` — a lab serving
+ * its own model, or a first-party hyperscaler cloud. DeepSeek V3.1 and Qwen3
+ * Coder were removed for that reason: `qwen/qwen3-coder` was served by Alibaba
+ * Cloud, and the objection is that Alibaba is a Chinese company whose terms and
+ * legal obligations put the code beyond its owner's reach — not that a rack
+ * happens to sit in a particular country.
+ *
+  * Losing DeepSeek and Qwen cost two labs on an app whose whole premise is
+ * cross-lab disagreement. Mistral Large 3 and Nova 2 Lite restore both, from a
+ * French lab serving its own model and from Amazon via Bedrock respectively —
+ * the latter at no policy cost, since Bedrock was already allowlisted.
+ *
+ * Meta was considered and rejected, which is worth recording so it is not
+ * re-litigated: every Llama available on an allowlisted provider states a
+ * knowledge cutoff of 2024-08-31 or earlier, against 2025-12 and 2025-01 for
+ * the rest of the roster. This repo reviews code written against framework
+ * versions that postdate that by two years — see AGENTS.md, which exists
+ * precisely because models carry stale framework knowledge. A reviewer that
+ * confidently misremembers current APIs does not merely add nothing; the
+ * outlier badge on single-model findings actively invites a second look at its
+ * false positives. Revisit when Meta ships something current on Bedrock or
+ * Vertex.
+ *
  * To add one: confirm it reports `tools` support at
- * https://openrouter.ai/api/v1/models before adding it here.
+ * https://openrouter.ai/api/v1/models, then run `npm run check:models`, which
+ * fails if any provider serving the slug falls outside the allowlist.
  */
 exports.MODELS = [
     {
@@ -31646,31 +31693,239 @@ exports.MODELS = [
         providerModel: "x-ai/grok-4.5",
     },
     {
-        id: "deepseek-v3.1",
-        label: "DeepSeek V3.1",
-        lab: "DeepSeek",
+        id: "mistral-large-3",
+        label: "Mistral Large 3",
+        lab: "Mistral",
         provider: "openrouter",
-        providerModel: "deepseek/deepseek-chat-v3.1",
+        // Served only by `mistral` itself — a French lab serving its own model, so
+        // the counterparty is the lab and the jurisdiction is the EU. Single
+        // provider means no fallback if Mistral is degraded; check:models warns
+        // about this rather than failing, same as Grok.
+        //
+        // Chosen over devstral-2512 and codestral-2508 despite both being
+        // code-specialised: those are tuned for writing and completing code, and
+        // reviewing it is a reasoning task rather than an editing one. Large 3 is
+        // also the cheapest of the three on input tokens, which is the side that
+        // dominates here — submissions are long, findings are short.
+        providerModel: "mistralai/mistral-large-2512",
     },
     {
-        id: "qwen3-coder",
-        label: "Qwen3 Coder",
-        lab: "Qwen",
+        id: "nova-2-lite",
+        label: "Nova 2 Lite",
+        lab: "Amazon",
         provider: "openrouter",
-        // Not the "-plus" variant: that one is served by Alibaba alone, so any
-        // account data policy excluding Alibaba leaves no endpoint and OpenRouter
-        // returns a hard 404. This slug has six providers to fall back through.
-        providerModel: "qwen/qwen3-coder",
+        // Served by amazon-bedrock, already on the allowlist — this entry cost no
+        // policy change at all, which is the cheapest way to buy back a lab.
+        //
+        // Nova 2 Lite rather than Nova Premier despite Premier being the more
+        // capable tier: Premier is the older generation and bills $2.50/$12.50 per
+        // M against Lite's $0.30/$2.50, which would make it the most expensive
+        // reviewer on the roster by a wide margin. As a supplementary voice in a
+        // consensus — not a primary — the newer generation at an eighth the input
+        // price is the better trade. Revisit if its corroboration rate on /models
+        // comes in low.
+        providerModel: "amazon/nova-2-lite-v1",
+    },
+    {
+        id: "inkling",
+        label: "Inkling",
+        lab: "Thinking Machines",
+        provider: "openrouter",
+        // The newest model on the roster by roughly seven months, and the only
+        // entry requiring an intermediary provider: Thinking Machines serves no
+        // first-party endpoint, so this rides on DeepInfra. See the admission note
+        // in provider-policy.ts for why that one and not Together or Baseten.
+        //
+        // Worth watching on /models rather than assuming: the lab was founded
+        // largely by ex-OpenAI researchers, so its errors may correlate with
+        // GPT-5.5's more than a nominally separate lab suggests. A consensus is
+        // only worth what its independence is worth, and corroboration rate is the
+        // measurement that would show it.
+        providerModel: "thinkingmachines/inkling",
     },
 ];
 exports.DEFAULT_MODEL_IDS = ["claude-sonnet-5"];
-exports.MAX_MODELS_PER_SUBMISSION = 6;
+/** Every rostered model. Derived so trimming the roster cannot leave it stale. */
+exports.MAX_MODELS_PER_SUBMISSION = exports.MODELS.length;
 const BY_ID = new Map(exports.MODELS.map((m) => [m.id, m]));
 function getModel(id) {
     return BY_ID.get(id);
 }
 function modelLabel(id) {
     return BY_ID.get(id)?.label ?? id;
+}
+
+
+/***/ }),
+
+/***/ 97183:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/**
+ * Who is allowed to receive submitted code.
+ *
+ * Submitted code is unreleased work, and a review ships it verbatim to whoever
+ * serves the model. The risk being managed is therefore **corporate control**:
+ * which legal entity ends up holding the code, what its terms permit it to do
+ * with it, and whose government can compel it to hand the code over.
+ *
+ * That is not the same question as where a datacenter sits, and conflating the
+ * two gets both answers wrong. See ALLOWED_PROVIDERS for the primary test and
+ * SECONDARY_JURISDICTION_SIGNAL for why geography is kept only as a
+ * corroborating hint.
+ *
+ * Two mechanisms enforce this, and both are needed:
+ *
+ *  1. The reviewer roster in `models.ts` only lists models whose providers pass.
+ *  2. Every OpenRouter request pins `provider.only` to the allowlist below, so
+ *     a provider added to a slug later cannot silently start receiving code.
+ *
+ * Mechanism 2 is the load-bearing one. OpenRouter maps a model slug to a
+ * changing set of providers, so a roster that was clean when written can start
+ * routing somewhere new without a single line changing here.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.PROVIDER_ROUTING = exports.EXCLUDED_JURISDICTIONS = exports.SECONDARY_JURISDICTION_SIGNAL = exports.ALLOWED_PROVIDERS = void 0;
+exports.withProviderRouting = withProviderRouting;
+/**
+ * OpenRouter provider slugs permitted to receive submitted code.
+ *
+ * **The test is corporate control, not geography.** Every entry is either the
+ * lab that built the model serving it directly, or a first-party hyperscaler
+ * cloud. In both cases the counterparty is a US or EU entity with enterprise
+ * data terms, a contractual position on training, and a legal system that the
+ * code's owner can actually reach.
+ *
+ * Excluded by the same test: providers under Chinese corporate control, whose
+ * terms may permit training on inputs and which are subject to compulsion under
+ * PRC law. Alibaba Cloud, DeepSeek, SiliconFlow and Tencent are the ones this
+ * repo has actually encountered — see models.ts for what that cost.
+ *
+ * An allowlist rather than a blocklist, deliberately. A blocklist fails open
+ * every time OpenRouter onboards a provider; this fails closed, which is the
+ * right direction when being wrong means someone's unreleased source code is
+ * held by an entity they did not choose.
+ *
+ * **This list needs a human.** There is no field in OpenRouter's directory for
+ * "who ultimately controls this entity", and registration country is actively
+ * misleading — several Chinese-founded providers register in SG, and at least
+ * one with Hong Kong roots reports a US headquarters. Corporate control cannot
+ * be screened automatically, which is exactly why the list is kept short enough
+ * to re-derive by hand rather than grown to whatever passes a check.
+ *
+ * Intermediary GPU resellers are excluded by default — not because they are
+ * Chinese, most are not, but because each adds a counterparty whose retention
+ * and training terms need reading first. That is a per-provider decision to
+ * make deliberately, not a gap to fill. DeepInfra is the sole admission so far
+ * and carries its reasoning inline below; Together, Baseten, Novita and the
+ * rest remain out.
+ */
+exports.ALLOWED_PROVIDERS = [
+    // First-party: the lab that built the model, serving it itself.
+    "anthropic",
+    "openai",
+    "google-ai-studio",
+    "xai",
+    "mistral",
+    // First-party hyperscaler clouds.
+    "google-vertex",
+    "azure",
+    "amazon-bedrock",
+    "claude-on-aws",
+    /**
+     * The one intermediary, admitted deliberately rather than by drift.
+     *
+     * Thinking Machines does not serve Inkling itself — no first-party endpoint
+     * exists — so reaching the newest model available at all required accepting a
+     * reseller. Of the three that serve it, DeepInfra is the only one whose
+     * privacy policy makes an unconditional commitment about inference data: it
+     * will not store, sell, or train on API inputs and outputs without explicit
+     * consent. Together's equivalent is real but opt-in through an account
+     * setting, and the account is OpenRouter's rather than ours. Baseten's policy
+     * says nothing about model inputs at all — every mention of "inference" or
+     * "train" in it is page navigation or a CCPA category list.
+     *
+     * Two caveats worth keeping visible. First, this list is global rather than
+     * per-model, so DeepInfra is now eligible for any rostered model it happens
+     * to serve — none today, but that can change without notice here. Second, we
+     * are not DeepInfra's customer; OpenRouter is. Their policy describes what is
+     * possible, not what is configured for our traffic, which is why
+     * `data_collection: "deny"` below matters more than this reading does.
+     */
+    "deepinfra",
+];
+/**
+ * A corroborating geographic signal, **not** the primary test.
+ *
+ * Demoted deliberately. It was originally the main screen, which was a mistake
+ * on two counts:
+ *
+ * - **It over-flags.** Data physically in China is reachable by PRC legal
+ *   process regardless of who owns the server, which is precisely why the
+ *   hyperscalers partition rather than extend: AWS China is operated by
+ *   Sinnet/NWCD and Azure China by 21Vianet, as separate Chinese legal
+ *   entities, because the US parent cannot maintain control there. Traffic to
+ *   `amazon-bedrock` or `azure` never enters those partitions, so a CN region
+ *   existing somewhere in the vendor's org chart says nothing about this app.
+ *
+ * - **It under-flags, and this is the worse failure.** Only about a quarter of
+ *   providers in OpenRouter's directory publish a datacenter list at all, so
+ *   "no CN datacenter listed" usually means "nothing listed". A screen that is
+ *   silent on three quarters of its inputs is not a control.
+ *
+ * Kept because when it does fire it is worth reading: Alibaba was the provider
+ * serving `qwen/qwen3-coder`, and `dc=[SG,CN]` is a useful corroboration of a
+ * conclusion that corporate control had already reached on its own.
+ *
+ * HK and MO sit alongside CN: the concern is the data-access jurisdiction, not
+ * the mainland border as such.
+ */
+exports.SECONDARY_JURISDICTION_SIGNAL = ["CN", "HK", "MO"];
+/** @deprecated Use SECONDARY_JURISDICTION_SIGNAL — the name overstated its role. */
+exports.EXCLUDED_JURISDICTIONS = exports.SECONDARY_JURISDICTION_SIGNAL;
+/**
+ * Routing constraints attached to every OpenRouter chat completion.
+ *
+ * `only` answers *who* may receive the code. `data_collection` answers the
+ * separate question of *whether they may keep it* — a provider can be entirely
+ * above suspicion on control and still retain submissions and train on them.
+ * The allowlist alone does not address that, and OpenRouter's default for this
+ * field is `"allow"`, so leaving it unset opts into the permissive behaviour.
+ *
+ * `allow_fallbacks` stays true so a request can still move between allowlisted
+ * providers when one is degraded — the constraint is *which* providers may
+ * serve it, not that a single one must. With `only` set, fallback cannot
+ * escape the list.
+ *
+ * **Failure mode worth knowing:** if `deny` leaves a model with no eligible
+ * provider, that model's request fails rather than silently downgrading. That
+ * is the correct direction — no provider willing to commit to not storing the
+ * code means the code should not be sent — and `reviewWithModels` already
+ * degrades a single model failure into a recorded `status: "failed"` shown on
+ * the review page, so a submission still returns whatever else succeeded.
+ *
+ * Not used here: OpenRouter also accepts `zdr: true`, restricting routing to
+ * Zero Data Retention endpoints. It is stricter than this and currently far too
+ * strict to apply globally — of the six rostered models only Grok (`xai/zdr`)
+ * and Mistral Large 3 (`mistral/zdr`) publish ZDR endpoints, so enabling it
+ * would fail the other four outright. Worth revisiting per-model if a
+ * maximum-assurance tier is ever wanted.
+ */
+exports.PROVIDER_ROUTING = {
+    only: [...exports.ALLOWED_PROVIDERS],
+    allow_fallbacks: true,
+    data_collection: "deny",
+};
+/**
+ * OpenRouter accepts a top-level `provider` object that the OpenAI SDK's types
+ * do not model, since it is an OpenRouter extension. The SDK forwards unknown
+ * body properties as-is, so this spreads cleanly into a params object; the cast
+ * is confined here rather than repeated at each of the three call sites.
+ */
+function withProviderRouting(params) {
+    return { ...params, provider: exports.PROVIDER_ROUTING };
 }
 
 
@@ -31752,6 +32007,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.reviewWithOpenRouter = reviewWithOpenRouter;
 const openai_1 = __importDefault(__nccwpck_require__(82011));
 const errors_1 = __nccwpck_require__(88594);
+const provider_policy_1 = __nccwpck_require__(97183);
 const validation_1 = __nccwpck_require__(66678);
 const shared_1 = __nccwpck_require__(66019);
 async function reviewWithOpenRouter(providerModel, input) {
@@ -31767,7 +32023,7 @@ async function reviewWithOpenRouter(providerModel, input) {
     });
     let completion;
     try {
-        completion = await (0, shared_1.withDeadline)(client.chat.completions.create({
+        completion = await (0, shared_1.withDeadline)(client.chat.completions.create((0, provider_policy_1.withProviderRouting)({
             model: providerModel,
             max_tokens: 4096,
             tools: [
@@ -31788,7 +32044,7 @@ async function reviewWithOpenRouter(providerModel, input) {
                 { role: "system", content: shared_1.SYSTEM_PROMPT },
                 { role: "user", content: (0, shared_1.buildUserPrompt)(input) },
             ],
-        }), providerModel);
+        })), providerModel);
     }
     catch (err) {
         if (err instanceof errors_1.ReviewError)
@@ -31978,6 +32234,7 @@ exports.redTeamGroups = redTeamGroups;
 const openai_1 = __importDefault(__nccwpck_require__(82011));
 const consensus_1 = __nccwpck_require__(22190);
 const shared_1 = __nccwpck_require__(66019);
+const provider_policy_1 = __nccwpck_require__(97183);
 function isRedTeamAssignment(value) {
     if (typeof value !== "object" || value === null)
         return false;
@@ -32194,7 +32451,7 @@ function parseRedTeamResult(raw) {
     };
 }
 async function redTeamOne(client, model, group, input) {
-    const completion = await (0, shared_1.withDeadline)(client.chat.completions.create({
+    const completion = await (0, shared_1.withDeadline)(client.chat.completions.create((0, provider_policy_1.withProviderRouting)({
         model,
         max_tokens: 2048,
         tools: [
@@ -32212,7 +32469,7 @@ async function redTeamOne(client, model, group, input) {
             { role: "system", content: SYSTEM_PROMPT },
             { role: "user", content: buildPrompt(group, input) },
         ],
-    }), `red team (${model})`);
+    })), `red team (${model})`);
     const toolCall = completion.choices[0]?.message?.tool_calls?.[0];
     if (!toolCall || !("function" in toolCall))
         return null;

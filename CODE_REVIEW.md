@@ -1,6 +1,6 @@
 # Code Review — More Eyes
 
-Last updated: 2026-07-30 · Self-review findings closed — all findings resolved
+Last updated: 2026-08-26 · Pass 3 — baseline security net added; 4 of 12 new findings fixed; S-13 reframed around corporate control
 
 Tracked findings across security, reliability, accessibility, test coverage, and
 code quality. Kept current by the `more-eyes-review` skill — run it to
@@ -42,9 +42,28 @@ or reused, even once resolved, so changelog entries stay meaningful.
 | R-6 | Reliability | Medium | Rate-limit map grows unbounded across client keys | ✅ Fixed | `src/lib/rate-limit.ts` |
 | C-7 | Code quality | Medium | Consensus matching is lexical and has a ceiling | ✅ Fixed | `src/lib/consensus-llm.ts`, `src/lib/consensus.ts` |
 
-**25 fixed · 0 partial · 0 open** — the five findings from the self-review pass
-are now closed alongside everything before them. See the note on what "0 open"
-does and does not mean at the end of the closing pass below.
+| S-9 | Security | High | 9 high-severity CVEs in the dependency tree | ✅ Fixed | `package.json`, `package-lock.json` |
+| S-10 | Security | High | No automated security net on a public repo | ✅ Fixed | `.github/dependabot.yml`, `.github/workflows/codeql.yml` |
+| S-13 | Security | High | Submitted code routed to a Chinese-controlled provider | ✅ Fixed | `src/lib/provider-policy.ts`, `src/lib/models.ts`, `scripts/check-models.ts` |
+| S-14 | Security | Medium | Providers permitted to store and train on submissions | 🟡 Partial | `src/lib/provider-policy.ts` |
+| R-8 | Reliability | Medium | Nested build output not excluded from Action reviews | ✅ Fixed | `action/src/diff.ts`, `action/action.yml` |
+| R-9 | Reliability | High | Fixed `max_tokens` starves reasoning models before the tool call | 🔴 Open | `src/lib/providers/openrouter.ts`, `src/lib/models.ts` |
+| R-10 | Reliability | Medium | Gemini 3.5 Flash returns no structured review | 🔴 Open | `src/lib/models.ts`, `scripts/check-models.ts` |
+| C-8 | Code quality | High | `action/dist` not reproducible from `action/src` | ✅ Fixed | `action/dist/index.js`, `.github/workflows/ci.yml` |
+| S-11 | Security | Medium | Model-authored text fenced in one place, raw in another | 🔴 Open | `action/src/report.ts` |
+| A11Y-5 | Accessibility | Medium | `opacity-70` text fails WCAG AA on high/medium cards | 🔴 Open | `src/app/review/[id]/findings-list.tsx` |
+| T-4 | Test coverage | Medium | Action and MCP entry points untested | 🔴 Open | `action/src/main.ts`, `mcp-server/src/index.ts` |
+| C-9 | Code quality | Medium | Review doc and skill went stale against the code | 🟡 Partial | `CODE_REVIEW.md`, `.claude/skills/more-eyes-review/SKILL.md` |
+| S-12 | Security | Low | CSP allows `script-src 'unsafe-inline'` in production | 🔴 Open | `src/proxy.ts` |
+| R-7 | Reliability | Low | Request-size guard bypassable without `content-length` | 🔴 Open | `src/app/api/reviews/route.ts` |
+| C-10 | Code quality | Low | `comment_mode` defaults to `both` but does nothing | 🔴 Open | `action/action.yml` |
+| C-11 | Code quality | Low | `.env.example` misrepresents `ANTHROPIC_API_KEY` | 🔴 Open | `.env.example` |
+
+**30 fixed · 2 partial · 9 open** — the 25 findings from passes 1–2 all still
+hold (re-verified against the code, not the doc). Pass 3 added 12: the four
+High ones are fixed, the rest are open by choice pending a go-ahead on Medium
+priority. See the note on what "0 open" did and did not mean at the end of the
+closing pass below — it applies just as much to these counts.
 
 ## Details
 
@@ -318,6 +337,270 @@ does and does not mean at the end of the closing pass below.
 - **Remains:** Not wired into CI — it depends on a live external API, and a
   provider outage should not fail an unrelated build. Run it manually when
   touching the registry.
+
+### S-9 — 9 high-severity CVEs in the dependency tree
+- **Priority:** High · **Status:** ✅ Fixed
+- **Files:** `package.json`, `package-lock.json`
+- **Found:** `npm audit` reported 9 high advisories, 7 reachable from production
+  dependencies. `next@16.2.12` pulled a vulnerable `postcss` (three advisories,
+  all arbitrary `.map` file disclosure via attacker-controlled
+  `sourceMappingURL`) and `sharp <0.35.0` (four inherited libvips CVEs).
+- **Why it matters:** The app is deployed and public-facing, and this is exactly
+  the class of thing S-10's Dependabot exists to surface. It had been sitting
+  unflagged because nothing was watching.
+- **Done:** Bumped to `next@16.3.3`, which clears both. `npm audit fix` then
+  cleared `brace-expansion`, `js-yaml`, and `nanoid` without a breaking change.
+  9 high → 3 high.
+- **Remains:** Three, all one chain: `prisma` → `@prisma/config` →
+  `deepmerge-ts` (stack exhaustion merging recursive object graphs). Not taken,
+  because npm's only offered "fix" is a **downgrade** to `prisma@6.12.0` —
+  backwards across a major, reaching code that predates the advisory rather than
+  resolves it. The reachable surface is `@prisma/config` parsing our own schema
+  at build time, not attacker-supplied input. Dependabot now tracks the real
+  upstream fix.
+
+### S-10 — No automated security net on a public repo
+- **Priority:** High · **Status:** ✅ Fixed
+- **Files:** `.github/dependabot.yml`, `.github/workflows/codeql.yml`, repo settings
+- **Found:** The repository is **public**, and Dependabot alerts, Dependabot
+  security updates, secret scanning, and push protection were all disabled. No
+  code scanning of any kind existed.
+- **Why it matters:** A live `OPENROUTER_API_KEY` sits in a gitignored `.env`.
+  One `git add -A` slip publishes a billable credential to a public repo with
+  nothing positioned to catch it. Separately, S-9 proves the dependency half was
+  not hypothetical — real CVEs were already present and unflagged.
+- **Done:** `dependabot.yml` covering all three npm manifests plus the Actions
+  themselves, grouped so a framework bump moves its `@types` and eslint-config
+  packages in one PR rather than several that each fail CI alone. A CodeQL
+  workflow on push, PR, and weekly schedule, running `security-extended` rather
+  than the default pack — the injection- and XSS-class queries are the reason
+  for adding it and are not in the default set. No build step, since the
+  `javascript-typescript` extractor reads sources directly. The four repository
+  toggles were enabled via the API and verified as `enabled` afterwards.
+- **Remains:** Secret scanning validity checks and non-provider patterns are
+  still off — both are available and free on a public repo. Validity checks in
+  particular would tell you whether a leaked key is still live. Left off because
+  they were outside what was asked for, not because they were judged unhelpful.
+  No CodeQL run has completed yet, so the first results are unreviewed.
+
+### S-13 — Submitted code routed to a Chinese-controlled provider
+- **Priority:** High · **Status:** ✅ Fixed
+- **Files:** `src/lib/provider-policy.ts` (new), `src/lib/models.ts`,
+  `src/lib/providers/openrouter.ts`, `src/lib/consensus-llm.ts`,
+  `src/lib/redteam.ts`, `scripts/check-models.ts`,
+  `src/lib/provider-policy.test.ts` (new)
+- **Found:** The roster included DeepSeek V3.1 and Qwen3 Coder. Checking
+  OpenRouter's live endpoint data, `qwen/qwen3-coder` was being served by the
+  `alibaba` provider, whose published datacenter list includes `CN`. Submitted
+  code was physically routing into mainland China. `deepseek-chat-v3.1` was
+  additionally served by SiliconFlow and Novita.
+- **Why it matters:** Submitted code is by definition unreleased work, and a
+  review ships it verbatim to whoever serves the model. Choosing a model is not
+  the same decision as choosing a jurisdiction — that distinction is the whole
+  finding.
+- **Done:** Two layers, because either alone is insufficient. (1) Both
+  Chinese-lab models removed from the roster — this fixes today. (2) Every
+  OpenRouter request now pins `provider.only` to an allowlist of
+  US-headquartered providers with no CN/HK datacenters — this is what keeps it
+  fixed, since OpenRouter maps one slug to a shifting set of providers and a
+  clean roster can start routing elsewhere without a line changing here. An
+  allowlist rather than a blocklist, so onboarding a new provider fails closed.
+  `check:models` now enforces the policy against the live catalogue and runs in
+  CI per-PR and weekly. Verified by re-adding both models: exits 1 and names
+  `alibaba (hq=SG, dc=SG/CN) ← excluded jurisdiction` as the reason.
+- **Reframed after review:** the fix was right, the stated rationale was not.
+  It was written around **datacenter geography**, and the correct test is
+  **corporate control** — which legal entity holds the code, what its terms
+  permit, and whose government can compel disclosure. The two are genuinely
+  different, and leading with geography got both directions wrong. It
+  *over-flags*: data in China is reachable by PRC process whoever owns the
+  server, which is precisely why the hyperscalers partition (AWS China is a
+  separate Chinese entity that AWS Global never routes into), so a CN region on
+  a vendor's org chart says nothing about this app. And it *under-flags*, which
+  is worse: only ~25% of providers in OpenRouter's directory publish a
+  datacenter list, so "no CN datacenter" usually means "nothing listed".
+  Alibaba was correctly caught, but because Alibaba Cloud is a Chinese company —
+  the `dc=CN` was corroboration, not the reason. `ALLOWED_PROVIDERS` was already
+  correct under the better test (all entries are labs serving their own models
+  or first-party hyperscaler clouds), so enforcement did not change; the
+  rationale, the region list's role, and the docs did.
+  `EXCLUDED_JURISDICTIONS` is now `SECONDARY_JURISDICTION_SIGNAL`, kept as a
+  corroborating annotation with a deprecated alias.
+- **Remains:** The cost is real — two labs' worth of independent opinions on an
+  app whose premise is cross-lab disagreement. Mistral Large 3 restores one:
+  a French lab serving its own model, so the counterparty is the lab and the
+  jurisdiction is the EU. A test asserts at least two labs remain so the policy
+  cannot quietly collapse the roster to one, and another asserts no intermediary
+  GPU reseller has been admitted without a deliberate decision. Grok 4.5 and
+  Mistral Large 3 both have a single allowlisted provider, so an outage at
+  either removes that reviewer; `check:models` warns rather than fails. The
+  deeper limitation is unfixable by tooling: there is no field anywhere for
+  "who ultimately controls this entity", and registration country misleads —
+  several Chinese-founded providers register in SG, and one with Hong Kong
+  roots reports a US headquarters. The allowlist needs a person, which is why
+  it is kept short enough to re-derive by hand. Amazon Nova and Llama 4 remain
+  available through already-allowlisted providers at zero policy cost if more
+  labs are wanted; the US GPU resellers (DeepInfra, Together, Baseten) are a
+  per-provider terms-reading decision that has not been made. Amazon was
+  subsequently taken up (Nova 2 Lite); Meta was rejected on capability rather
+  than policy — see the roster note below.
+
+### C-8 — `action/dist` not reproducible from `action/src`
+- **Priority:** High · **Status:** ✅ Fixed
+- **Files:** `action/dist/index.js`, `.github/workflows/ci.yml`, `CONTRIBUTING.md`
+- **Found:** Rebuilding the committed ncc bundle produced a different artifact —
+  3,117,637 bytes committed against 3,136,138 rebuilt. CI acknowledged this in a
+  comment and checked it anyway: "drift between action/src and action/dist won't
+  fail this, only a broken build will."
+- **Why it matters:** `uses: <repo>@v1` executes `dist/index.js`, never
+  `action/src`. Reviewed source and executed artifact could differ with nothing
+  positioned to notice. This turned out to be load-bearing rather than
+  hygienic: the committed bundle contained **zero** occurrences of the S-13
+  provider routing pin, so the Action as published would have kept sending PR
+  diffs to unrestricted providers while the source said otherwise.
+- **Done:** Confirmed ncc is deterministic given the same lockfile (three
+  consecutive builds, identical SHA-256). CI now rebuilds and fails when the
+  tree is left dirty, with the fix command in the error message. The rebuilt
+  bundle is committed, which is what closes the current gap. `CONTRIBUTING.md`
+  documents the rebuild step and cites this incident as the reason.
+- **Remains:** The check proves `dist` matches `src` **at the lockfile CI
+  resolves**. It is not a reproducible-build guarantee in the cryptographic
+  sense, and it cannot detect a bundle committed together with a matching
+  malicious source change. Publishing provenance attestations would close that;
+  it was out of scope here.
+
+### S-11 — Model-authored text fenced in one place, raw in another
+- **Priority:** Medium · **Status:** 🔴 Open
+- **Files:** `action/src/report.ts:142-144`
+- **Found:** `fence()` correctly wraps red-team `reasoning` and `exploit` in a
+  backtick run long enough to survive their own contents. But
+  `finding.description`, `group.title`, `assumption`, and `rationale` are
+  interpolated raw into the job-summary markdown.
+- **Why it matters:** A description containing `</details>`, a `###` heading, or
+  the literal text "No findings." can restructure or spoof the report. The whole
+  value of the product is that the summary can be trusted; content originating
+  in submitted code should not be able to rewrite the verdict's framing. GitHub
+  sanitizes HTML in job summaries, so this is layout and content spoofing rather
+  than XSS.
+- **Done:** Nothing yet.
+- **Remains:** All of it. The fix is small — route every model-authored field
+  through the existing `fence()` or an inline-escaping equivalent, noting that
+  titles sit in a heading where fencing is wrong and escaping is right.
+
+### A11Y-5 — `opacity-70` text fails WCAG AA on high/medium cards
+- **Priority:** Medium · **Status:** 🔴 Open
+- **Files:** `src/app/review/[id]/findings-list.tsx:113` (category label), `:29`
+  (`STATUS_STYLES.persistent`), `:46` (`REDTEAM_STYLES.no`)
+- **Found:** Contrast ratios computed rather than eyeballed. `text-xs` at
+  `opacity-70` on `bg-red-100`/`text-red-900` gives **4.16:1**; on
+  `bg-amber-100`/`text-amber-900`, **3.92:1**. Both are below the 4.5:1 required
+  for normal-size text, and `text-xs` is unambiguously normal size.
+- **Why it matters:** It affects the category label on *every* finding card plus
+  the "persistent" and "not demonstrated" pills — and the high and medium cards
+  are precisely the ones a reader most needs to be able to read.
+- **Done:** Nothing yet.
+- **Remains:** All of it. Scope is narrower than it first appears: low-severity
+  (gray) cards pass at 5.27:1 and all of dark mode passes at 6.96:1, so this is
+  light mode, high and medium severity only. `opacity-80` already passes at
+  5.27:1, which suggests the smallest correct fix is raising 70 to 80 — worth
+  re-computing rather than assuming.
+
+### T-4 — Action and MCP entry points untested
+- **Priority:** Medium · **Status:** 🔴 Open
+- **Files:** `action/src/main.ts`, `mcp-server/src/index.ts`
+- **Found:** `action/src/report.ts` and `action/src/diff.ts` are well covered,
+  but `main.ts` — which holds the fork-PR skip paths, the cross-batch red-team
+  budget arithmetic, and the gate wiring — has no tests. `mcp-server/` has none
+  at all.
+- **Why it matters:** Two of the three shipping surfaces have untested entry
+  points. The shared red-team budget in particular was a deliberate bug fix
+  (commit `775f096`, "Make the red-team cap a budget shared across the Action's
+  batches") and nothing currently prevents it regressing to `cap × batches`.
+- **Done:** Nothing yet.
+- **Remains:** All of it. `main.ts` needs `@actions/core` and `@actions/github`
+  mocked, which is why it was skipped originally; the budget arithmetic could be
+  extracted into a pure helper and tested directly at much lower cost.
+
+### C-9 — Review doc and skill went stale against the code
+- **Priority:** Medium · **Status:** 🟡 Partial
+- **Files:** `CODE_REVIEW.md`, `.claude/skills/more-eyes-review/SKILL.md`
+- **Found:** This document was last updated 2026-07-30 and predated the red-team
+  pass, the MCP server, the GitHub Action, and the Postgres migration — roughly
+  ten commits of new subsystems it did not mention. The skill's repo notes still
+  described "Prisma over SQLite" and "Requires `ANTHROPIC_API_KEY`" when the app
+  had moved to Postgres and OpenRouter. `A11Y-4` appears in commit `e231329` but
+  never reached the summary table, and `C-1`/`C-2` are absent entirely.
+- **Why it matters:** This is the mechanism intended to make re-review cheap.
+  Wrong repo notes do not merely fail to help — they actively mislead the next
+  pass into checking for the wrong things.
+- **Done:** Both files brought current in pass 3. The skill now also verifies the
+  S-10 tooling is still enabled and runs `check:models` for S-13.
+- **Remains:** The underlying cause is unaddressed: nothing links a subsystem
+  landing to this document being updated. `A11Y-4`, `C-1`, and `C-2` are still
+  unaccounted for — their IDs stay burned rather than being reused.
+
+### S-12 — CSP allows `script-src 'unsafe-inline'` in production
+- **Priority:** Low · **Status:** 🔴 Open
+- **Files:** `src/proxy.ts:91`
+- **Found:** The production CSP is `script-src 'self' 'unsafe-inline'`. The
+  existing comment explains it accurately: Next inlines hydration scripts and a
+  nonce-free policy needs `unsafe-inline` for them.
+- **Why it matters:** `unsafe-inline` substantially weakens what CSP contributes
+  against XSS. It is defense-in-depth rather than a live vulnerability — React
+  escapes by default and no unsanitized HTML injection point was found — but it
+  removes the layer meant to catch the case where one is introduced.
+- **Done:** Nothing. The tradeoff was made knowingly when S-4 landed.
+- **Remains:** Next 16 supports nonce-based CSP generated in the proxy, which
+  would let `unsafe-inline` be dropped. Worth revisiting now that the proxy is
+  already doing per-request work.
+
+### R-7 — Request-size guard bypassable without `content-length`
+- **Priority:** Low · **Status:** 🔴 Open
+- **Files:** `src/app/api/reviews/route.ts:33`
+- **Found:** The 413 guard reads the `content-length` header. When it is absent
+  — chunked transfer encoding — `Number(null ?? 0)` evaluates to `0` and the
+  check passes, after which `await request.json()` buffers the body before zod's
+  20,000-character cap can apply.
+- **Why it matters:** Less than it first appears, and the initial assessment of
+  Medium was wrong. Because this app uses `proxy.ts`, Next already buffers
+  request bodies with a **10MB default cap** (`proxyClientMaxBodySize`), so the
+  body cannot actually grow unbounded; an oversized request is truncated and
+  then fails JSON parsing, returning a clean 400. The residual issue is that
+  10MB per concurrent request is still generous for an endpoint whose largest
+  legitimate body is roughly 36KB.
+- **Done:** Nothing yet. Reclassified High→Medium→Low once Next's own buffering
+  behaviour was read rather than assumed.
+- **Remains:** Set `experimental.proxyClientMaxBodySize` in `next.config.ts` to
+  something near `MAX_REQUEST_BYTES` so the framework enforces the same ceiling
+  the route intends. Note the setting is marked experimental.
+
+### C-10 — `comment_mode` defaults to `both` but does nothing
+- **Priority:** Low · **Status:** 🔴 Open
+- **Files:** `action/action.yml:35-38`
+- **Found:** The input is accepted and defaults to `both`, but `main.ts` never
+  reads it and no PR comment is ever posted — only the job summary is written.
+- **Why it matters:** Honestly documented as reserved for M3 in both the input
+  description and `action/README.md`, so this is a papercut rather than a
+  deception. But a default naming behaviour that does not exist invites a
+  consumer to configure it and conclude the Action is broken.
+- **Done:** Nothing.
+- **Remains:** Either default it to `summary`, which is what actually happens,
+  or implement M3. The former is a one-line change.
+
+### C-11 — `.env.example` misrepresents `ANTHROPIC_API_KEY`
+- **Priority:** Low · **Status:** 🔴 Open
+- **Files:** `.env.example`
+- **Found:** The file leads with `ANTHROPIC_API_KEY` and a "Get a key from
+  console.anthropic.com" comment, giving no indication it is optional. The
+  README's variable table correctly marks it **No**, since Claude is routed via
+  OpenRouter by default.
+- **Why it matters:** `.env.example` is what a new contributor copies. Leading
+  with an optional key implies two credentials are required when one is, and the
+  genuinely required pair (`OPENROUTER_API_KEY`, `APP_ACCESS_SECRET`) is further
+  down.
+- **Done:** Nothing.
+- **Remains:** Reorder so required variables come first, and mark the Anthropic
+  key optional with the condition under which it is needed.
 
 ## Changelog
 
@@ -645,3 +928,398 @@ thing bounding spend, and rotating one header bypassed it entirely.
   not a fresh six-model submission. One model call instead of seven, run on the
   exact data where fragmentation was originally observed, and reproducible
   afterwards. Live verification does not have to mean an expensive one.
+
+### Pass 3 — 2026-08-26
+
+First pass since the repo grew three shipping surfaces. Scope was a full
+re-review plus standing up a baseline security net in GitHub's own tooling.
+
+**Ground truth at open:** typecheck clean, lint clean, 235 tests passing,
+production build succeeds. No regressions — all 25 findings from passes 1–2
+re-verified against the code rather than trusted from this document, and every
+one still holds.
+
+**The document itself was the first finding.** It was last updated 2026-07-30
+and described a Prisma-over-SQLite app requiring `ANTHROPIC_API_KEY`. Since
+then the app moved to Postgres and OpenRouter and gained a red-team pass, an
+MCP server, and a GitHub Action — none of which appeared here. The skill's repo
+notes were wrong in the same ways, which is worse than absent, since they told
+the next pass to go looking for the wrong things. Filed as C-9.
+
+**Twelve new findings: four High, four Medium, four Low.** The four High are
+fixed; the rest are open pending a decision on Medium priority.
+
+- **S-9** — `npm audit` reported 9 high advisories, 7 reachable from production
+  deps, via `next@16.2.12` → vulnerable `postcss` and `sharp`. `next@16.3.3`
+  plus a non-breaking `audit fix` took it to 3. The remaining three are one
+  `prisma` → `@prisma/config` → `deepmerge-ts` chain whose only offered fix is a
+  *downgrade* across a major, which is not a fix.
+- **S-10** — the requested security net. The repo is public and had Dependabot
+  alerts, Dependabot security updates, secret scanning, and push protection all
+  **disabled**, with no code scanning at all. All four toggles enabled and
+  verified; `dependabot.yml` covers three npm manifests plus the Actions;
+  CodeQL runs `security-extended` on push, PR, and weekly. S-9 is the proof
+  this was not theoretical — real CVEs were already sitting unflagged.
+- **S-13** — raised mid-pass, and the most consequential finding here. Verified
+  against OpenRouter's live endpoint data that `qwen/qwen3-coder` was served by
+  `alibaba`, whose published datacenters include `CN`: submitted code was
+  actually routing into mainland China, not hypothetically. Fixed in two layers,
+  because removing the models alone fixes only today — requests now pin
+  `provider.only` to an allowlist, since OpenRouter remaps slugs to new
+  providers without anything in this repo changing. Cost two labs.
+- **C-8** — the committed Action bundle did not match its source. This stopped
+  being hygiene the moment S-13 landed: the published `dist` contained **zero**
+  occurrences of the new routing pin, so the Action would have kept sending PR
+  diffs to unrestricted providers while the source said otherwise. A fix that
+  reaches source but not the shipped artifact is not a fix.
+
+**One assessment corrected mid-pass.** R-7 was first written up as Medium on the
+reasoning that a missing `content-length` lets an unbounded body reach
+`request.json()`. Reading Next 16's own `proxyClientMaxBodySize` documentation
+showed the framework already buffers proxy-handled bodies with a 10MB default
+cap, so the body cannot actually grow without bound and an oversized request
+degrades to a clean 400. Downgraded to Low. The finding survives only as
+"10MB is a poor ceiling for a 36KB endpoint."
+
+**Ground truth at close:** typecheck clean, lint clean, **241 tests passing**
+(up from 235), `check:models` reports 4 models / 0 failing / 1 warning,
+production build succeeds, `mcp-server` and `action` both build, and
+`action/dist` verified in sync with `action/src`.
+
+- **Verified rather than asserted:** the jurisdiction check was negative-tested
+  by re-adding both removed models — it exits 1 and names
+  `alibaba (hq=SG, dc=SG/CN) ← excluded jurisdiction`. ncc determinism was
+  confirmed across three consecutive builds with identical SHA-256, which is
+  what makes the new CI dist check meaningful rather than flaky. The four
+  repository security toggles were re-read from the API after enabling and
+  confirmed `enabled`.
+- **Not verified:** no CodeQL run has completed, so its first findings are
+  unreviewed and may add to this list. Dependabot has not yet opened its first
+  PR. Nothing was exercised against a live model — the roster change is
+  catalogue-verified, not confirmed by an actual review request through a pinned
+  provider. Nothing was deployed.
+- **Method note worth keeping:** the two most valuable findings this pass came
+  from checking live external state rather than reading code. `models.ts` looks
+  entirely correct in isolation; only OpenRouter's provider directory reveals
+  where the code actually goes. Likewise `action/dist` looks fine until it is
+  rebuilt and diffed. A review confined to the source tree would have found
+  neither, which is an argument for keeping `check:models` and the dist check in
+  CI rather than treating them as review-time chores.
+
+### S-13 reframed — 2026-08-26
+
+Same day, after review. The fix stood; the reasoning behind it did not.
+
+S-13 was written around **datacenter geography** — "US-headquartered providers
+with no CN/HK datacenters". Challenged on whether that is really the concern,
+and it is not. The concern is **corporate control**: a Chinese company can
+retain submitted code, train on it, and be compelled to produce it, and that is
+a different thing from a Western company with enterprise data terms operating a
+datacenter somewhere.
+
+The geographic test was wrong in both directions:
+
+- **Over-flags.** Data in China is reachable by PRC process regardless of who
+  owns the server — which is exactly why AWS China (Sinnet/NWCD) and Azure
+  China (21Vianet) are *separate Chinese legal entities* rather than regions of
+  the global clouds. Traffic to `amazon-bedrock` never enters them. A CN region
+  existing on a vendor's org chart says nothing about this app.
+- **Under-flags, which is worse.** 26 of 103 providers publish a datacenter
+  list. For the other 77, the check is silent — and silence read as "clean" is
+  how a control becomes decoration.
+
+Alibaba was caught correctly, but for the reason that actually matters: Alibaba
+Cloud is a Chinese company. The `dc=[SG,CN]` was corroboration after the fact.
+
+**Nothing about the enforcement changed**, which is the useful part of the
+finding: `ALLOWED_PROVIDERS` was already exactly right under the better test,
+because every entry is a lab serving its own model or a first-party hyperscaler
+cloud. What changed is the rationale in the code and docs, the demotion of the
+region list to `SECONDARY_JURISDICTION_SIGNAL` (with a deprecated alias), and
+an added test asserting no intermediary GPU reseller has been admitted — those
+are excluded as *unreviewed*, not as untrustworthy, and admitting one should
+break a test before it reaches production.
+
+**Mistral Large 3 added**, restoring a fifth lab. Served only by `mistral`
+itself — a French lab serving its own model, so the counterparty is the lab and
+the jurisdiction is the EU. Chosen over `devstral-2512` and `codestral-2508`
+despite both being code-specialised: those are tuned for writing and completing
+code, while reviewing it is a reasoning task. It is also the cheapest of the
+three on input tokens, the side that dominates when submissions are long and
+findings are short.
+
+- **Ground truth:** typecheck clean, lint clean, **242 tests passing**,
+  `check:models` reports 5 models / 0 failing / 2 warning (Grok and Mistral both
+  single-provider), production build succeeds, mcp-server and action build,
+  `action/dist` rebuilt and verified to carry the new roster.
+- **Not verified:** no live review has been run through the `mistral` provider,
+  so its behaviour under the forced `tool_choice` contract rests on the
+  catalogue reporting `tools` support. Worth one real submission before trusting
+  its findings.
+- **Since closed:** the `data_collection: "deny"` preference noted here as
+  unverified was confirmed against OpenRouter's provider-routing documentation
+  and implemented — see the S-14 entry below.
+- **Lesson worth keeping:** the check was passing, the roster was clean, and the
+  reasoning was still wrong. A control can enforce the right thing for the wrong
+  reason, and it stays correct only by accident — the next person to extend it
+  reasons from the stated rationale, not from the outcome.
+
+### Roster restored to six labs — 2026-08-26
+
+Nova 2 Lite added via `amazon-bedrock`, which was already on the allowlist — so
+this cost no policy change and no new counterparty. That is the cheapest kind of
+addition and the first place to look when the roster needs widening.
+
+Nova 2 Lite rather than Nova Premier: Premier is the more capable tier but the
+older generation, and bills $2.50/$12.50 per M against Lite's $0.30/$2.50, which
+would have made it the most expensive reviewer on the roster by a wide margin.
+For a supplementary voice in a consensus rather than a primary one, the newer
+generation at an eighth the input price is the better trade. The `/models` page
+tracks corroboration rate per model, so this is a decision that can be revisited
+on evidence rather than argued about.
+
+**Meta was considered and rejected — on capability, not policy.** Llama 4
+Maverick and Scout are both reachable through `google-vertex` and would also
+have cost no policy change. Every Llama available on an allowlisted provider
+states a knowledge cutoff of **2024-08-31** (Llama 4) or **2023-12-31**
+(Llama 3.3), against 2025-12 for GPT-5.5 and 2025-01 for Gemini 3.5 Flash.
+
+That gap is disqualifying for this specific tool rather than merely
+unattractive. This repo's own `AGENTS.md` opens with "This is NOT the Next.js
+you know — APIs, conventions, and file structure may all differ from your
+training data", which is an admission that stale framework knowledge is the
+known failure mode here. A reviewer two years behind will produce confident,
+specific, wrong findings about current APIs — and the UI makes that worse rather
+than better: `outlierSignal` badges a single-model finding with "often a unique
+catch rather than noise — worth a second look before dismissing", which is
+exactly the wrong advice for a stale-knowledge false positive. Adding Llama
+would have degraded the agreement signal the product is built on.
+
+Worth revisiting when Meta ships something current on Bedrock or Vertex. The
+general lesson is now written into the contributor checklist: **check the
+knowledge cutoff**, because a model can pass every policy and capability gate
+and still be the wrong reviewer.
+
+- **Ground truth:** typecheck clean, lint clean, 242 tests passing,
+  `check:models` reports 6 models / 0 failing / 3 warning (Grok, Mistral and
+  Nova all single-provider), production build succeeds, `action/dist` rebuilt.
+- **Not verified:** neither Mistral Large 3 nor Nova 2 Lite has served a live
+  review. Both report `tools` support in the catalogue, but neither has been
+  exercised against the forced `tool_choice` contract, and neither has a
+  corroboration rate on `/models` yet. Their value here is asserted, not
+  measured — one real six-model submission would settle both.
+
+### S-14 — Providers permitted to store and train on submissions
+- **Priority:** Medium · **Status:** 🟡 Partial
+- **Files:** `src/lib/provider-policy.ts`
+- **Found:** S-13 pinned `provider.only`, which controls *who* receives
+  submitted code. It says nothing about whether they may keep it. OpenRouter's
+  `data_collection` field defaults to `"allow"`, so every request this app made
+  was opting into providers that may store inputs — including under the fixed
+  allowlist. A provider can pass every question about corporate control and
+  still retain submissions and train on them.
+- **Why it matters:** It is the closest available control to the actual concern
+  — that submitted code becomes someone else's asset. Neither the allowlist nor
+  the region check addresses retention at all, so this was the gap they left.
+- **Done:** `data_collection: "deny"` added to `PROVIDER_ROUTING`, with a test
+  asserting it, since an unset field silently reverts to permissive. Verified
+  against OpenRouter's provider-routing documentation, which lists the field as
+  `"allow" | "deny"` defaulting to `"allow"`.
+- **Remains:** **Not verified at runtime.** OpenRouter's public API does not
+  expose per-endpoint data-collection policy — confirmed by dumping the full
+  endpoint object, which carries pricing, uptime, quantization and supported
+  parameters but nothing about retention. So there is no way to determine
+  statically which providers survive the filter, and no way to know whether any
+  rostered model is left with zero eligible providers. That failure mode is
+  safe by construction (`reviewWithModels` records a per-model failure and the
+  review page shows it) but it is unconfirmed. One live submission across all
+  six models would settle it.
+  `zdr: true` is the stricter sibling and was deliberately not used: of the six
+  rostered models only Grok (`xai/zdr`) and Mistral Large 3 (`mistral/zdr`)
+  publish ZDR endpoints, so enabling it globally would fail the other four.
+  Worth revisiting per-model for a maximum-assurance tier.
+
+### Provider data policies read — 2026-08-26
+
+Prompted by evaluating Thinking Machines' Inkling, which is served only by
+intermediary GPU resellers rather than by the lab itself. Reading the three
+providers' actual policies changed two conclusions.
+
+**Baseten had been the recommendation, on 1M context and uptime. That was
+wrong** — those are performance criteria applied to a data-governance question.
+Its privacy policy says nothing whatsoever about model inputs, prompts, or
+training on inference data. Every occurrence of "inference" and "train" in it is
+either footer navigation or a CCPA category list ("Inferences drawn from other
+personal information"). It is a generic website privacy template.
+
+- **DeepInfra** — the only unconditional commitment of the three: will not
+  store, sell, or train on API inputs and outputs absent explicit consent.
+- **Together** — a real Zero Data Retention mode, but **opt-in through an
+  account setting**, and the account is OpenRouter's rather than ours.
+- **Baseten** — silent.
+
+**The structural point outlasts the specific findings: we are not these
+providers' customer.** OpenRouter is. Their policies describe what is possible,
+not what is configured for our traffic, and the toggles they describe are not
+ours to set. That is what moved the fix from "pick the provider with the best
+policy" to "set the routing parameter", and it is why S-14 exists at all.
+
+If Inkling is ever added, it should be through DeepInfra rather than Baseten —
+the reverse of the earlier recommendation.
+
+### R-8 — Nested build output not excluded from Action reviews
+- **Priority:** Medium · **Status:** ✅ Fixed
+- **Files:** `action/src/diff.ts`, `action/action.yml`, `action/src/diff.test.ts`
+- **Found:** The default exclude list carried `dist/**`, and a pattern
+  containing a slash is matched against the full repo-relative path. So it
+  matched `dist/a.js` and never `action/dist/index.js` or `mcp-server/dist/**`.
+  This repo commits a 3MB ncc bundle to the first of those.
+- **Why it matters:** Every PR touching the bundle sent it to every configured
+  model — bounded only by per-batch truncation, and displacing real changed
+  files from the review. A reviewer looking at 30KB of minified output is worse
+  than one model fewer, because the run still reports as a success.
+- **Done:** `**/` forms added alongside the anchored ones for `dist`, `vendor`,
+  `vendored` and `node_modules`. The matcher's anchoring is deliberate and
+  gitignore-consistent, so it was left alone — the defect was the list.
+- **Underneath it:** `DEFAULT_EXCLUDE_GLOBS` in `diff.ts` and the `exclude`
+  default in `action.yml` are two copies of one list, and **only the yaml takes
+  effect** — `main.ts` reads the Action input and never the constant. So the
+  copy under test was not the live copy, and they had already drifted in intent.
+  Both corrected, and a test now asserts they are identical.
+- **Remains:** Nothing for this defect. The duplication itself is structural —
+  an Action's inputs must be declared in `action.yml` — so the test is the fix
+  rather than deduplication.
+- **How it was found:** Not by reading the code. By testing the exclusion
+  against this repo's actual paths while sizing what a dogfood PR would cost.
+  The glob looks correct in isolation and is correct by its own documented
+  semantics; only the combination of that semantics with this repo's layout is
+  wrong.
+
+### Inkling added, DeepInfra admitted — 2026-08-26
+
+The first intermediary provider on the allowlist, and the first admission made
+deliberately rather than by default.
+
+Thinking Machines serves no first-party endpoint for Inkling, so reaching the
+newest model available at all — released roughly seven months after anything
+else on the roster — required accepting a reseller. Reading the three that serve
+it decided which:
+
+- **DeepInfra** — unconditional: will not store, sell, or train on API inputs
+  and outputs without explicit consent. Admitted.
+- **Together** — real Zero Data Retention, but opt-in through an account
+  setting, and the account is OpenRouter's rather than ours. Not admitted.
+- **Baseten** — silent on model inputs entirely. Not admitted.
+
+**The check's severity model had to change, and that is the interesting part.**
+`check:models` previously failed whenever any non-allowlisted provider served a
+rostered model. That was right while the allowlist was entirely first-party: an
+unknown provider meant the pin had silently started doing real work. With a
+deliberate partial admission, partial coverage becomes the normal case — Inkling
+is served by DeepInfra *and* by Together and Baseten, which are pinned out — so
+the old rule would have failed the policy for working as designed.
+
+Now: **FAIL** when no allowlisted provider serves the model (unroutable), or
+when a provider in a flagged region serves it — that one still never receives
+code, but it means the serving set now reaches somewhere the policy exists to
+avoid, which deserves a person rather than a line of scrollback. **WARN** for
+benign non-allowlisted providers, naming them. Negative-tested by re-adding
+Qwen3 Coder: exits 1 with `alibaba (hq=SG, dc=SG/CN)`.
+
+- **Watch on `/models`:** Thinking Machines was founded largely by ex-OpenAI
+  researchers, so Inkling's errors may correlate with GPT-5.5's more than a
+  nominally separate lab implies. A consensus is worth what its independence is
+  worth, and corroboration rate is the measurement that would show it. Recorded
+  as something to check rather than something assumed either way.
+- **Not verified:** Inkling has served no live review. It is also the second
+  model whose only allowlisted provider is a single endpoint, so a DeepInfra
+  outage removes it entirely.
+
+### R-9 — Fixed `max_tokens` starves reasoning models before the tool call
+- **Priority:** High · **Status:** 🔴 Open
+- **Files:** `src/lib/providers/openrouter.ts` (`max_tokens: 4096`), `src/lib/models.ts`
+- **Found:** Inkling failed on all three batches of the first live run with
+  "did not return a structured review". Reproduced against the real diff: at
+  the shipped `max_tokens: 4096` it spends **4,258 reasoning tokens**, hits
+  `finish_reason: "length"`, and returns zero content and no tool call. The same
+  call with `reasoning: {effort: "low"}` returns a tool call in 237 completion
+  tokens; with `max_tokens: 16000` it returns one after 6,442 reasoning tokens.
+- **Why it matters:** The budget is a single constant shared by every model, and
+  it silently does not account for reasoning tokens. This is not an Inkling
+  quirk — it is a design assumption that stops holding for any reasoning model,
+  and reasoning models are what the frontier is made of now. Grok 4.5 also timed
+  out at 90s on one batch, which is plausibly the same cause wearing a different
+  error message. The failure is total and silent: the model is billed, produces
+  nothing usable, and the review reports success one voice short.
+- **Done:** Nothing yet — reported, per the standing instruction to report
+  rather than fix.
+- **Remains:** All of it. Three candidate directions, in ascending order of
+  work: set `reasoning: {effort: "low"}` for reasoning models, which is also
+  **5.7× cheaper** here ($0.0047 vs $0.027 per call) and reads as the right
+  default for a structured-extraction task; raise `max_tokens` per model rather
+  than globally; or make `ModelOption` carry its own token budget so the
+  constant stops being one-size-fits-all. Whichever is chosen, `finish_reason:
+  "length"` deserves a distinct error message — "did not return a structured
+  review" sent the first investigation toward the tool schema rather than the
+  budget.
+
+### R-10 — Gemini 3.5 Flash returns no structured review
+- **Priority:** Medium · **Status:** 🔴 Open
+- **Files:** `src/lib/models.ts`, `scripts/check-models.ts`
+- **Found:** Failed all three batches of the first live run. Probed directly
+  with no provider constraints, with `provider.only`, and with
+  `data_collection: "deny"`: identical in all three — routes to Google, returns
+  empty content and no tool call.
+- **Why it matters:** A rostered model has been contributing nothing. Worse, it
+  fails *quietly* — the review page shows "N of M models responded", so the
+  consensus silently rests on fewer voices than the roster implies, and every
+  agreement count is measured against a denominator that includes a model that
+  never answers.
+- **Not caused by this pass.** The identical failure with no provider
+  constraints at all rules out `provider.only` and `data_collection`. It is
+  pre-existing roster rot that the first live multi-model run surfaced.
+- **Done:** Nothing yet — reported.
+- **Remains:** Determine whether the tool schema needs adjusting for Gemini or
+  whether the entry should move to a working slug, then decide. The wider gap is
+  in `check:models`: it verifies a model *advertises* `tools` support in the
+  catalogue and never that it actually honours a forced `tool_choice`. That is
+  exactly the difference between what the catalogue claims and what the model
+  does, which is the same class of gap S-13 turned on. A periodic live smoke
+  call per model — one tiny request, asserting a tool call comes back — would
+  close it for cents.
+
+### First live run — 2026-08-27
+
+The PR opened against `main` is the first time the full roster ran against real
+traffic, and the first exercise of `provider.only` and `data_collection:
+"deny"`. All four checks passed; the interesting results are underneath that.
+
+**What it verified — S-13 and S-14 both close their runtime gaps:**
+
+- The provider pin routes successfully. Claude, GPT-5.5, Grok, Mistral and Nova
+  all returned reviews through it, so `data_collection: "deny"` does not leave
+  the roster unroutable — the failure mode S-14 flagged as unconfirmed.
+- **Mistral Large 3 works** — 8 findings on the first batch.
+- **Nova 2 Lite works** — 4 findings on the first batch.
+- 29 grouped findings across 19 files in 3 batches.
+
+**What it found — two models on the roster do not work:**
+
+- **Inkling: 0 for 3.** Diagnosed to R-9, a fixed `max_tokens` that reasoning
+  models exhaust before emitting the tool call. Added earlier the same day and
+  never exercised, which is exactly what "not verified" meant in that entry.
+- **Gemini 3.5 Flash: 0 for 3.** Diagnosed to R-10 and pre-existing.
+
+Both failures were invisible before this run, and neither is the kind of thing
+the test suite can catch — 248 tests pass with two of seven reviewers dead.
+
+**Dependabot reported 24 vulnerabilities on `main`** the moment the branch was
+pushed (9 high, 12 moderate, 3 low), which is S-10 doing its job before the PR
+even opened.
+
+- **Method note worth keeping:** every finding in this entry came from live
+  execution, and none of them from reading code. The roster looks correct in
+  `models.ts`, `check:models` passes, and the type system is satisfied. Two of
+  seven reviewers still return nothing. Dogfooding is not a nicety here — it is
+  the only instrument that measures the thing the product actually sells.
+- **Cost:** the PR review run plus roughly $0.05 of diagnostic probes.

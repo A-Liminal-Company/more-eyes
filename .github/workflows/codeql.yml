@@ -1,0 +1,59 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Advisories land continuously, and the query packs improve between pushes.
+  # A weekly run means a newly-published query gets applied to code that has
+  # not changed, which is where the interesting findings usually are.
+  schedule:
+    - cron: "27 4 * * 1"
+
+# A push to main and its merged PR can race; the PR run is the redundant one.
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      # Uploading the SARIF results is what makes findings appear under the
+      # repository's Security tab rather than only in the job log.
+      security-events: write
+      contents: read
+      actions: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # `javascript-typescript` covers .ts/.tsx and, importantly, the
+        # committed `action/dist/index.js` bundle. There is no second language
+        # in this repo — the matrix is here so adding one is a one-line change.
+        language: ["javascript-typescript"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # security-extended adds the injection- and XSS-class queries beyond
+          # the default set, which is the reason this workflow exists. It is
+          # noisier than `default`; `security-and-quality` would be noisier
+          # still and overlaps with what eslint already enforces in CI.
+          queries: security-extended
+
+      # No build step. `javascript-typescript` uses CodeQL's own extractor and
+      # analyses the sources directly, so `npm ci && npm run build` would only
+      # add several minutes and a Postgres service for no extra coverage.
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}

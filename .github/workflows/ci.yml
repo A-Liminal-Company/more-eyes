@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The jurisdiction check reads OpenRouter's live provider directory, which
+  # changes without anything in this repo changing. A weekly run catches a
+  # model that has picked up an out-of-policy provider on a quiet week.
+  schedule:
+    - cron: "17 5 * * 1"
 
 jobs:
   check:
@@ -48,8 +53,30 @@ jobs:
       - run: npx tsc --noEmit
       - run: npx eslint .
       - run: npm test
+      # Jurisdiction policy: fails if a rostered model is served by a provider
+      # outside the allowlist in src/lib/provider-policy.ts. Hits OpenRouter's
+      # public catalogue, so it needs no key — but it does need the network,
+      # and a failure here is a policy question, not a flaky test.
+      - run: npm run check:models
       - run: npm run build
       - run: npm run build --prefix mcp-server
-      # Confirms the committed ncc bundle can be rebuilt; drift between
-      # action/src and action/dist won't fail this, only a broken build will.
       - run: npm run build --prefix action
+      # `dist/` is what consumers actually execute — `uses: <repo>@v1` runs the
+      # committed bundle, never action/src. So a build that merely *succeeds*
+      # proves nothing: source and shipped artifact can differ without any
+      # check noticing, which is a supply-chain gap rather than an untidiness.
+      # ncc is deterministic given the same lockfile, so a rebuild that leaves
+      # the tree dirty means the committed bundle does not correspond to the
+      # reviewed source.
+      - name: Verify action/dist matches action/src
+        run: |
+          if ! git diff --quiet -- action/dist; then
+            echo "::error::action/dist is stale — it does not match action/src."
+            echo "The bundle in dist/ is what consumers of this Action execute,"
+            echo "so it must be rebuilt and committed alongside any src change."
+            echo "Fix: npm run build --prefix action && git add action/dist"
+            echo ""
+            git --no-pager diff --stat -- action/dist
+            exit 1
+          fi
+          echo "action/dist is in sync with action/src."

@@ -38,10 +38,28 @@ is either useful or funny depending on the day.
 forwarded to fork PRs, so the Action detects the missing key and exits successfully
 rather than failing your build. That is deliberate, not a bug you need to fix.
 
+**If you touched anything under `action/src` or `src/lib`, rebuild the Action bundle:**
+
+```bash
+npm run build --prefix action && git add action/dist
+```
+
+`uses: <repo>@v1` executes `action/dist/index.js`, never `action/src`. A source change
+that is not rebuilt simply does not reach anyone using the Action. This is not
+theoretical: the provider pin in `src/lib/provider-policy.ts` landed in source while the
+committed bundle still routed PR diffs through unrestricted providers. CI now fails when
+`dist` does not match `src`.
+
 ## Invariants worth knowing before you change things
 
 These are the load-bearing decisions. Breaking one is fine if you have a reason, but say
 so in the PR, because each of these exists because the alternative bit us.
+
+**`PROVIDER_ROUTING` carries two independent controls, not one.** `only` decides who may
+receive submitted code; `data_collection: "deny"` decides whether they may keep it. It is
+easy to read the second as redundant once the first is in place — it is not. A provider
+can pass every question about corporate control and still retain and train on what you
+send it, and OpenRouter's default for that field is `"allow"`.
 
 **Grouping stays deterministic.** `groupFindings` in `src/lib/consensus.ts` is plain code
 — category match plus token overlap — and it runs on every page render. A model call in
@@ -89,11 +107,23 @@ change spans storage and rendering, load the page.
 Edit `src/lib/models.ts`, then:
 
 1. **Confirm it supports tool calling** at `https://openrouter.ai/api/v1/models`. Structured output depends on it.
-2. **Prefer a multi-provider slug.** A model served by a single provider returns a hard 404 if your account's data policy excludes that provider, with no fallback. This is why the list uses `qwen/qwen3-coder` rather than `qwen/qwen3-coder-plus`. Check with `https://openrouter.ai/api/v1/models/<slug>/endpoints`.
-3. Run `npm run check:models` to verify the registry against the live catalogue.
+2. **Check who would serve it.** Submitted code is unreleased work, and a review ships it verbatim to whichever provider serves the model. The test is corporate control — which legal entity holds the code and what its terms let it do with it — so `ALLOWED_PROVIDERS` in `src/lib/provider-policy.ts` lists only labs serving their own models and first-party hyperscaler clouds. `npm run check:models` fails if your model is served by anything else.
+3. **Check the knowledge cutoff.** A reviewer whose training predates the framework versions you ship will produce confident, wrong findings about current APIs. This is what ruled Meta's models out — every Llama on an allowlisted provider states a 2024-08-31 cutoff or earlier, against 2025-12 for the rest of the roster.
+4. **Prefer a multi-provider slug.** A model served by a single allowlisted provider has no fallback when that provider is degraded. Grok 4.5, Mistral Large 3 and Nova 2 Lite are all in this position, and `check:models` warns rather than fails on it. Check with `https://openrouter.ai/api/v1/models/<slug>/endpoints`.
+5. Run `npm run check:models` to verify the registry against the live catalogue.
 
 Diversity across labs is the point — models share blind spots with their own family, so a
-second opinion from the same lab is worth less than it looks.
+second opinion from the same lab is worth less than it looks. The provider policy cuts
+against that directly: it cost DeepSeek and Qwen. Mistral Large 3 and Nova 2 Lite bought
+both back — the latter through a provider already on the allowlist, which is the cheapest
+kind of addition and the first place to look.
+
+If you find yourself widening `ALLOWED_PROVIDERS` to make a red build go green, that is
+the wrong direction. Drop the model instead — or admit the provider deliberately, having
+read its retention and training terms, and say so in the PR. No automated check can make
+that judgement: there is no field for "who ultimately controls this entity", and
+registration country is misleading (several Chinese-founded providers register in
+Singapore, and one with Hong Kong roots reports a US headquarters).
 
 ## Security
 

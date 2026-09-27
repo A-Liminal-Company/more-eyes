@@ -15,14 +15,35 @@ export type DiffFile = {
 };
 
 /** Mirrors the design doc's stated default excludes: lockfiles, generated/vendored code. */
+/**
+ * Files not worth spending a model call on: lockfiles, build output, vendored
+ * code.
+ *
+ * **Every directory pattern needs both forms.** A pattern containing a slash is
+ * anchored to the repo root (see `matchesGlob`), so `dist/**` matches
+ * `dist/a.js` and *not* `action/dist/index.js`. This repo keeps build output at
+ * two nested paths and commits a 3MB bundle to one of them, so the anchored
+ * form alone silently sent that bundle to every model on every PR that touched
+ * it — bounded only by per-batch truncation, and displacing real files from the
+ * review. The anchoring is deliberate and gitignore-consistent; the defect was
+ * this list.
+ *
+ * Mirrored by the `exclude` default in `action.yml`, which is what actually
+ * takes effect at runtime — `main.ts` reads the input, never this constant.
+ * A test asserts the two are identical, because they had already drifted.
+ */
 export const DEFAULT_EXCLUDE_GLOBS = [
   "package-lock.json",
   "*.lock",
   "dist/**",
+  "**/dist/**",
   "*.min.*",
   "vendor/**",
+  "**/vendor/**",
   "vendored/**",
+  "**/vendored/**",
   "node_modules/**",
+  "**/node_modules/**",
 ];
 
 function stripDiffPathPrefix(raw: string): string {

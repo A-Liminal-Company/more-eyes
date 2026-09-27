@@ -66,26 +66,102 @@ itself, so a captured cookie is not a captured master credential. Rotating
 
 ## Reviewers
 
-Six models across six labs, all verified to support tool calling:
+Seven models across seven labs, all verified to support tool calling:
 
-| Model | Lab |
-|---|---|
-| Claude Sonnet 5 | Anthropic |
-| GPT-5.5 | OpenAI |
-| Gemini 3.5 Flash | Google |
-| Grok 4.5 | xAI |
-| DeepSeek V3.1 | DeepSeek |
-| Qwen3 Coder | Qwen |
+| Model | Lab | Served by |
+|---|---|---|
+| Claude Sonnet 5 | Anthropic | Anthropic, Bedrock, Azure, Vertex |
+| GPT-5.5 | OpenAI | OpenAI, Azure, Bedrock |
+| Gemini 3.5 Flash | Google | AI Studio, Vertex |
+| Grok 4.5 | xAI | xAI |
+| Mistral Large 3 | Mistral | Mistral |
+| Nova 2 Lite | Amazon | Bedrock |
+| Inkling | Thinking Machines | DeepInfra |
 
-Edit the list in `src/lib/models.ts`. Two things to know before adding one:
+### Who is allowed to receive your code
+
+A review sends submitted code verbatim to whoever serves the model, and
+submitted code is by definition unreleased work. The risk being managed is
+therefore **corporate control**: which legal entity ends up holding the code,
+what its terms permit it to do with it, and whose government can compel it to
+hand the code over.
+
+Every request pins `provider.only` to an allowlist where each entry is either
+the lab that built the model, serving it directly, or a first-party hyperscaler
+cloud (`src/lib/provider-policy.ts`). In both cases the counterparty is a US or
+EU entity with enterprise data terms and a legal system the code's owner can
+actually reach.
+
+**One exception, admitted deliberately:** DeepInfra, an intermediary rather than
+a first party. Thinking Machines serves no endpoint for Inkling, so reaching it
+at all meant accepting a reseller. Of the three that serve it, DeepInfra is the
+only one whose privacy policy unconditionally commits not to store, sell, or
+train on API inputs and outputs. Together's equivalent is opt-in through an
+account setting that belongs to OpenRouter rather than to us; Baseten's policy
+says nothing about model inputs at all.
+
+Requests also set **`data_collection: "deny"`**, which is a separate question
+from the allowlist: `only` decides *who* receives the code, `data_collection`
+decides *whether they may keep it*. A provider can be entirely above suspicion
+on control and still retain submissions and train on them. OpenRouter's default
+for this field is `"allow"`, so leaving it unset opts into the permissive
+behaviour.
+
+If that leaves a model with no eligible provider, that model's request fails
+rather than quietly downgrading — which is the right direction. One model
+failing is already handled: the review page shows which models failed and
+returns whatever else succeeded.
+
+The pin is the load-bearing part. Picking a model is not the same decision as
+picking a counterparty — OpenRouter maps one slug to a shifting set of
+providers, so a roster that was clean when written can start routing elsewhere
+without a line changing here. DeepSeek V3.1 and Qwen3 Coder were removed under
+this test: `qwen/qwen3-coder` was being served by Alibaba Cloud, and the
+objection is that Alibaba is a Chinese company whose terms and legal obligations
+put the code beyond its owner's reach.
+
+**Geography is a secondary signal, not the test.** Data physically in China is
+reachable by PRC legal process whoever owns the server — which is exactly why
+the hyperscalers partition rather than extend, AWS China being a separate
+Chinese entity that AWS Global never routes into. And in the other direction,
+only about a quarter of providers publish a datacenter list at all, so "no CN
+datacenter listed" usually just means "nothing listed".
+
+This costs real coverage. Losing DeepSeek and Qwen cost two labs on an app whose
+premise is cross-lab disagreement; Mistral Large 3 and Nova 2 Lite restore both —
+the latter through Bedrock, which was already allowlisted, so at no policy cost.
+
+Meta was considered and rejected on capability rather than policy. Every Llama
+available on an allowlisted provider states a knowledge cutoff of 2024-08-31 or
+earlier, against 2025-12 and 2025-01 for the rest of the roster. This tool
+reviews code written against framework versions two years newer than that, and a
+reviewer that confidently misremembers current APIs is worse than absent here —
+the outlier badge invites a second look at exactly its false positives. Worth
+revisiting when Meta ships something current on Bedrock or Vertex.
+
+`npm run check:models` enforces the allowlist against OpenRouter's live
+catalogue and fails if a rostered model has picked up a provider outside it. CI
+runs it on every PR and again weekly, since the catalogue changes on its own
+schedule.
+
+Edit the list in `src/lib/models.ts`. Three things to know before adding one:
 
 - **Confirm it reports `tools` support** at `https://openrouter.ai/api/v1/models`.
   Structured output depends on it.
-- **Prefer multi-provider slugs.** A model served by a single provider returns a
-  hard 404 if your account's data policy excludes that provider, with no
-  fallback. This is exactly why the list uses `qwen/qwen3-coder` rather than
-  `qwen/qwen3-coder-plus`, which only Alibaba serves. Check with
+- **Check who would serve it.** Run `npm run check:models`. If the model is
+  served by a provider outside the allowlist, decide deliberately whether to
+  drop the model or admit the provider having read its retention and training
+  terms — do not widen `ALLOWED_PROVIDERS` to make a red build go green. There
+  is no field anywhere for "who ultimately controls this entity", and
+  registration country is actively misleading, so this judgement needs a person.
+- **Prefer multi-provider slugs.** A model served by a single allowlisted
+  provider has no fallback when that provider is degraded. Grok 4.5, Mistral
+  Large 3 and Nova 2 Lite are all in this position — `check:models` warns rather
+  than failing. Check with
   `https://openrouter.ai/api/v1/models/<slug>/endpoints`.
+- **Check the knowledge cutoff.** A reviewer whose training predates the
+  framework versions you actually ship will produce confident, wrong findings
+  about current APIs. This is what ruled out Meta's models here.
 
 ## Commands
 
@@ -97,7 +173,10 @@ npm run build          # production build
 npm run check:models   # verify the registry against OpenRouter's catalogue
 ```
 
-CI runs typecheck, lint, tests, and build on every push and PR.
+CI runs typecheck, lint, tests, the jurisdiction check, and build on every push
+and PR, plus a weekly scheduled run. CodeQL (`security-extended`) analyses the
+same code on push, PR, and weekly; Dependabot covers all three package
+manifests.
 
 ## How it works
 

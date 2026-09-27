@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MODELS } from "@/lib/models";
 import { resetRateLimit } from "@/lib/rate-limit";
 
 const createMock = vi.fn();
@@ -204,25 +205,24 @@ describe("POST /api/reviews", () => {
     reviewWithModelsMock.mockResolvedValue([okResult]);
     createMock.mockResolvedValue({ id: "abc123" });
 
-    const sixModels = {
+    // Derived from the roster rather than listed. A hardcoded list silently
+    // became invalid input — and so a 400, not the 201 this asserts — when two
+    // models were removed for jurisdiction reasons, which is a confusing way to
+    // learn the roster changed.
+    const everyModel = {
       ...validBody,
-      models: [
-        "claude-sonnet-5",
-        "gpt-5.5",
-        "gemini-3.5-flash",
-        "grok-4.5",
-        "deepseek-v3.1",
-        "qwen3-coder",
-      ],
+      models: MODELS.map((m) => m.id),
     };
+    const perSubmission = MODELS.length;
+    const affordable = Math.floor(30 / perSubmission);
 
-    // Five six-model submissions exhaust the same 30-call budget that thirty
-    // single-model submissions would.
-    for (let i = 0; i < 5; i++) {
-      expect((await POST(postRequest(sixModels))).status).toBe(201);
+    // N submissions of M models exhaust the same 30-call budget that 30
+    // single-model submissions would — the unit is model calls, not requests.
+    for (let i = 0; i < affordable; i++) {
+      expect((await POST(postRequest(everyModel))).status).toBe(201);
     }
 
-    expect((await POST(postRequest(sixModels))).status).toBe(429);
+    expect((await POST(postRequest(everyModel))).status).toBe(429);
   });
 
   it("does not let a rotating X-Forwarded-For reset the budget", async () => {

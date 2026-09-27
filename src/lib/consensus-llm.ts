@@ -5,6 +5,7 @@ import type {
   ModelFinding,
 } from "./consensus";
 import { keyFindings } from "./consensus";
+import { withProviderRouting } from "./provider-policy";
 import {
   MAX_RETRIES,
   REQUEST_TIMEOUT_MS,
@@ -161,7 +162,8 @@ export async function proposeMerges(
     });
 
     const completion = await withDeadline(
-      client.chat.completions.create({
+      client.chat.completions.create(
+        withProviderRouting({
         model,
         max_tokens: 2048,
         tools: [
@@ -179,7 +181,8 @@ export async function proposeMerges(
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: buildPrompt(groups) },
         ],
-      }),
+        })
+      ),
       `consensus merge (${model})`
     );
 

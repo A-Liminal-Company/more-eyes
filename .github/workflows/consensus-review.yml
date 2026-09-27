@@ -22,6 +22,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          # The whole roster, not the action's three-model default. This
+          # workflow is the only place the full set runs against real traffic,
+          # so it is also where a model that cannot honour the forced
+          # tool_choice contract, or that provider.only leaves unroutable,
+          # shows up as a recorded failure instead of a surprise in the app.
+          models: claude-sonnet-5,gpt-5.5,gemini-3.5-flash,grok-4.5,mistral-large-3,nova-2-lite,inkling
+          # A 500-line changelog reviewed by seven models is spend with no
+          # finding at the end of it. README and CONTRIBUTING stay in — they
+          # carry claims about the code that a reviewer can catch contradicting.
+          exclude: package-lock.json,*.lock,dist/**,**/dist/**,*.min.*,vendor/**,**/vendor/**,vendored/**,**/vendored/**,node_modules/**,**/node_modules/**,CODE_REVIEW.md
           # Dogfoods the red-team pass, which otherwise only ever runs in the
           # web app. Costs one call per finding that survives the focused
           # view, bounded by redteam_max_findings (default 10), so a PR that
