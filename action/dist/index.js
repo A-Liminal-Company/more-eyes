@@ -30894,6 +30894,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.run = run;
+const promises_1 = __nccwpck_require__(51455);
 const core = __importStar(__nccwpck_require__(37484));
 const github = __importStar(__nccwpck_require__(93228));
 const consensus_1 = __nccwpck_require__(22190);
@@ -30901,6 +30902,7 @@ const redteam_1 = __nccwpck_require__(79419);
 const review_1 = __nccwpck_require__(74369);
 const diff_1 = __nccwpck_require__(19952);
 const report_1 = __nccwpck_require__(70665);
+const source_1 = __nccwpck_require__(4998);
 function parseList(input) {
     return input
         .split(",")
@@ -30927,12 +30929,17 @@ async function run() {
     }
     const context = github.context;
     const pullRequest = context.payload.pull_request;
-    if (context.eventName !== "pull_request" || !pullRequest) {
-        await writeSkipSummary(`event "${context.eventName}" is not a pull_request`);
+    const source = (0, source_1.resolveDiffSource)({
+        diffPath: core.getInput("diff_path"),
+        eventName: context.eventName,
+        hasPullRequest: Boolean(pullRequest),
+    });
+    if (source.kind === "skip") {
+        await writeSkipSummary(source.reason);
         return;
     }
     const token = process.env.GITHUB_TOKEN;
-    if (!token) {
+    if (source.kind === "pr" && !token) {
         await writeSkipSummary("GITHUB_TOKEN is not available");
         return;
     }
@@ -30945,6 +30952,8 @@ async function run() {
     const exclude = parseList(core.getInput("exclude"));
     const failOnSeverity = (core.getInput("fail_on_severity") || "none");
     const minAgreement = Number(core.getInput("min_agreement")) || 2;
+    const maxBatches = Number(core.getInput("max_batches")) || 0;
+    const failOnTruncation = core.getInput("fail_on_truncation").trim() === "true";
     // Read by the shared library from the environment, same contract as the key.
     const redteamModel = core.getInput("redteam_model").trim();
     if (redteamModel)
@@ -30955,27 +30964,47 @@ async function run() {
     const redteamMax = core.getInput("redteam_max_findings").trim();
     if (redteamMax)
         process.env.REDTEAM_MAX_FINDINGS = redteamMax;
-    const octokit = github.getOctokit(token);
-    const { owner, repo } = context.repo;
-    const pull_number = pullRequest.number;
     let rawDiff;
-    try {
-        const response = await octokit.rest.pulls.get({
-            owner,
-            repo,
-            pull_number,
-            mediaType: { format: "diff" },
-        });
-        // Requesting the diff media type makes `data` a raw diff string, not the
-        // typed pull-request object the client's types otherwise assume.
-        rawDiff = response.data;
+    let title;
+    let description;
+    if (source.kind === "file") {
+        try {
+            rawDiff = await (0, promises_1.readFile)(source.path, "utf8");
+        }
+        catch (err) {
+            core.setFailed(`Failed to read diff_path ${source.path}: ${err instanceof Error ? err.message : String(err)}`);
+            return;
+        }
+        title = core.getInput("review_title") || `Diff file ${source.path}`;
+        description = core.getInput("review_description") || "Unified diff review";
     }
-    catch (err) {
-        core.setFailed(`Failed to fetch PR diff: ${err instanceof Error ? err.message : String(err)}`);
-        return;
+    else {
+        const octokit = github.getOctokit(token);
+        const { owner, repo } = context.repo;
+        const pull_number = pullRequest.number;
+        try {
+            const response = await octokit.rest.pulls.get({
+                owner,
+                repo,
+                pull_number,
+                mediaType: { format: "diff" },
+            });
+            // Requesting the diff media type makes `data` a raw diff string, not the
+            // typed pull-request object the client's types otherwise assume.
+            rawDiff = response.data;
+        }
+        catch (err) {
+            core.setFailed(`Failed to fetch PR diff: ${err instanceof Error ? err.message : String(err)}`);
+            return;
+        }
+        title = core.getInput("review_title") || `PR #${pull_number}`;
+        description = core.getInput("review_description") || pullRequest.title || "Pull request review";
     }
     const files = (0, diff_1.filterFiles)((0, diff_1.parseDiffFiles)(rawDiff), include, exclude);
-    const batches = (0, diff_1.chunkFiles)(files, maxChars);
+    const { kept: batches, dropped } = (0, source_1.capBatches)((0, diff_1.chunkFiles)(files, maxChars), maxBatches);
+    if (dropped > 0) {
+        core.warning(`max_batches=${maxBatches}: ${dropped} batch(es) of the diff were NOT reviewed.`);
+    }
     core.info(`Reviewing ${files.length} files in ${batches.length} batch(es) with models: ${modelIds.join(", ")}`);
     // Shared across every batch — see the note at the redTeamGroups call below.
     let redTeamBudget = (0, redteam_1.redTeamMaxFindings)();
@@ -30985,8 +31014,8 @@ async function run() {
     for (const batch of batches) {
         const code = batch.join("\n\n");
         const reviews = await (0, review_1.reviewWithModels)(modelIds, {
-            title: `PR #${pull_number}`,
-            description: pullRequest.title || "Pull request review",
+            title,
+            description,
             language: "mixed",
             code,
             format: "diff",
@@ -31026,11 +31055,20 @@ async function run() {
         }));
     }
     core.info(`Total: ${allGroups.length} grouped finding(s)`);
+    if (dropped > 0) {
+        core.summary.addRaw(`> **Partial review.** ${dropped} batch(es) of the diff were over \`max_batches\`=${maxBatches} ` +
+            "and were not reviewed. Treat what follows as covering only part of the change.\n\n");
+    }
     await core.summary
         .addRaw((0, report_1.renderSummary)(allGroups, modelIds.length, allRedTeam))
         .write();
     core.setOutput("findings_count", String(allGroups.length));
     core.setOutput("skipped", "false");
+    core.setOutput("truncated", dropped > 0 ? "true" : "false");
+    if (dropped > 0 && failOnTruncation) {
+        core.setFailed(`${dropped} batch(es) were not reviewed (max_batches=${maxBatches}) and fail_on_truncation is on.`);
+        return;
+    }
     const gate = (0, report_1.evaluateGate)(allGroups, { failOnSeverity, minAgreement });
     if (gate.shouldFail && gate.reason) {
         core.setFailed(gate.reason);
@@ -31166,6 +31204,48 @@ function renderSummary(groups, totalModels, redTeam) {
         lines.push("");
     });
     return lines.join("\n");
+}
+
+
+/***/ }),
+
+/***/ 4998:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/**
+ * Where the diff under review comes from, and how much of it gets reviewed.
+ *
+ * Pure and fixture-testable, like diff.ts. The default is the pull request's own
+ * diff. `diff_path` switches to a unified diff file the workflow produced itself —
+ * the release-vetting case, where a version-bump PR's own diff (one line in a pin
+ * file) says nothing about what changed upstream, so the workflow generates the
+ * upstream diff between the two versions and hands it over as a file.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.resolveDiffSource = resolveDiffSource;
+exports.capBatches = capBatches;
+function resolveDiffSource(opts) {
+    const diffPath = opts.diffPath.trim();
+    if (diffPath)
+        return { kind: "file", path: diffPath };
+    if (opts.eventName !== "pull_request" || !opts.hasPullRequest) {
+        return { kind: "skip", reason: `event "${opts.eventName}" is not a pull_request` };
+    }
+    return { kind: "pr" };
+}
+/**
+ * Caps the number of batches reviewed. 0 (or less) means no cap, which is the
+ * default and keeps existing behaviour. An upstream release can be far larger than
+ * a pull request, and each batch costs one call per model, so release vetting sets
+ * a cap — and the caller must report what was dropped, never drop it silently.
+ */
+function capBatches(batches, maxBatches) {
+    if (!Number.isFinite(maxBatches) || maxBatches <= 0 || batches.length <= maxBatches) {
+        return { kept: batches, dropped: 0 };
+    }
+    return { kept: batches.slice(0, maxBatches), dropped: batches.length - maxBatches };
 }
 
 

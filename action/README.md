@@ -57,6 +57,10 @@ through `env:` as shown above.
 | `comment_mode` | `both` | `summary` \| `inline` \| `both`. Reserved for M3 — no effect yet. |
 | `fail_on_severity` | `none` | `none` \| `high` \| `medium`. The run is advisory (never fails) by default. |
 | `min_agreement` | `2` | How many models must independently agree before a finding can fail the run. A single-model finding never breaks the build, however severe — it's surfaced and labeled instead. |
+| `diff_path` | *(empty = the PR's own diff)* | Path to a unified diff file on the runner. When set, that diff is reviewed instead of the PR's, on any event, and `GITHUB_TOKEN` isn't needed. See **Release vetting** below. |
+| `review_title` / `review_description` | *(PR number / PR title)* | Context handed to the models. |
+| `max_batches` | `0` (no cap) | Cap on diff batches reviewed, since each costs one call per model. Anything dropped is reported in the summary and the `truncated` output, never silently. |
+| `fail_on_truncation` | `false` | `true` fails the run when `max_batches` left part of the diff unreviewed. |
 | `redteam_model` | *(empty = off)* | Model id that attempts a concrete exploit per reported finding, labeling it demonstrated or not. Costs one extra call per reported finding. Never fails the run — see below. |
 | `redteam_categories` | `security,bug,reliability` | Which categories are worth an exploit attempt. Widening to `performance,style` mostly buys calls with no exploit to find. |
 | `redteam_max_findings` | `10` | Ceiling on exploit attempts for the whole run. A large diff is reviewed in batches; this budget is shared across them, so it bounds the run's cost regardless of how many batches the diff splits into. |
@@ -97,3 +101,26 @@ Action **exits successfully** (`skipped: "true"`) with a note in the job
 summary instead of failing the run. Point your workflow's `openrouter_api_key`
 straight at your secret, as in the example above — no conditional guard
 needed; the Action already handles the fork case gracefully.
+
+## Release vetting
+
+A dependency bump PR's own diff is one line in a pin file, which tells a reviewer
+nothing about what changed upstream. For that case the workflow builds the upstream
+diff itself and passes it in:
+
+```yaml
+- run: git -C upstream diff v1.2.0 v1.3.0 > upstream.diff
+- uses: A-Liminal-Company/more-eyes/action@<sha>
+  with:
+    openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+    diff_path: upstream.diff
+    review_title: "Upstream release: example v1.2.0 -> v1.3.0"
+    review_description: "Vet this upstream release before we install it. Focus on security and supply-chain risk."
+    max_batches: "8"
+    fail_on_truncation: "true"
+    fail_on_severity: high
+```
+
+The review is still advisory in the sense that matters: a clean run isn't evidence the
+release is safe. Use it alongside deterministic checks, not instead of them.
+
