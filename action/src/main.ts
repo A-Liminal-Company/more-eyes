@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import * as core from "@actions/core";
 import * as github from "@actions/github";
 import { groupFindings, type FindingGroup, type ModelFinding } from "../../src/lib/consensus";
@@ -12,6 +13,7 @@ import {
 import { reviewWithModels } from "../../src/lib/review";
 import { chunkFiles, filterFiles, parseDiffFiles } from "./diff";
 import { evaluateGate, renderSummary, type FailOnSeverity } from "./report";
+import { capBatches, resolveDiffSource } from "./source";
 
 function parseList(input: string): string[] {
   return input
@@ -44,13 +46,18 @@ export async function run(): Promise<void> {
   const context = github.context;
   const pullRequest = context.payload.pull_request;
 
-  if (context.eventName !== "pull_request" || !pullRequest) {
-    await writeSkipSummary(`event "${context.eventName}" is not a pull_request`);
+  const source = resolveDiffSource({
+    diffPath: core.getInput("diff_path"),
+    eventName: context.eventName,
+    hasPullRequest: Boolean(pullRequest),
+  });
+  if (source.kind === "skip") {
+    await writeSkipSummary(source.reason);
     return;
   }
 
   const token = process.env.GITHUB_TOKEN;
-  if (!token) {
+  if (source.kind === "pr" && !token) {
     await writeSkipSummary("GITHUB_TOKEN is not available");
     return;
   }
@@ -65,6 +72,8 @@ export async function run(): Promise<void> {
   const exclude = parseList(core.getInput("exclude"));
   const failOnSeverity = (core.getInput("fail_on_severity") || "none") as FailOnSeverity;
   const minAgreement = Number(core.getInput("min_agreement")) || 2;
+  const maxBatches = Number(core.getInput("max_batches")) || 0;
+  const failOnTruncation = core.getInput("fail_on_truncation").trim() === "true";
 
   // Read by the shared library from the environment, same contract as the key.
   const redteamModel = core.getInput("redteam_model").trim();
@@ -74,28 +83,49 @@ export async function run(): Promise<void> {
   const redteamMax = core.getInput("redteam_max_findings").trim();
   if (redteamMax) process.env.REDTEAM_MAX_FINDINGS = redteamMax;
 
-  const octokit = github.getOctokit(token);
-  const { owner, repo } = context.repo;
-  const pull_number = pullRequest.number;
-
   let rawDiff: string;
-  try {
-    const response = await octokit.rest.pulls.get({
-      owner,
-      repo,
-      pull_number,
-      mediaType: { format: "diff" },
-    });
-    // Requesting the diff media type makes `data` a raw diff string, not the
-    // typed pull-request object the client's types otherwise assume.
-    rawDiff = response.data as unknown as string;
-  } catch (err) {
-    core.setFailed(`Failed to fetch PR diff: ${err instanceof Error ? err.message : String(err)}`);
-    return;
+  let title: string;
+  let description: string;
+  if (source.kind === "file") {
+    try {
+      rawDiff = await readFile(source.path, "utf8");
+    } catch (err) {
+      core.setFailed(
+        `Failed to read diff_path ${source.path}: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return;
+    }
+    title = core.getInput("review_title") || `Diff file ${source.path}`;
+    description = core.getInput("review_description") || "Unified diff review";
+  } else {
+    const octokit = github.getOctokit(token as string);
+    const { owner, repo } = context.repo;
+    const pull_number = pullRequest!.number;
+    try {
+      const response = await octokit.rest.pulls.get({
+        owner,
+        repo,
+        pull_number,
+        mediaType: { format: "diff" },
+      });
+      // Requesting the diff media type makes `data` a raw diff string, not the
+      // typed pull-request object the client's types otherwise assume.
+      rawDiff = response.data as unknown as string;
+    } catch (err) {
+      core.setFailed(`Failed to fetch PR diff: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    title = core.getInput("review_title") || `PR #${pull_number}`;
+    description = core.getInput("review_description") || pullRequest!.title || "Pull request review";
   }
 
   const files = filterFiles(parseDiffFiles(rawDiff), include, exclude);
-  const batches = chunkFiles(files, maxChars);
+  const { kept: batches, dropped } = capBatches(chunkFiles(files, maxChars), maxBatches);
+  if (dropped > 0) {
+    core.warning(
+      `max_batches=${maxBatches}: ${dropped} batch(es) of the diff were NOT reviewed.`
+    );
+  }
 
   core.info(
     `Reviewing ${files.length} files in ${batches.length} batch(es) with models: ${modelIds.join(", ")}`
@@ -111,8 +141,8 @@ export async function run(): Promise<void> {
   for (const batch of batches) {
     const code = batch.join("\n\n");
     const reviews = await reviewWithModels(modelIds, {
-      title: `PR #${pull_number}`,
-      description: pullRequest.title || "Pull request review",
+      title,
+      description,
       language: "mixed",
       code,
       format: "diff",
@@ -166,11 +196,25 @@ export async function run(): Promise<void> {
 
   core.info(`Total: ${allGroups.length} grouped finding(s)`);
 
+  if (dropped > 0) {
+    core.summary.addRaw(
+      `> **Partial review.** ${dropped} batch(es) of the diff were over \`max_batches\`=${maxBatches} ` +
+        "and were not reviewed. Treat what follows as covering only part of the change.\n\n"
+    );
+  }
   await core.summary
     .addRaw(renderSummary(allGroups, modelIds.length, allRedTeam))
     .write();
   core.setOutput("findings_count", String(allGroups.length));
   core.setOutput("skipped", "false");
+  core.setOutput("truncated", dropped > 0 ? "true" : "false");
+
+  if (dropped > 0 && failOnTruncation) {
+    core.setFailed(
+      `${dropped} batch(es) were not reviewed (max_batches=${maxBatches}) and fail_on_truncation is on.`
+    );
+    return;
+  }
 
   const gate = evaluateGate(allGroups, { failOnSeverity, minAgreement });
   if (gate.shouldFail && gate.reason) {
