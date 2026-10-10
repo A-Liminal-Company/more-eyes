@@ -139,7 +139,9 @@ export function needsAttention(report: Report): boolean {
   return failedModels(report.health).length > 0 || recentCandidates(report).length > 0;
 }
 
-const cell = (s: string): string => s.replace(/\|/g, "\\|").replace(/\s+/g, " ").trim();
+/** Markdown table cell: escape backslashes first, then pipes, then flatten whitespace. */
+export const cell = (s: string): string =>
+  s.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\s+/g, " ").trim();
 
 function runCell(r: RunResult): string {
   const secs = `${(r.ms / 1000).toFixed(1)}s`;
@@ -190,7 +192,7 @@ export function renderMarkdown(report: Report): string {
     );
     for (const c of report.candidates) {
       lines.push(
-        `| ${c.id} | ${new Date(c.created * 1000).toISOString().slice(0, 10)} | ${c.providers.join(", ")} | ${c.otherProviders.join(", ") || "-"} |`
+        `| ${cell(c.id)} | ${new Date(c.created * 1000).toISOString().slice(0, 10)} | ${cell(c.providers.join(", "))} | ${cell(c.otherProviders.join(", ")) || "-"} |`
       );
     }
     lines.push(

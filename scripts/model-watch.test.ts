@@ -4,6 +4,7 @@ import {
   SMALL_DIFF,
   buildLargeDiff,
   needsAttention,
+  cell,
   preFilter,
   renderMarkdown,
   toCandidate,
@@ -169,5 +170,13 @@ describe("fixtures", () => {
     expect(out.startsWith("diff --git a/a.ts b/a.ts")).toBe(true);
     expect(out.length).toBeLessThanOrEqual(29000);
     expect(out.length).toBeGreaterThan(28000);
+  });
+});
+
+describe("cell", () => {
+  it("escapes backslashes before pipes, so a trailing backslash can't swallow a separator", () => {
+    expect(cell("a\\|b")).toBe("a\\\\\\|b");
+    expect(cell("ends\\")).toBe("ends\\\\");
+    expect(cell("two\n  lines")).toBe("two lines");
   });
 });
