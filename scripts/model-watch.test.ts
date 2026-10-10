@@ -116,11 +116,23 @@ describe("report", () => {
         row("c", { ok: false, error: "timed out after 90s", ms: 90000 }, okRun),
       ],
       candidates: [
-        { id: "openai/gpt-6", created: 300, lab: "openai", providers: ["openai"], otherProviders: [] },
+        // 2026-10-05: within RECENT_DAYS of generatedAt (2026-10-12).
+        { id: "openai/gpt-6", created: Date.parse("2026-10-05T00:00:00Z") / 1000, lab: "openai", providers: ["openai"], otherProviders: [] },
       ],
     });
     expect(verdictLine(r)).toBe("MODEL_WATCH: failures=2 new=1");
     expect(needsAttention(r)).toBe(true);
+  });
+
+  it("does not count older candidates as news, so a quiet week stays quiet", () => {
+    const r = report({
+      candidates: [
+        { id: "openai/gpt-6", created: Date.parse("2026-09-01T00:00:00Z") / 1000, lab: "openai", providers: ["openai"], otherProviders: [] },
+      ],
+    });
+    expect(verdictLine(r)).toBe("MODEL_WATCH: failures=0 new=0");
+    expect(needsAttention(r)).toBe(false);
+    expect(renderMarkdown(r)).toContain("openai/gpt-6");
   });
 
   it("is quiet when everything passes and nothing is new", () => {

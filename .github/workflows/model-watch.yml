@@ -47,9 +47,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          failures=$(jq '[.health[] | select(.runs.small.ok == false or .runs.large.ok == false)] | length' model-watch.json)
-          new=$(jq '.candidates | length' model-watch.json)
-          if [ "$failures" -eq 0 ] && [ "$new" -eq 0 ]; then
+          # The script's verdict line is the one place that decides what counts:
+          # failed models, and candidates added in the last RECENT_DAYS days.
+          verdict=$(grep '^MODEL_WATCH:' model-watch.md | tail -1)
+          if [ "$verdict" = "MODEL_WATCH: failures=0 new=0" ]; then
             echo "Quiet week: nothing to report."
             exit 0
           fi

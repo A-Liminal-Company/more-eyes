@@ -40,6 +40,17 @@ export type Report = {
   candidates: Candidate[];
 };
 
+/**
+ * Only candidates this recent count as news. Without it the same newer models
+ * would reopen the issue every week and no week would ever be quiet.
+ */
+export const RECENT_DAYS = 14;
+
+export function recentCandidates(report: Report, now = Date.parse(report.generatedAt)): Candidate[] {
+  const cutoff = now / 1000 - RECENT_DAYS * 86_400;
+  return report.candidates.filter((c) => c.created >= cutoff);
+}
+
 /** Lab prefix of a slug: "anthropic/claude-x" -> "anthropic". */
 export const labOf = (id: string): string => id.split("/")[0];
 
@@ -120,12 +131,12 @@ export function failedModels(health: HealthRow[]): HealthRow[] {
 
 /** `failures` counts models with at least one failed fixture, not runs. */
 export function verdictLine(report: Report): string {
-  return `MODEL_WATCH: failures=${failedModels(report.health).length} new=${report.candidates.length}`;
+  return `MODEL_WATCH: failures=${failedModels(report.health).length} new=${recentCandidates(report).length}`;
 }
 
 /** Whether the workflow should open/update an issue. Quiet weeks stay quiet. */
 export function needsAttention(report: Report): boolean {
-  return failedModels(report.health).length > 0 || report.candidates.length > 0;
+  return failedModels(report.health).length > 0 || recentCandidates(report).length > 0;
 }
 
 const cell = (s: string): string => s.replace(/\|/g, "\\|").replace(/\s+/g, " ").trim();
@@ -163,7 +174,13 @@ export function renderMarkdown(report: Report): string {
     }
   }
 
-  lines.push("", "## New candidates", "");
+  lines.push(
+    "",
+    "## New candidates",
+    "",
+    `Newer than the roster from the same labs. "New" in the verdict counts only those added in the last ${RECENT_DAYS} days.`,
+    ""
+  );
   if (report.candidates.length === 0) {
     lines.push("None.");
   } else {

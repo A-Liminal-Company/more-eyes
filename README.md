@@ -177,7 +177,7 @@ roster is health-checked and the catalogue is scanned for newer models:
   suffix such as `:free`, and at least one allowlisted provider.
 - **Output.** Report in the job summary and a JSON artifact. One issue labelled
   `model-watch` is opened (or commented on, if one is open) only when a model
-  failed or a candidate appeared; quiet weeks stay quiet.
+  failed or a candidate was added in the last 14 days; quiet weeks stay quiet.
 - **Cost.** Two reviews per model, roughly $0.30 to $1 a week.
 
 Adding a model to the roster remains a human PR. Locally:
