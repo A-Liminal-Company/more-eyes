@@ -22,45 +22,30 @@
  */
 import { MODELS } from "../src/lib/models";
 import {
+  fetchCatalogue,
+  fetchEndpoints,
+  fetchProviders,
+  slugOf,
+  type Endpoint,
+} from "./catalogue";
+import {
   ALLOWED_PROVIDERS,
   SECONDARY_JURISDICTION_SIGNAL,
 } from "../src/lib/provider-policy";
 
-type CatalogueModel = { id: string; supported_parameters?: string[] };
-type Endpoint = { provider_name?: string; tag?: string };
-type ProviderInfo = {
-  slug: string;
-  name: string;
-  headquarters?: string;
-  datacenters?: string[];
-};
-
 const ALLOWED = new Set<string>(ALLOWED_PROVIDERS);
 const FLAGGED_REGIONS = new Set<string>(SECONDARY_JURISDICTION_SIGNAL);
 
-/** Provider slug for an endpoint. Tags are "<slug>" or "<slug>/<variant>". */
-function slugOf(endpoint: Endpoint): string {
-  return (endpoint.tag ?? "").split("/")[0];
-}
-
 async function main() {
-  const res = await fetch("https://openrouter.ai/api/v1/models");
-  if (!res.ok) {
-    console.error(`Could not fetch catalogue: HTTP ${res.status}`);
+  const catalogue = await fetchCatalogue().catch((err) => {
+    console.error(err instanceof Error ? err.message : err);
     process.exit(1);
-  }
-
-  const catalogue: CatalogueModel[] = (await res.json()).data ?? [];
+  });
   const byId = new Map(catalogue.map((m) => [m.id, m]));
 
   // Provider directory, for reporting *why* a slug is out of policy — the
   // allowlist is the enforcement, this is the explanation attached to it.
-  const providers = new Map<string, ProviderInfo>(
-    await fetch("https://openrouter.ai/api/v1/providers")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => (j?.data ?? []).map((p: ProviderInfo) => [p.slug, p]))
-      .catch(() => [])
-  );
+  const providers = await fetchProviders();
 
   let failures = 0;
   let warnings = 0;
@@ -87,12 +72,7 @@ async function main() {
       continue;
     }
 
-    const endpoints: Endpoint[] = await fetch(
-      `https://openrouter.ai/api/v1/models/${model.providerModel}/endpoints`
-    )
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => j?.data?.endpoints ?? [])
-      .catch(() => []);
+    const endpoints: Endpoint[] = await fetchEndpoints(model.providerModel);
 
     const slugs = [...new Set(endpoints.map(slugOf).filter(Boolean))];
     const servable = slugs.filter((s) => ALLOWED.has(s));

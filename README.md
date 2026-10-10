@@ -163,6 +163,27 @@ Edit the list in `src/lib/models.ts`. Three things to know before adding one:
   framework versions you actually ship will produce confident, wrong findings
   about current APIs. This is what ruled out Meta's models here.
 
+## Model watch
+
+Every Monday (`.github/workflows/model-watch.yml`, also runnable by hand) the
+roster is health-checked and the catalogue is scanned for newer models:
+
+- **Health.** Each rostered model reviews a small (~1k chars) and a large
+  (~29k chars, built from `src/lib`) diff through the real review path, which
+  catches failures like a model running out of output tokens on big batches
+  before a real review hits them.
+- **Discovery.** Up to 10 models from rostered labs, newer than that lab's
+  newest rostered model, with `tools` support, text-only output, no variant
+  suffix such as `:free`, and at least one allowlisted provider.
+- **Output.** Report in the job summary and a JSON artifact. One issue labelled
+  `model-watch` is opened (or commented on, if one is open) only when a model
+  failed or a candidate was added in the last 14 days; quiet weeks stay quiet.
+- **Cost.** Two reviews per model, roughly $0.30 to $1 a week.
+
+Adding a model to the roster remains a human PR. Locally:
+`OPENROUTER_API_KEY=... npm run watch:models -- --json out.json` (without a key,
+discovery runs and health is skipped).
+
 ## Commands
 
 ```bash
@@ -171,6 +192,7 @@ npm test               # vitest
 npm run lint           # eslint
 npm run build          # production build
 npm run check:models   # verify the registry against OpenRouter's catalogue
+npm run watch:models   # health-check the roster and list new candidate models
 ```
 
 CI runs typecheck, lint, tests, the jurisdiction check, and build on every push
