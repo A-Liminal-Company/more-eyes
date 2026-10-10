@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FindingGroup } from "../../src/lib/consensus";
-import { evaluateGate, renderSummary } from "./report";
+import { buildReport, evaluateGate, renderSummary } from "./report";
 
 function group(overrides: Partial<FindingGroup> & { models: string[] }): FindingGroup {
   return {
@@ -220,5 +220,58 @@ describe("renderSummary fences model-authored text", () => {
 
     const line = out.split("\n").findIndex((l) => l.includes("[a link]"));
     expect(out.split("\n")[line - 1]).toMatch(/^`{3,}$/);
+  });
+});
+
+describe("buildReport", () => {
+  const models = ["a", "b", "c"];
+  const gateOptions = { failOnSeverity: "high" as const, minAgreement: 2 };
+
+  function report(groups: FindingGroup[]) {
+    return buildReport({
+      title: "Upstream release: x v1 -> v2",
+      models,
+      modelRuns: { a: { ok: 2, failed: 0 }, b: { ok: 2, failed: 0 }, c: { ok: 1, failed: 1 } },
+      batches: 2,
+      droppedBatches: 0,
+      groups,
+      gate: evaluateGate(groups, gateOptions),
+      gateOptions,
+      generatedAt: "2026-10-10T00:00:00.000Z",
+    });
+  }
+
+  it("carries the gate verdict and marks exactly the findings that tripped it", () => {
+    const agreed = group({ title: "Agreed", severity: "high", category: "security", models: ["a", "b"] });
+    const lone = group({ title: "Lone", severity: "high", category: "security", models: ["c"] });
+    const out = report([agreed, lone]);
+
+    expect(out.version).toBe(1);
+    expect(out.gate.failed).toBe(true);
+    expect(out.gate.reason).toContain("1 finding");
+    expect(out.findings.map((f) => [f.title, f.agreement, f.gating, f.outlier])).toEqual([
+      ["Agreed", "2/3", true, null],
+      ["Lone", "1/3", false, "security outlier"],
+    ]);
+  });
+
+  it("keeps per-model batch outcomes, so a reviewer that kept failing shows up", () => {
+    const out = report([]);
+    expect(out.modelRuns.c).toEqual({ ok: 1, failed: 1 });
+    expect(out.gate.failed).toBe(false);
+    expect(out.findings).toEqual([]);
+  });
+
+  it("serializes optional finding fields as null and round-trips through JSON", () => {
+    const out = report([group({ models: ["a"] })]);
+    const detail = JSON.parse(JSON.stringify(out)).findings[0].details[0];
+    expect(detail).toEqual({
+      model: "a",
+      description: "Description.",
+      file: null,
+      line: null,
+      assumption: null,
+      rationale: null,
+    });
   });
 });

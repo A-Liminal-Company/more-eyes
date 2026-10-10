@@ -30895,6 +30895,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.run = run;
 const promises_1 = __nccwpck_require__(51455);
+const node_path_1 = __nccwpck_require__(76760);
 const core = __importStar(__nccwpck_require__(37484));
 const github = __importStar(__nccwpck_require__(93228));
 const consensus_1 = __nccwpck_require__(22190);
@@ -31006,6 +31007,7 @@ async function run() {
         core.warning(`max_batches=${maxBatches}: ${dropped} batch(es) of the diff were NOT reviewed.`);
     }
     core.info(`Reviewing ${files.length} files in ${batches.length} batch(es) with models: ${modelIds.join(", ")}`);
+    const modelRuns = Object.fromEntries(modelIds.map((id) => [id, { ok: 0, failed: 0 }]));
     // Shared across every batch — see the note at the redTeamGroups call below.
     let redTeamBudget = (0, redteam_1.redTeamMaxFindings)();
     const allGroups = [];
@@ -31021,10 +31023,13 @@ async function run() {
             format: "diff",
         });
         for (const review of reviews) {
+            const runs = (modelRuns[review.modelId] ??= { ok: 0, failed: 0 });
             if (review.status === "ok") {
+                runs.ok += 1;
                 core.info(`${review.modelId}: ${review.result.findings.length} finding(s)`);
             }
             else {
+                runs.failed += 1;
                 core.info(`${review.modelId}: failed - ${review.error}`);
             }
         }
@@ -31065,11 +31070,36 @@ async function run() {
     core.setOutput("findings_count", String(allGroups.length));
     core.setOutput("skipped", "false");
     core.setOutput("truncated", dropped > 0 ? "true" : "false");
+    const gateOptions = { failOnSeverity, minAgreement };
+    const gate = (0, report_1.evaluateGate)(allGroups, gateOptions);
+    // Written before any setFailed below, so a held run still leaves its report.
+    const reportPath = core.getInput("report_path").trim();
+    if (reportPath) {
+        const report = (0, report_1.buildReport)({
+            title,
+            models: modelIds,
+            modelRuns,
+            batches: batches.length,
+            droppedBatches: dropped,
+            groups: allGroups,
+            gate,
+            gateOptions,
+            generatedAt: new Date().toISOString(),
+        });
+        try {
+            await (0, promises_1.mkdir)((0, node_path_1.dirname)(reportPath), { recursive: true });
+            await (0, promises_1.writeFile)(reportPath, JSON.stringify(report, null, 2) + "\n", "utf8");
+            core.setOutput("report_path", reportPath);
+        }
+        catch (err) {
+            // A missing report must not change the review's verdict.
+            core.warning(`Could not write report_path ${reportPath}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
     if (dropped > 0 && failOnTruncation) {
         core.setFailed(`${dropped} batch(es) were not reviewed (max_batches=${maxBatches}) and fail_on_truncation is on.`);
         return;
     }
-    const gate = (0, report_1.evaluateGate)(allGroups, { failOnSeverity, minAgreement });
     if (gate.shouldFail && gate.reason) {
         core.setFailed(gate.reason);
     }
@@ -31089,6 +31119,7 @@ run().catch((err) => {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.evaluateGate = evaluateGate;
 exports.renderSummary = renderSummary;
+exports.buildReport = buildReport;
 /**
  * Job-summary rendering and gate evaluation. Pure — no @actions/core import
  * — so both are fixture-testable without mocking the Actions runtime. M2
@@ -31204,6 +31235,46 @@ function renderSummary(groups, totalModels, redTeam) {
         lines.push("");
     });
     return lines.join("\n");
+}
+/**
+ * The machine-readable twin of renderSummary, written when `report_path` is set,
+ * so dashboards and agents can read a run without scraping the job summary.
+ * Every string that came from a model is untrusted: consumers must escape it.
+ * Bump `version` on any breaking change to the shape.
+ */
+function buildReport(input) {
+    const gating = new Set(input.gate.gatingGroups);
+    return {
+        version: 1,
+        title: input.title,
+        generatedAt: input.generatedAt,
+        models: input.models,
+        modelRuns: input.modelRuns,
+        batches: { reviewed: input.batches, dropped: input.droppedBatches },
+        gate: {
+            failOnSeverity: input.gateOptions.failOnSeverity,
+            minAgreement: input.gateOptions.minAgreement,
+            failed: input.gate.shouldFail,
+            reason: input.gate.reason,
+        },
+        findings: input.groups.map((group) => ({
+            title: group.title,
+            category: group.category,
+            severity: group.severity,
+            models: group.models,
+            agreement: `${group.models.length}/${input.models.length}`,
+            gating: gating.has(group),
+            outlier: (0, consensus_1.outlierSignal)(group),
+            details: group.findings.map((finding) => ({
+                model: finding.model,
+                description: finding.description,
+                file: finding.file ?? null,
+                line: finding.line ?? null,
+                assumption: finding.assumption ?? null,
+                rationale: finding.rationale ?? null,
+            })),
+        })),
+    };
 }
 
 

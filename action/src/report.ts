@@ -168,3 +168,59 @@ export function renderSummary(
 
   return lines.join("\n");
 }
+
+/** Per-model outcome across every batch: how many returned a review, how many failed. */
+export type ModelRuns = Record<string, { ok: number; failed: number }>;
+
+export type ReportInput = {
+  title: string;
+  models: string[];
+  modelRuns: ModelRuns;
+  batches: number;
+  droppedBatches: number;
+  groups: FindingGroup[];
+  gate: GateResult;
+  gateOptions: GateOptions;
+  generatedAt: string;
+};
+
+/**
+ * The machine-readable twin of renderSummary, written when `report_path` is set,
+ * so dashboards and agents can read a run without scraping the job summary.
+ * Every string that came from a model is untrusted: consumers must escape it.
+ * Bump `version` on any breaking change to the shape.
+ */
+export function buildReport(input: ReportInput) {
+  const gating = new Set(input.gate.gatingGroups);
+  return {
+    version: 1,
+    title: input.title,
+    generatedAt: input.generatedAt,
+    models: input.models,
+    modelRuns: input.modelRuns,
+    batches: { reviewed: input.batches, dropped: input.droppedBatches },
+    gate: {
+      failOnSeverity: input.gateOptions.failOnSeverity,
+      minAgreement: input.gateOptions.minAgreement,
+      failed: input.gate.shouldFail,
+      reason: input.gate.reason,
+    },
+    findings: input.groups.map((group) => ({
+      title: group.title,
+      category: group.category,
+      severity: group.severity,
+      models: group.models,
+      agreement: `${group.models.length}/${input.models.length}`,
+      gating: gating.has(group),
+      outlier: outlierSignal(group),
+      details: group.findings.map((finding) => ({
+        model: finding.model,
+        description: finding.description,
+        file: finding.file ?? null,
+        line: finding.line ?? null,
+        assumption: finding.assumption ?? null,
+        rationale: finding.rationale ?? null,
+      })),
+    })),
+  };
+}
