@@ -32025,7 +32025,9 @@ async function reviewWithOpenRouter(providerModel, input) {
     try {
         completion = await (0, shared_1.withDeadline)(client.chat.completions.create((0, provider_policy_1.withProviderRouting)({
             model: providerModel,
-            max_tokens: 4096,
+            max_tokens: shared_1.MAX_OUTPUT_TOKENS,
+            // OpenRouter's unified reasoning control; models that don't think ignore it.
+            reasoning: { max_tokens: shared_1.REASONING_TOKEN_BUDGET },
             tools: [
                 {
                     type: "function",
@@ -32052,9 +32054,14 @@ async function reviewWithOpenRouter(providerModel, input) {
         console.error(`[review] OpenRouter request failed (${providerModel}):`, err);
         throw new errors_1.ReviewError(`OpenRouter request failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-    const toolCall = completion.choices[0]?.message?.tool_calls?.[0];
+    const choice = completion.choices[0];
+    const toolCall = choice?.message?.tool_calls?.[0];
     if (!toolCall || !("function" in toolCall)) {
-        throw new errors_1.ReviewError(`${providerModel} did not return a structured review.`);
+        // "length" means the output budget ran out first (usually on thinking),
+        // which is a budget problem, not a model that ignored the tool.
+        throw new errors_1.ReviewError(choice?.finish_reason === "length"
+            ? `${providerModel} ran out of output tokens before returning a review.`
+            : `${providerModel} did not return a structured review.`);
     }
     let raw;
     try {
@@ -32082,7 +32089,7 @@ async function reviewWithOpenRouter(providerModel, input) {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.SYSTEM_PROMPT = exports.REVIEW_TOOL_SCHEMA = exports.REVIEW_TOOL_NAME = exports.MAX_RETRIES = exports.REVIEW_DEADLINE_MS = exports.REQUEST_TIMEOUT_MS = void 0;
+exports.SYSTEM_PROMPT = exports.REVIEW_TOOL_SCHEMA = exports.REVIEW_TOOL_NAME = exports.REASONING_TOKEN_BUDGET = exports.MAX_OUTPUT_TOKENS = exports.MAX_RETRIES = exports.REVIEW_DEADLINE_MS = exports.REQUEST_TIMEOUT_MS = void 0;
 exports.withDeadline = withDeadline;
 exports.escapeForPrompt = escapeForPrompt;
 exports.buildUserPrompt = buildUserPrompt;
@@ -32099,6 +32106,20 @@ exports.REQUEST_TIMEOUT_MS = Number(process.env.REVIEW_REQUEST_TIMEOUT_MS ?? 45_
 exports.REVIEW_DEADLINE_MS = Number(process.env.REVIEW_DEADLINE_MS ?? 90_000);
 /** Retries multiply wall-clock time, so keep them low behind the deadline. */
 exports.MAX_RETRIES = 1;
+/** Output budget for one review call: the hidden thinking plus the tool call. */
+exports.MAX_OUTPUT_TOKENS = 4096;
+/**
+ * Ceiling on a model's hidden thinking, inside MAX_OUTPUT_TOKENS.
+ *
+ * Thinking tokens count against max_tokens. Uncapped, Gemini 3.5 Flash spent
+ * the whole 4096 thinking on a 30k-character batch and stopped at
+ * finish_reason "length" with no tool call, on 7 of 8 batches of a real
+ * release vet. Raising max_tokens instead just moved the failure to the
+ * deadline: it thought for longer than 90s. Capping thinking leaves room for
+ * the answer. Measured 2026-10-10 on a 30k batch, with the tool forced: all
+ * three default models still returned a structured review under this cap.
+ */
+exports.REASONING_TOKEN_BUDGET = 1024;
 /**
  * Rejects with a ReviewError if `work` outlives the deadline, so a slow model
  * degrades into a recorded failure instead of stalling the batch.

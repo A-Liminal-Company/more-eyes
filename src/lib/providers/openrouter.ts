@@ -7,7 +7,9 @@ import {
   type ReviewResult,
 } from "../validation";
 import {
+  MAX_OUTPUT_TOKENS,
   MAX_RETRIES,
+  REASONING_TOKEN_BUDGET,
   REQUEST_TIMEOUT_MS,
   REVIEW_TOOL_NAME,
   REVIEW_TOOL_SCHEMA,
@@ -39,7 +41,9 @@ export async function reviewWithOpenRouter(
       client.chat.completions.create(
         withProviderRouting({
         model: providerModel,
-        max_tokens: 4096,
+        max_tokens: MAX_OUTPUT_TOKENS,
+        // OpenRouter's unified reasoning control; models that don't think ignore it.
+        reasoning: { max_tokens: REASONING_TOKEN_BUDGET },
         tools: [
           {
             type: "function",
@@ -72,10 +76,15 @@ export async function reviewWithOpenRouter(
     );
   }
 
-  const toolCall = completion.choices[0]?.message?.tool_calls?.[0];
+  const choice = completion.choices[0];
+  const toolCall = choice?.message?.tool_calls?.[0];
   if (!toolCall || !("function" in toolCall)) {
+    // "length" means the output budget ran out first (usually on thinking),
+    // which is a budget problem, not a model that ignored the tool.
     throw new ReviewError(
-      `${providerModel} did not return a structured review.`
+      choice?.finish_reason === "length"
+        ? `${providerModel} ran out of output tokens before returning a review.`
+        : `${providerModel} did not return a structured review.`
     );
   }
 

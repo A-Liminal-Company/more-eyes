@@ -28,6 +28,22 @@ export const REVIEW_DEADLINE_MS = Number(
 /** Retries multiply wall-clock time, so keep them low behind the deadline. */
 export const MAX_RETRIES = 1;
 
+/** Output budget for one review call: the hidden thinking plus the tool call. */
+export const MAX_OUTPUT_TOKENS = 4096;
+
+/**
+ * Ceiling on a model's hidden thinking, inside MAX_OUTPUT_TOKENS.
+ *
+ * Thinking tokens count against max_tokens. Uncapped, Gemini 3.5 Flash spent
+ * the whole 4096 thinking on a 30k-character batch and stopped at
+ * finish_reason "length" with no tool call, on 7 of 8 batches of a real
+ * release vet. Raising max_tokens instead just moved the failure to the
+ * deadline: it thought for longer than 90s. Capping thinking leaves room for
+ * the answer. Measured 2026-10-10 on a 30k batch, with the tool forced: all
+ * three default models still returned a structured review under this cap.
+ */
+export const REASONING_TOKEN_BUDGET = 1024;
+
 /**
  * Rejects with a ReviewError if `work` outlives the deadline, so a slow model
  * degrades into a recorded failure instead of stalling the batch.
