@@ -34705,34 +34705,35 @@ const tokenize = (input) => {
             continue;
         }
         if (char === '"') {
-            let value = '';
+            // a `"` closes the string only after an even number of backslashes; escapes are kept verbatim
+            const start = current + 1;
+            let end = start;
             let danglingQuote = false;
-            char = input[++current];
-            while (char !== '"') {
-                if (current === input.length) {
+            while (true) {
+                end = input.indexOf('"', end);
+                if (end === -1) {
                     danglingQuote = true;
                     break;
                 }
-                if (char === '\\') {
-                    current++;
-                    if (current === input.length) {
-                        danglingQuote = true;
-                        break;
-                    }
-                    value += char + input[current];
-                    char = input[++current];
+                let backslashes = 0;
+                let i = end - 1;
+                while (i >= start && input[i] === '\\') {
+                    backslashes++;
+                    i--;
                 }
-                else {
-                    value += char;
-                    char = input[++current];
-                }
+                if (backslashes % 2 === 0)
+                    break;
+                end++;
             }
-            char = input[++current];
-            if (!danglingQuote) {
+            if (danglingQuote) {
+                current = input.length;
+            }
+            else {
                 tokens.push({
                     type: 'string',
-                    value,
+                    value: input.slice(start, end),
                 });
+                current = end + 1;
             }
             continue;
         }
@@ -34763,6 +34764,7 @@ const tokenize = (input) => {
             tokens.push({
                 type: 'number',
                 value,
+                unterminated: current === input.length,
             });
             continue;
         }
@@ -34793,42 +34795,53 @@ const tokenize = (input) => {
     }
     return tokens;
 }, strip = (tokens) => {
-    if (tokens.length === 0) {
-        return tokens;
+    let open = [];
+    for (const token of tokens) {
+        if (token.type === 'brace' || token.type === 'paren') {
+            if (token.value === '{' || token.value === '[') {
+                open.push(token.value);
+            }
+            else {
+                open.pop();
+            }
+        }
     }
-    let lastToken = tokens[tokens.length - 1];
-    switch (lastToken.type) {
-        case 'separator':
-            tokens = tokens.slice(0, tokens.length - 1);
-            return strip(tokens);
-            break;
-        case 'number':
-            let lastCharacterOfLastToken = lastToken.value[lastToken.value.length - 1];
-            if (lastCharacterOfLastToken === '.' ||
-                lastCharacterOfLastToken === '-' ||
-                lastCharacterOfLastToken === '+' ||
-                lastCharacterOfLastToken === 'e' ||
-                lastCharacterOfLastToken === 'E') {
-                tokens = tokens.slice(0, tokens.length - 1);
-                return strip(tokens);
-            }
-        case 'string':
-            let tokenBeforeTheLastToken = tokens[tokens.length - 2];
-            if (tokenBeforeTheLastToken?.type === 'delimiter') {
-                tokens = tokens.slice(0, tokens.length - 1);
-                return strip(tokens);
-            }
-            else if (tokenBeforeTheLastToken?.type === 'brace' && tokenBeforeTheLastToken.value === '{') {
-                tokens = tokens.slice(0, tokens.length - 1);
-                return strip(tokens);
-            }
-            break;
-        case 'delimiter':
-            tokens = tokens.slice(0, tokens.length - 1);
-            return strip(tokens);
-            break;
+    // brackets are never stripped, so this holds for every token looked at below
+    let innermostOpenBracket = open[open.length - 1];
+    let length = tokens.length;
+    let JSON_NUMBER = /^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][-+]?[0-9]+)?$/;
+    while (length > 0) {
+        let lastToken = tokens[length - 1];
+        switch (lastToken.type) {
+            case 'separator':
+                length--;
+                continue;
+            case 'number':
+                // more digits may follow a number that runs to the end of the input, and one that
+                // something else cuts short, e.g. `1.` or `1e-`, will never be a number
+                if (lastToken.unterminated || !JSON_NUMBER.test(lastToken.value)) {
+                    length--;
+                    continue;
+                }
+                break;
+            case 'string':
+                // in an object this is a key without a value yet, in an array it is a complete item
+                let tokenBeforeTheLastToken = tokens[length - 2];
+                if (innermostOpenBracket === '{' &&
+                    (tokenBeforeTheLastToken?.type === 'delimiter' ||
+                        (tokenBeforeTheLastToken?.type === 'brace' && tokenBeforeTheLastToken.value === '{'))) {
+                    length--;
+                    continue;
+                }
+                break;
+            case 'delimiter':
+                // whatever precedes a comma is complete
+                length--;
+                break;
+        }
+        break;
     }
-    return tokens;
+    return tokens.slice(0, length);
 }, unstrip = (tokens) => {
     let tail = [];
     tokens.map((token) => {
@@ -34917,6 +34930,7 @@ const files_1 = __nccwpck_require__(66188);
 const models_1 = __nccwpck_require__(19317);
 const beta_1 = __nccwpck_require__(90846);
 const messages_1 = __nccwpck_require__(17442);
+const organization_1 = __nccwpck_require__(61708);
 const skills_1 = __nccwpck_require__(28022);
 const detect_platform_2 = __nccwpck_require__(5890);
 const headers_1 = __nccwpck_require__(60017);
@@ -35699,7 +35713,13 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
                 (0, values_1.validatePositiveInteger)('timeout', options.timeout);
             options.timeout = options.timeout ?? this.timeout;
             const { bodyHeaders, body } = this.buildBody({ options });
-            const reqHeaders = await this.buildHeaders({ options: inputOptions, method, bodyHeaders, retryCount });
+            const reqHeaders = await this.buildHeaders({
+                options: inputOptions,
+                method,
+                bodyHeaders,
+                retryCount,
+                timeout: options.timeout,
+            });
             const req = {
                 method,
                 headers: reqHeaders,
@@ -35712,13 +35732,13 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
             };
             return { req, url, timeout: options.timeout };
         }
-        async buildHeaders({ options, method, bodyHeaders, retryCount, }) {
+        async buildHeaders({ options, method, bodyHeaders, retryCount, timeout, }) {
             const headers = (0, headers_1.buildHeaders)([
                 {
                     Accept: 'application/json',
                     'User-Agent': this.getUserAgent(),
                     'X-Stainless-Retry-Count': String(retryCount),
-                    ...(options.timeout ? { 'X-Stainless-Timeout': String(Math.trunc(options.timeout / 1000)) } : {}),
+                    'X-Stainless-Timeout': String(Math.trunc(timeout / 1000)),
                     ...(0, detect_platform_1.getPlatformHeaders)(),
                     ...(this._options.dangerouslyAllowBrowser ?
                         { 'anthropic-dangerous-direct-browser-access': 'true' }
@@ -35793,8 +35813,6 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
         return this.baseURL !== 'https://api.anthropic.com';
     };
     BaseAnthropic.Anthropic = _a;
-    BaseAnthropic.HUMAN_PROMPT = exports.HUMAN_PROMPT;
-    BaseAnthropic.AI_PROMPT = exports.AI_PROMPT;
     BaseAnthropic.DEFAULT_TIMEOUT = 600000; // 10 minutes
     BaseAnthropic.AnthropicError = Errors.AnthropicError;
     BaseAnthropic.APIError = Errors.APIError;
@@ -35810,6 +35828,8 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
     BaseAnthropic.PermissionDeniedError = Errors.PermissionDeniedError;
     BaseAnthropic.UnprocessableEntityError = Errors.UnprocessableEntityError;
     BaseAnthropic.toFile = Uploads.toFile;
+    BaseAnthropic.HUMAN_PROMPT = exports.HUMAN_PROMPT;
+    BaseAnthropic.AI_PROMPT = exports.AI_PROMPT;
     return BaseAnthropic;
 })();
 exports.BaseAnthropic = BaseAnthropic;
@@ -35825,6 +35845,7 @@ var Anthropic = /* @__PURE__ */ (() => {
             this.models = new API.Models(this);
             this.files = new API.Files(this);
             this.skills = new API.Skills(this);
+            this.organization = new API.Organization(this);
             this.beta = new API.Beta(this);
         }
     }
@@ -35833,6 +35854,7 @@ var Anthropic = /* @__PURE__ */ (() => {
     Anthropic.Models = models_1.Models;
     Anthropic.Files = files_1.Files;
     Anthropic.Skills = skills_1.Skills;
+    Anthropic.Organization = organization_1.Organization;
     Anthropic.Beta = beta_1.Beta;
     return Anthropic;
 })();
@@ -36747,6 +36769,9 @@ class PageCursor extends AbstractPage {
     getPaginatedItems() {
         return this.data ?? [];
     }
+    hasNextPage() {
+        return this.nextPageRequestOptions() != null;
+    }
     nextPageRequestOptions() {
         const cursor = this.next_page;
         if (!cursor) {
@@ -36771,6 +36796,9 @@ class BidirectionalPageCursor extends AbstractPage {
     }
     getPaginatedItems() {
         return this.data ?? [];
+    }
+    hasNextPage() {
+        return this.nextPageRequestOptions() != null;
     }
     nextPageRequestOptions() {
         const cursor = this.next_page;
@@ -37070,8 +37098,8 @@ async function* _iterSSEMessages(response, controller) {
     const sseDecoder = new SSEDecoder();
     const lineDecoder = new line_1.LineDecoder();
     const iter = (0, shims_2.ReadableStreamToAsyncIterable)(response.body);
-    for await (const sseChunk of iterSSEChunks(iter)) {
-        for (const line of lineDecoder.decode(sseChunk)) {
+    for await (const chunk of iter) {
+        for (const line of lineDecoder.decode(chunk)) {
             const sse = sseDecoder.decode(line);
             if (sse)
                 yield sse;
@@ -37081,35 +37109,6 @@ async function* _iterSSEMessages(response, controller) {
         const sse = sseDecoder.decode(line);
         if (sse)
             yield sse;
-    }
-}
-/**
- * Given an async iterable iterator, iterates over it and yields full
- * SSE chunks, i.e. yields when a double new-line is encountered.
- */
-async function* iterSSEChunks(iterator) {
-    let data = new Uint8Array();
-    for await (const chunk of iterator) {
-        if (chunk == null) {
-            continue;
-        }
-        const binaryChunk = chunk instanceof ArrayBuffer ? new Uint8Array(chunk)
-            : typeof chunk === 'string' ? (0, bytes_1.encodeUTF8)(chunk)
-                : chunk;
-        let newData = new Uint8Array(data.length + binaryChunk.length);
-        newData.set(data);
-        newData.set(binaryChunk, data.length);
-        data = newData;
-        // Yield views, not copies, so a chunk holding many events is not re-copied
-        // once per event. This relies on newData never being written again.
-        let patternIndex;
-        while ((patternIndex = (0, line_1.findDoubleNewlineIndex)(data)) !== -1) {
-            yield data.subarray(0, patternIndex);
-            data = data.subarray(patternIndex);
-        }
-    }
-    if (data.length > 0) {
-        yield data;
     }
 }
 class SSEDecoder {
@@ -37263,21 +37262,16 @@ exports = module.exports = function (...args) {
   return new exports.default(...args)
 }
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.UnprocessableEntityError = exports.PermissionDeniedError = exports.InternalServerError = exports.AuthenticationError = exports.BadRequestError = exports.RateLimitError = exports.ConflictError = exports.NotFoundError = exports.RetryableError = exports.APIUserAbortError = exports.APIConnectionTimeoutError = exports.APIConnectionError = exports.APIError = exports.AnthropicError = exports.PagePromise = exports.AI_PROMPT = exports.HUMAN_PROMPT = exports.Anthropic = exports.BaseAnthropic = exports.BetaFallbackState = exports.betaRefusalFallbackMiddleware = exports.APIPromise = exports.toFile = exports["default"] = void 0;
+exports.BetaFallbackState = exports.betaRefusalFallbackMiddleware = exports.AI_PROMPT = exports.HUMAN_PROMPT = exports.UnprocessableEntityError = exports.PermissionDeniedError = exports.InternalServerError = exports.AuthenticationError = exports.BadRequestError = exports.RateLimitError = exports.ConflictError = exports.NotFoundError = exports.RetryableError = exports.APIUserAbortError = exports.APIConnectionTimeoutError = exports.APIConnectionError = exports.APIError = exports.AnthropicError = exports.PagePromise = exports.Anthropic = exports.BaseAnthropic = exports.APIPromise = exports.toFile = exports["default"] = void 0;
 var client_1 = __nccwpck_require__(92134);
 Object.defineProperty(exports, "default", ({ enumerable: true, get: function () { return client_1.Anthropic; } }));
 var uploads_1 = __nccwpck_require__(36027);
 Object.defineProperty(exports, "toFile", ({ enumerable: true, get: function () { return uploads_1.toFile; } }));
 var api_promise_1 = __nccwpck_require__(9649);
 Object.defineProperty(exports, "APIPromise", ({ enumerable: true, get: function () { return api_promise_1.APIPromise; } }));
-var middleware_1 = __nccwpck_require__(82793);
-Object.defineProperty(exports, "betaRefusalFallbackMiddleware", ({ enumerable: true, get: function () { return middleware_1.betaRefusalFallbackMiddleware; } }));
-Object.defineProperty(exports, "BetaFallbackState", ({ enumerable: true, get: function () { return middleware_1.BetaFallbackState; } }));
 var client_2 = __nccwpck_require__(92134);
 Object.defineProperty(exports, "BaseAnthropic", ({ enumerable: true, get: function () { return client_2.BaseAnthropic; } }));
 Object.defineProperty(exports, "Anthropic", ({ enumerable: true, get: function () { return client_2.Anthropic; } }));
-Object.defineProperty(exports, "HUMAN_PROMPT", ({ enumerable: true, get: function () { return client_2.HUMAN_PROMPT; } }));
-Object.defineProperty(exports, "AI_PROMPT", ({ enumerable: true, get: function () { return client_2.AI_PROMPT; } }));
 var pagination_1 = __nccwpck_require__(27117);
 Object.defineProperty(exports, "PagePromise", ({ enumerable: true, get: function () { return pagination_1.PagePromise; } }));
 var error_1 = __nccwpck_require__(69955);
@@ -37295,6 +37289,12 @@ Object.defineProperty(exports, "AuthenticationError", ({ enumerable: true, get: 
 Object.defineProperty(exports, "InternalServerError", ({ enumerable: true, get: function () { return error_1.InternalServerError; } }));
 Object.defineProperty(exports, "PermissionDeniedError", ({ enumerable: true, get: function () { return error_1.PermissionDeniedError; } }));
 Object.defineProperty(exports, "UnprocessableEntityError", ({ enumerable: true, get: function () { return error_1.UnprocessableEntityError; } }));
+var client_3 = __nccwpck_require__(92134);
+Object.defineProperty(exports, "HUMAN_PROMPT", ({ enumerable: true, get: function () { return client_3.HUMAN_PROMPT; } }));
+Object.defineProperty(exports, "AI_PROMPT", ({ enumerable: true, get: function () { return client_3.AI_PROMPT; } }));
+var middleware_1 = __nccwpck_require__(82793);
+Object.defineProperty(exports, "betaRefusalFallbackMiddleware", ({ enumerable: true, get: function () { return middleware_1.betaRefusalFallbackMiddleware; } }));
+Object.defineProperty(exports, "BetaFallbackState", ({ enumerable: true, get: function () { return middleware_1.BetaFallbackState; } }));
 //# sourceMappingURL=index.js.map
 
 /***/ }),
@@ -39386,7 +39386,7 @@ async function toFile(value, name, options) {
     (0, uploads_2.checkFileSupport)();
     // If it's a promise, resolve it.
     value = await value;
-    name || (name = (0, uploads_1.getName)(value, true));
+    name || (name = value instanceof File ? value.name : (0, uploads_1.getName)(value, true));
     // If we've been given a `File` we don't need to do anything if the name / options
     // have not been customised.
     if (isFileLike(value)) {
@@ -39561,7 +39561,7 @@ exports.checkFileSupport = checkFileSupport;
  */
 function makeFile(fileBits, fileName, options) {
     (0, exports.checkFileSupport)();
-    return new File(fileBits, fileName ?? 'unknown_file', options);
+    return new File(fileBits, fileName ?? '', options);
 }
 function getName(value, stripPath) {
     const val = (typeof value === 'object' &&
@@ -39668,7 +39668,10 @@ const addFormValue = async (form, key, value, stripFilenames) => {
         form.append(key, makeFile([await new Response((0, shims_1.ReadableStreamFrom)(value)).blob()], getName(value, stripFilenames)));
     }
     else if (value instanceof Blob) {
-        form.append(key, makeFile([value], getName(value, stripFilenames) || undefined, { type: value.type }));
+        // A File's name is one the caller chose, so it is sent as is; any other Blob's name is a path.
+        const isFile = typeof File !== 'undefined' && value instanceof File;
+        const name = isFile ? value.name : getName(value, stripFilenames);
+        form.append(key, makeFile([value], name, { type: value.type }));
     }
     else if (Array.isArray(value)) {
         await Promise.all(value.map((entry) => addFormValue(form, key + '[]', entry, stripFilenames)));
@@ -43666,6 +43669,150 @@ function copyClientForHelper(client, { authToken, helper }) {
 
 /***/ }),
 
+/***/ 57589:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+var _BetaToolRunnerStream_instances, _BetaToolRunnerStream_onToolCall, _BetaToolRunnerStream_emitted, _BetaToolRunnerStream_readers, _BetaToolRunnerStream_toolCalls, _BetaToolRunnerStream_closed, _BetaToolRunnerStream_ready, _BetaToolRunnerStream_fallback, _BetaToolRunnerStream_track, _BetaToolRunnerStream_release, _BetaToolRunnerStream_removeReader;
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.BetaToolRunnerStream = void 0;
+const tslib_1 = __nccwpck_require__(14839);
+const stainless_helper_header_1 = __nccwpck_require__(50324);
+const BetaMessageStream_1 = __nccwpck_require__(27816);
+var BetaToolRunnerStream = /* @__PURE__ */ (() => {
+    /**
+     * The stream a tool runner yields. It hands each `tool_use` call to `onToolCall` once the model has moved on
+     * from it, and the caller's listeners and `for await` loops over the stream have handled the event that shows it.
+     */
+    class BetaToolRunnerStream extends BetaMessageStream_1.BetaMessageStream {
+        constructor(params, onToolCall) {
+            super(params);
+            _BetaToolRunnerStream_instances.add(this);
+            _BetaToolRunnerStream_onToolCall.set(this, void 0);
+            /** The number of stream events emitted so far */
+            _BetaToolRunnerStream_emitted.set(this, 0);
+            /** The `for await` loops over the stream that are still reading it */
+            _BetaToolRunnerStream_readers.set(this, []);
+            /** The `tool_use` blocks that have finished streaming, in the model's order */
+            _BetaToolRunnerStream_toolCalls.set(this, []);
+            /** The last `tool_use` block to close, until the model moves on from it */
+            _BetaToolRunnerStream_closed.set(this, void 0);
+            /** The calls the model has moved on from, in its order, until every reader has caught up with them */
+            _BetaToolRunnerStream_ready.set(this, []);
+            /** Whether a refusal has handed the reply to a fallback model */
+            _BetaToolRunnerStream_fallback.set(this, false);
+            tslib_1.__classPrivateFieldSet(this, _BetaToolRunnerStream_onToolCall, onToolCall, "f");
+        }
+        /** The `tool_use` blocks that have finished streaming, in the model's order */
+        get toolCalls() {
+            return tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_toolCalls, "f");
+        }
+        /** Sends the request as `client.beta.messages.stream()` does. */
+        static start(messages, params, options, onToolCall) {
+            const stream = new BetaToolRunnerStream({ ...params, stream: true }, onToolCall);
+            for (const message of params.messages) {
+                stream._addMessageParam(message);
+            }
+            stream._run(() => stream._createMessage(messages, { ...params, stream: true }, { ...options, headers: { ...options?.headers, [stainless_helper_header_1.STAINLESS_HELPER_METHOD_HEADER]: 'stream' } }));
+            return stream;
+        }
+        _emit(event, ...args) {
+            var _a;
+            if (event !== 'streamEvent' || this.ended) {
+                super._emit(event, ...args);
+                return;
+            }
+            // Counted first, so that a reader created by a listener of this event starts after it.
+            tslib_1.__classPrivateFieldSet(this, _BetaToolRunnerStream_emitted, (_a = tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_emitted, "f"), _a++, _a), "f");
+            const [streamEvent, snapshot] = args;
+            const block = streamEvent.type === 'content_block_stop' ? snapshot.content[streamEvent.index] : undefined;
+            const closed = block?.type === 'tool_use' ? block : undefined;
+            if (closed) {
+                tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_toolCalls, "f").push(closed);
+            }
+            super._emit(event, ...args);
+            tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_instances, "m", _BetaToolRunnerStream_track).call(this, streamEvent, closed);
+            tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_instances, "m", _BetaToolRunnerStream_release).call(this);
+        }
+        [(_BetaToolRunnerStream_onToolCall = new WeakMap(), _BetaToolRunnerStream_emitted = new WeakMap(), _BetaToolRunnerStream_readers = new WeakMap(), _BetaToolRunnerStream_toolCalls = new WeakMap(), _BetaToolRunnerStream_closed = new WeakMap(), _BetaToolRunnerStream_ready = new WeakMap(), _BetaToolRunnerStream_fallback = new WeakMap(), _BetaToolRunnerStream_instances = new WeakSet(), Symbol.asyncIterator)]() {
+            const iterator = super[Symbol.asyncIterator]();
+            const reader = { handled: tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_emitted, "f") };
+            tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_readers, "f").push(reader);
+            let holdsEvent = false;
+            return {
+                next: async () => {
+                    // Asking for the next event is how a `for await` loop says it is done with the one it holds.
+                    if (holdsEvent) {
+                        holdsEvent = false;
+                        reader.handled++;
+                        tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_instances, "m", _BetaToolRunnerStream_release).call(this);
+                    }
+                    try {
+                        const result = await iterator.next();
+                        holdsEvent = !result.done;
+                        if (result.done) {
+                            tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_instances, "m", _BetaToolRunnerStream_removeReader).call(this, reader);
+                        }
+                        return result;
+                    }
+                    catch (error) {
+                        tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_instances, "m", _BetaToolRunnerStream_removeReader).call(this, reader);
+                        throw error;
+                    }
+                },
+                return: async () => {
+                    // Leaving the loop aborts the stream, which has to come first so that no call starts after it.
+                    const result = iterator.return?.();
+                    tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_instances, "m", _BetaToolRunnerStream_removeReader).call(this, reader);
+                    return (await result) ?? { value: undefined, done: true };
+                },
+            };
+        }
+    }
+    _BetaToolRunnerStream_track = function _BetaToolRunnerStream_track(event, closed) {
+        if (tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_fallback, "f")) {
+            return;
+        }
+        if (event.type === 'content_block_start' && event.content_block.type === 'fallback') {
+            // The refusal that led to the fallback may have cut the call before it off.
+            tslib_1.__classPrivateFieldSet(this, _BetaToolRunnerStream_fallback, true, "f");
+            tslib_1.__classPrivateFieldSet(this, _BetaToolRunnerStream_closed, undefined, "f");
+            return;
+        }
+        // A call's own `content_block_stop` isn't enough, because a reply that is cut off closes its last call too.
+        const movedOn = event.type === 'content_block_start' ||
+            (event.type === 'message_delta' && event.delta.stop_reason === 'tool_use');
+        if (tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_closed, "f") && movedOn) {
+            tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_ready, "f").push({ toolUse: tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_closed, "f"), event: tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_emitted, "f") });
+            tslib_1.__classPrivateFieldSet(this, _BetaToolRunnerStream_closed, undefined, "f");
+        }
+        if (closed) {
+            tslib_1.__classPrivateFieldSet(this, _BetaToolRunnerStream_closed, closed, "f");
+        }
+    }, _BetaToolRunnerStream_release = function _BetaToolRunnerStream_release() {
+        // Events that were already read still arrive after the stream has failed or been aborted.
+        if (this.errored || this.controller.signal.aborted) {
+            return;
+        }
+        const handled = Math.min(tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_emitted, "f"), ...tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_readers, "f").map((reader) => reader.handled));
+        while (tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_ready, "f")[0] && tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_ready, "f")[0].event <= handled) {
+            tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_onToolCall, "f").call(this, tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_ready, "f").shift().toolUse);
+        }
+    }, _BetaToolRunnerStream_removeReader = function _BetaToolRunnerStream_removeReader(reader) {
+        const index = tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_readers, "f").indexOf(reader);
+        if (index >= 0) {
+            tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_readers, "f").splice(index, 1);
+            tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_instances, "m", _BetaToolRunnerStream_release).call(this);
+        }
+    };
+    return BetaToolRunnerStream;
+})();
+exports.BetaToolRunnerStream = BetaToolRunnerStream;
+//# sourceMappingURL=BetaToolRunnerStream.js.map
+
+/***/ }),
+
 /***/ 82793:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -43728,6 +43875,10 @@ function applyFallbackPatch(body, entry) {
             patchField(patched, key, value);
         }
     }
+    // the fallback model may not accept `between_tools`
+    if (entry.thinking === undefined && body.thinking?.type === 'between_tools') {
+        patched['thinking'] = { type: 'disabled' };
+    }
     return patched;
 }
 /** Set/`null`-unset/absent-keep one field on `target` (mutated). */
@@ -43768,6 +43919,10 @@ function patchField(target, key, value) {
  * the credit token is redeemable only against the refused request's body, so
  * the other per-entry overrides (`max_tokens`, `thinking`, ...) would be
  * rejected.
+ *
+ * A `between_tools` thinking config is sent to a fallback as `disabled`, since
+ * the fallback model may not accept it; when not streaming, an entry that sets
+ * `thinking` overrides this.
  *
  * The fallback-credit beta the credit tokens require is sent by default on
  * every request the middleware handles; the `betas` option controls this.
@@ -44314,6 +44469,9 @@ function buildFallbackRequest(orig, { model, creditToken, continuation, }) {
     const body = JSON.parse(orig.body);
     body.model = model;
     body.fallback_credit_token = creditTokenParam(creditToken);
+    if (body.thinking?.type === 'between_tools') {
+        body.thinking = { type: 'disabled' };
+    }
     // Append the continuation (decided by the chain loop) as a trailing
     // assistant turn; everything else must stay identical to the refused
     // request. When the refusal granted no prefill claim, omit the turn
@@ -44326,7 +44484,9 @@ function buildFallbackRequest(orig, { model, creditToken, continuation, }) {
     // model, fallback_credit_token, and the one appended assistant turn are the
     // only permitted deltas; anything else is a 400 ("request body ... does not
     // match the original refused request"). This is also why the per-entry
-    // BetaFallbackParam overrides are ignored on the streaming path.
+    // BetaFallbackParam overrides are ignored on the streaming path. The one
+    // exception is a carried `between_tools` thinking config, which the fallback
+    // model may not accept: it becomes `disabled`, served without the credit.
     return { ...orig, headers: new Headers(orig.headers), body: JSON.stringify(body) };
 }
 // --- block accumulation & prefill conversion -------------------------------
@@ -44571,24 +44731,26 @@ async function runRunnableTool(tool, rawInput, context) {
 
 "use strict";
 
-var _BetaToolRunner_instances, _BetaToolRunner_consumed, _BetaToolRunner_mutated, _BetaToolRunner_state, _BetaToolRunner_options, _BetaToolRunner_message, _BetaToolRunner_stream, _BetaToolRunner_toolResponse, _BetaToolRunner_completion, _BetaToolRunner_iterationCount, _BetaToolRunner_compaction, _BetaToolRunner_lastStopReason, _BetaToolRunner_toolOverrides, _BetaToolRunner_pendingToolChanges, _BetaToolRunner_checkAndCompact, _BetaToolRunner_send, _BetaToolRunner_compact, _BetaToolRunner_runnableTools, _BetaToolRunner_availableToolNames, _BetaToolRunner_recordRemovalsFromHistory, _BetaToolRunner_compactAfterFinalTurn, _BetaToolRunner_generateToolResponse, _BetaToolRunner_flushPendingToolChanges, _BetaToolRunner_pendingToolChangesMessage;
+var _BetaToolRunner_instances, _BetaToolRunner_consumed, _BetaToolRunner_mutated, _BetaToolRunner_state, _BetaToolRunner_options, _BetaToolRunner_message, _BetaToolRunner_stream, _BetaToolRunner_toolResponse, _BetaToolRunner_completion, _BetaToolRunner_iterationCount, _BetaToolRunner_compaction, _BetaToolRunner_calls, _BetaToolRunner_lastStopReason, _BetaToolRunner_toolOverrides, _BetaToolRunner_pendingToolChanges, _BetaToolRunner_send, _BetaToolRunner_streamThatStartsTools, _BetaToolRunner_startedCallsSettled, _BetaToolRunner_compact, _BetaToolRunner_runnableTools, _BetaToolRunner_availableToolNames, _BetaToolRunner_recordRemovalsFromHistory, _BetaToolRunner_compactAfterFinalTurn, _BetaToolRunner_generateToolResponse, _BetaToolRunner_flushPendingToolChanges, _BetaToolRunner_pendingToolChangesMessage;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.BetaToolRunner = void 0;
 const tslib_1 = __nccwpck_require__(14839);
 const ToolError_1 = __nccwpck_require__(81429);
 const error_1 = __nccwpck_require__(69955);
+const beta_1 = __nccwpck_require__(79221);
+const BetaToolRunnerStream_1 = __nccwpck_require__(57589);
 const headers_1 = __nccwpck_require__(60017);
 const promise_1 = __nccwpck_require__(65760);
 const values_1 = __nccwpck_require__(17999);
 const log_1 = __nccwpck_require__(88991);
-const CompactionControl_1 = __nccwpck_require__(58963);
 const stainless_helper_header_1 = __nccwpck_require__(50324);
 var BetaToolRunner = /* @__PURE__ */ (() => {
     /**
      * A ToolRunner handles the automatic conversation loop between the assistant and tools.
      *
      * A ToolRunner is an async iterable that yields either BetaMessage or BetaMessageStream objects
-     * depending on the streaming configuration.
+     * depending on the streaming configuration. With `runToolsEagerly` it starts each tool call while the
+     * reply is still streaming, unless `deferToolCall()` holds the call.
      */
     class BetaToolRunner {
         constructor(client, params, options) {
@@ -44613,6 +44775,8 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
             _BetaToolRunner_iterationCount.set(this, 0);
             /** A compaction scheduled with `compactBeforeNextTurn()`, in flight until its response has been handled */
             _BetaToolRunner_compaction.set(this, { status: 'idle' });
+            /** The tool calls of the current reply that are held or have started, by `tool_use` id. See `runToolsEagerly`. */
+            _BetaToolRunner_calls.set(this, void 0);
             /** The last turn's stop reason, or `null` once the history has been replaced since */
             _BetaToolRunner_lastStopReason.set(this, null);
             /**
@@ -44625,6 +44789,8 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
             /** Changes queued by `addTools()` / `removeTools()`, in call order, for the next request */
             _BetaToolRunner_pendingToolChanges.set(this, []);
             rejectCompactionParam(params);
+            rejectCompactionControl(params);
+            rejectRunToolsEagerlyWithoutStream(params);
             tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_state, {
                 params: {
                     // You can't clone the entire params since there are functions as handlers.
@@ -44633,7 +44799,7 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
                     ...params,
                     // Not structuredClone(): it throws on a function, and a runnable tool written by value into a
                     // `tool_addition` block has `run`. A JSON copy is the messages as they are sent, which drops it.
-                    messages: JSON.parse(JSON.stringify(params.messages)),
+                    messages: JSON.parse(JSON.stringify(withToolDefinitions(params.messages))),
                 },
             }, "f");
             // Cloning drops symbol-keyed properties, so collect helper marks
@@ -44649,86 +44815,8 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
                 ]),
             }, "f");
             tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_completion, (0, promise_1.promiseWithResolvers)(), "f");
-            if (params.compactionControl?.enabled) {
-                console.warn('Anthropic: The `compactionControl` parameter is deprecated and will be removed in a future version. ' +
-                    'Use server-side compaction instead by passing `edits: [{ type: "compact_20260112" }]` in the params passed to `toolRunner()`. ' +
-                    'See https://platform.claude.com/docs/en/build-with-claude/compaction');
-            }
         }
-        async *[(_BetaToolRunner_consumed = new WeakMap(), _BetaToolRunner_mutated = new WeakMap(), _BetaToolRunner_state = new WeakMap(), _BetaToolRunner_options = new WeakMap(), _BetaToolRunner_message = new WeakMap(), _BetaToolRunner_stream = new WeakMap(), _BetaToolRunner_toolResponse = new WeakMap(), _BetaToolRunner_completion = new WeakMap(), _BetaToolRunner_iterationCount = new WeakMap(), _BetaToolRunner_compaction = new WeakMap(), _BetaToolRunner_lastStopReason = new WeakMap(), _BetaToolRunner_toolOverrides = new WeakMap(), _BetaToolRunner_pendingToolChanges = new WeakMap(), _BetaToolRunner_instances = new WeakSet(), _BetaToolRunner_checkAndCompact = async function _BetaToolRunner_checkAndCompact() {
-            const compactionControl = tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.compactionControl;
-            if (!compactionControl || !compactionControl.enabled) {
-                return false;
-            }
-            let tokensUsed = 0;
-            if (tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_message, "f") !== undefined) {
-                try {
-                    const message = await tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_message, "f");
-                    const totalInputTokens = message.usage.input_tokens +
-                        (message.usage.cache_creation_input_tokens ?? 0) +
-                        (message.usage.cache_read_input_tokens ?? 0);
-                    tokensUsed = totalInputTokens + message.usage.output_tokens;
-                }
-                catch {
-                    // If we can't get the message, skip compaction
-                    return false;
-                }
-            }
-            const threshold = compactionControl.contextTokenThreshold ?? CompactionControl_1.DEFAULT_TOKEN_THRESHOLD;
-            if (tokensUsed < threshold) {
-                return false;
-            }
-            const model = compactionControl.model ?? tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.model;
-            const summaryPrompt = compactionControl.summaryPrompt ?? CompactionControl_1.DEFAULT_SUMMARY_PROMPT;
-            const messages = tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.messages;
-            if (messages[messages.length - 1].role === 'assistant') {
-                // Remove tool_use blocks from the last message to avoid 400 error
-                // (tool_use requires tool_result, which we don't have yet)
-                const lastMessage = messages[messages.length - 1];
-                if (Array.isArray(lastMessage.content)) {
-                    const nonToolBlocks = lastMessage.content.filter((block) => block.type !== 'tool_use');
-                    if (nonToolBlocks.length === 0) {
-                        // If all blocks were tool_use, just remove the message entirely
-                        messages.pop();
-                    }
-                    else {
-                        lastMessage.content = nonToolBlocks;
-                    }
-                }
-            }
-            const response = await this.client.beta.messages.create({
-                model,
-                messages: [
-                    ...messages,
-                    {
-                        role: 'user',
-                        content: [
-                            {
-                                type: 'text',
-                                text: summaryPrompt,
-                            },
-                        ],
-                    },
-                ],
-                max_tokens: tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.max_tokens,
-            }, {
-                signal: tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f").signal,
-                headers: (0, headers_1.buildHeaders)([tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f").headers, (0, stainless_helper_header_1.helperHeader)('compaction')]),
-            });
-            if (response.content[0]?.type !== 'text') {
-                throw new error_1.AnthropicError('Expected text response for compaction');
-            }
-            // Must run before the history is replaced: a removal the caller wrote into it is known only from it.
-            tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_recordRemovalsFromHistory).call(this);
-            tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_lastStopReason, null, "f");
-            tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.messages = [
-                {
-                    role: 'user',
-                    content: asContentParam(response.content),
-                },
-            ];
-            return true;
-        }, Symbol.asyncIterator)]() {
+        async *[(_BetaToolRunner_consumed = new WeakMap(), _BetaToolRunner_mutated = new WeakMap(), _BetaToolRunner_state = new WeakMap(), _BetaToolRunner_options = new WeakMap(), _BetaToolRunner_message = new WeakMap(), _BetaToolRunner_stream = new WeakMap(), _BetaToolRunner_toolResponse = new WeakMap(), _BetaToolRunner_completion = new WeakMap(), _BetaToolRunner_iterationCount = new WeakMap(), _BetaToolRunner_compaction = new WeakMap(), _BetaToolRunner_calls = new WeakMap(), _BetaToolRunner_lastStopReason = new WeakMap(), _BetaToolRunner_toolOverrides = new WeakMap(), _BetaToolRunner_pendingToolChanges = new WeakMap(), _BetaToolRunner_instances = new WeakSet(), Symbol.asyncIterator)]() {
             var _a;
             if (tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_consumed, "f")) {
                 throw new error_1.AnthropicError('Cannot iterate over a consumed stream');
@@ -44754,49 +44842,46 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
                         tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_toolResponse, undefined, "f");
                         tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_iterationCount, (_a = tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_iterationCount, "f"), _a++, _a), "f");
                         tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_message, undefined, "f");
-                        const { max_iterations, compactionControl, ...params } = tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params;
+                        const { max_iterations, runToolsEagerly, ...params } = tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params;
                         yield* tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_send).call(this, params);
-                        const isCompacted = await tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_checkAndCompact).call(this);
-                        if (!isCompacted) {
-                            if (!tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_mutated, "f")) {
-                                const message = await tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_message, "f");
-                                const nextStep = determineNextStepFromStopReason(message.stop_reason);
-                                tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_lastStopReason, message.stop_reason, "f");
-                                tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.messages.push({
-                                    role: message.role,
-                                    content: asContentParam(message.content),
-                                });
-                                // Container-bound server tools reject a follow-up request that omits the container the
-                                // previous turn ran in, so carry its id forward unless the caller pinned one themselves.
-                                const { container } = tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params;
-                                if (message.container) {
-                                    if (container == null) {
-                                        tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.container = message.container.id;
-                                    }
-                                    else if (typeof container === 'object' && container.id == null) {
-                                        tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.container = { ...container, id: message.container.id };
-                                    }
+                        if (!tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_mutated, "f")) {
+                            const message = await tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_message, "f");
+                            const nextStep = determineNextStepFromStopReason(message.stop_reason);
+                            tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_lastStopReason, message.stop_reason, "f");
+                            tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.messages.push({
+                                role: message.role,
+                                content: asContentParam(message.content),
+                            });
+                            // Container-bound server tools reject a follow-up request that omits the container the
+                            // previous turn ran in, so carry its id forward unless the caller pinned one themselves.
+                            const { container } = tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params;
+                            if (message.container) {
+                                if (container == null) {
+                                    tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.container = message.container.id;
                                 }
-                                if (nextStep === 'stop') {
-                                    yield* tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_compactAfterFinalTurn).call(this);
-                                    break;
-                                }
-                                if (nextStep === 'resume') {
-                                    continue;
+                                else if (typeof container === 'object' && container.id == null) {
+                                    tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.container = { ...container, id: message.container.id };
                                 }
                             }
-                            else {
-                                // The caller has taken over the history, so the last response no longer says how it ends.
-                                tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_lastStopReason, null, "f");
-                            }
-                            const toolMessage = await tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_generateToolResponse).call(this, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.messages.at(-1));
-                            if (toolMessage) {
-                                tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.messages.push(toolMessage);
-                            }
-                            else if (!tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_mutated, "f")) {
+                            if (nextStep === 'stop') {
                                 yield* tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_compactAfterFinalTurn).call(this);
                                 break;
                             }
+                            if (nextStep === 'resume') {
+                                continue;
+                            }
+                        }
+                        else {
+                            // The caller has taken over the history, so the last response no longer says how it ends.
+                            tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_lastStopReason, null, "f");
+                        }
+                        const toolMessage = await tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_generateToolResponse).call(this, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.messages.at(-1));
+                        if (toolMessage) {
+                            tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.messages.push(toolMessage);
+                        }
+                        else if (!tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_mutated, "f")) {
+                            yield* tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_compactAfterFinalTurn).call(this);
+                            break;
                         }
                     }
                     finally {
@@ -44804,6 +44889,7 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
                         tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_stream, undefined, "f");
                     }
                 }
+                await tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_startedCallsSettled).call(this);
                 if (!tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_message, "f")) {
                     throw new error_1.AnthropicError('ToolRunner concluded without a message from the server');
                 }
@@ -44821,6 +44907,7 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
         setMessagesParams(paramsOrMutator) {
             const params = typeof paramsOrMutator === 'function' ? paramsOrMutator(tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params) : paramsOrMutator;
             rejectCompactionParam(params);
+            rejectRunToolsEagerlyWithoutStream(params);
             if (tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_compaction, "f").status !== 'idle') {
                 rejectCompactionEdit(params);
             }
@@ -44843,7 +44930,9 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
         }
         /**
          * Get the tool response for the last message from the assistant.
-         * Avoids redundant tool executions by caching results.
+         * Avoids redundant tool executions by caching results. With `runToolsEagerly`, it reuses the calls of
+         * the reply that have started and runs the rest, including the ones `deferToolCall()` is holding, so that no
+         * call runs twice.
          *
          * @returns A promise that resolves to a BetaMessageParam containing tool results, or null if no tools need to be executed
          *
@@ -44859,6 +44948,65 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
                 return null;
             }
             return tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_generateToolResponse).call(this, message, signal);
+        }
+        /**
+         * Hold a tool call of the current reply until you are done with the reply, which is when it runs without
+         * streaming: at the end of the loop body, or when you call `generateToolResponse()`.
+         *
+         * With `runToolsEagerly` the runner otherwise starts each call while the reply streams, as soon as
+         * the model has moved on from it: when the next block starts, or the reply stops with `tool_use`. A call
+         * never starts before your stream listeners and any `for await` over the stream have handled that event, so
+         * you can call this from either once you have seen the call. The other calls of the reply still start early.
+         * It does nothing for a call that has started, outside the loop body, and without `runToolsEagerly`.
+         *
+         * @param toolUse - The `tool_use` block of the call, or its id
+         *
+         * @example
+         * for await (const stream of runner) {
+         *   stream.on('contentBlock', (block) => {
+         *     if (block.type === 'tool_use' && block.name === 'delete_file') {
+         *       runner.deferToolCall(block);
+         *     }
+         *   });
+         *   await stream.finalMessage();
+         *   // No `delete_file` call has started yet.
+         * }
+         */
+        deferToolCall(toolUse) {
+            const id = typeof toolUse === 'string' ? toolUse : toolUse.id;
+            if (tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_calls, "f") && !tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_calls, "f").has(id)) {
+                tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_calls, "f").set(id, { status: 'held' });
+            }
+        }
+        /**
+         * The tool calls of the current reply that `deferToolCall()` is holding, in the model's order, as their
+         * `tool_use` blocks. A call is in the list once its block has finished streaming, so read the list when you
+         * are done with the stream. A call that has started is not in it. It is empty without
+         * `runToolsEagerly`.
+         *
+         * Held calls are listed whatever the reply's `stop_reason`, because `generateToolResponse()` runs them
+         * whatever it is. After `max_tokens` the input of the last call can be cut off.
+         *
+         * @example
+         * for await (const stream of runner) {
+         *   stream.on('contentBlock', (block) => {
+         *     if (block.type === 'tool_use' && block.name === 'delete_file') {
+         *       runner.deferToolCall(block);
+         *     }
+         *   });
+         *   await stream.finalMessage();
+         *
+         *   const held = runner.deferredToolCalls;
+         *   if (held.length > 0 && !(await confirm(held))) break;
+         * }
+         */
+        get deferredToolCalls() {
+            const stream = tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_stream, "f");
+            const calls = tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_calls, "f");
+            if (!(stream instanceof BetaToolRunnerStream_1.BetaToolRunnerStream) || !calls) {
+                return [];
+            }
+            return stream.toolCalls.filter((toolUse) => calls.get(toolUse.id)?.status === 'held');
         }
         /**
          * Wait for the async iterator to complete. This works even if the async iterator hasn't yet started, and
@@ -44964,9 +45112,9 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
          *
          * Each tool's whole definition is sent in a `tool_addition` block with the next request, and a
          * runnable tool replaces a runnable tool of the same name straight away, even for a call already in
-         * the message being handled. A raw definition is only sent: the runner never runs it, and stops
-         * running a tool of the same name. Requires the `inline-tools-2026-09-15` beta, which the runner does
-         * not add for you.
+         * the message being handled. A call that started while the reply streamed keeps the old one. A raw
+         * definition is only sent: the runner never runs it, and stops running a tool of the same name.
+         * Requires the `inline-tools-2026-09-15` beta, which the runner does not add for you.
          *
          * @param tools - Runnable tools (for example from `betaZodTool()`) or raw tool definitions
          *
@@ -44986,8 +45134,9 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
          * Take tools away from the model without changing `params.tools`, which would miss the prompt cache.
          *
          * The tools stop being run straight away: a call to one of them, even one in the message being
-         * handled, gets the same "not found" error result as a call to an unknown tool. The model is told
-         * in a `tool_removal` block with the next request. Use {@link addTools} to bring a tool back.
+         * handled, gets the same "not found" error result as a call to an unknown tool. A call that started
+         * while the reply streamed finishes as usual. The model is told in a `tool_removal` block with the
+         * next request. Use {@link addTools} to bring a tool back.
          * Requires the `inline-tools-2026-09-15` beta, which the runner does not add for you.
          *
          * @param tools - The tools to remove, or their names
@@ -45017,8 +45166,17 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
      * end of the iteration.
      */
     async function* _BetaToolRunner_send(params) {
+        await tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_startedCallsSettled).call(this);
+        tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_calls, undefined, "f");
+        params = {
+            ...params,
+            ...(params.tools && { tools: params.tools.map(toolDefinition) }),
+            messages: withToolDefinitions(params.messages),
+        };
         if (params.stream) {
-            tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_stream, this.client.beta.messages.stream({ ...params }, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f")), "f");
+            tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_stream, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.runToolsEagerly ?
+                tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_streamThatStartsTools).call(this, params)
+                : this.client.beta.messages.stream({ ...params }, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f")), "f");
             tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_message, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_stream, "f").finalMessage(), "f");
             // Make sure that this promise doesn't throw before we get the option to do something about it.
             // Error will be caught when we call await this.#message ultimately
@@ -45029,9 +45187,28 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
             tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_message, this.client.beta.messages.create({ ...params, stream: false }, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f")), "f");
             yield tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_message, "f");
         }
+    }, _BetaToolRunner_streamThatStartsTools = function _BetaToolRunner_streamThatStartsTools(params) {
+        const calls = new Map();
+        tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_calls, calls, "f");
+        return BetaToolRunnerStream_1.BetaToolRunnerStream.start(this.client.beta.messages, params, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f"), (toolUse) => {
+            // Held, or started by `generateToolResponse()` before a reader that is behind got to the call.
+            if (calls.has(toolUse.id)) {
+                return;
+            }
+            // The call looks its tool up now, so a later `addTools()` or `removeTools()` doesn't change it.
+            const result = runToolCall(tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_runnableTools).call(this), tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_availableToolNames).call(this), toolUse, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f"));
+            // Marks a rejection as handled until the results are collected.
+            result.catch(() => { });
+            calls.set(toolUse.id, { status: 'started', result });
+        });
+    }, _BetaToolRunner_startedCallsSettled = 
+    /** Waits for the calls of the last streamed reply that have started, whether or not their results were sent. */
+    async function _BetaToolRunner_startedCallsSettled() {
+        const started = [...(tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_calls, "f")?.values() ?? [])].filter((call) => call.status === 'started');
+        await Promise.allSettled(started.map((call) => call.result));
     }, _BetaToolRunner_compact = async function* _BetaToolRunner_compact(compaction) {
         rejectCompactionEdit(tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params);
-        const { max_iterations, compactionControl, ...requestParams } = tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params;
+        const { max_iterations, runToolsEagerly, ...requestParams } = tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params;
         const params = withoutCompactionIncompatibleParams(requestParams);
         tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_compaction, { status: 'in_flight' }, "f");
         tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_toolResponse, undefined, "f");
@@ -45113,7 +45290,7 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
         if (tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_toolResponse, "f") !== undefined) {
             return tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_toolResponse, "f");
         }
-        tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_toolResponse, generateToolResponse(tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_runnableTools).call(this), tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_availableToolNames).call(this), lastMessage, { ...tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f"), signal }), "f");
+        tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_toolResponse, generateToolResponse(tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_runnableTools).call(this), tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_availableToolNames).call(this), lastMessage, { ...tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f"), signal }, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_calls, "f")), "f");
         return tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_toolResponse, "f");
     }, _BetaToolRunner_flushPendingToolChanges = function _BetaToolRunner_flushPendingToolChanges() {
         // A paused turn has to go back as the last message, so the changes wait for the request after it.
@@ -45131,12 +45308,7 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
                 content.push({ type: 'tool_removal', tool: { type: 'tool_reference', name: change.name } });
                 continue;
             }
-            // The functions stay out of the definition that is sent.
-            let definition = change.tool;
-            if ('run' in change.tool) {
-                const { run, parse, close, ...rest } = change.tool;
-                definition = rest;
-            }
+            const definition = toolDefinition(change.tool);
             content.push({ type: 'tool_addition', tool: { type: 'tool_definition', definition } });
         }
         return { role: 'system', content };
@@ -45148,6 +45320,19 @@ function rejectCompactionParam(params) {
     if ('compaction' in params && params.compaction != null) {
         throw new error_1.AnthropicError('`compaction` cannot be set on a tool runner: every request in the loop would compact again. ' +
             'Call `runner.compactBeforeNextTurn()` when the conversation should be compacted instead.');
+    }
+}
+function rejectCompactionControl(params) {
+    // No longer in the params type, so only untyped callers reach this; forwarding it would be an opaque API 400.
+    if ('compactionControl' in params && params.compactionControl != null) {
+        throw new error_1.AnthropicError('`compactionControl` has been removed from the tool runner. Use server-side compaction instead: ' +
+            'call `runner.compactBeforeNextTurn()` when the conversation should be compacted.');
+    }
+}
+function rejectRunToolsEagerlyWithoutStream(params) {
+    if (params.runToolsEagerly && !params.stream) {
+        throw new TypeError("`runToolsEagerly: true` needs `stream: true` in the tool runner's params, because a reply that " +
+            "isn't streamed arrives whole.");
     }
 }
 function rejectCompactionEdit(params) {
@@ -45178,7 +45363,28 @@ function withoutCompactionIncompatibleParams(params) {
     }
     return kept;
 }
-async function generateToolResponse(runnable, available, lastMessage, requestOptions) {
+function toolDefinition(tool) {
+    if (!('run' in tool)) {
+        return tool;
+    }
+    const apiKeys = beta_1.BETA_CLIENT_TOOL_UNION_KEYS;
+    return {
+        ...Object.fromEntries(Object.entries(tool).filter(([key]) => apiKeys.includes(key))),
+        ...((0, stainless_helper_header_1.wasCreatedByStainlessHelper)(tool) && { [stainless_helper_header_1.SDK_HELPER_SYMBOL]: tool[stainless_helper_header_1.SDK_HELPER_SYMBOL] }),
+    };
+}
+function withToolDefinitions(messages) {
+    return messages.map((message) => {
+        if (message.role !== 'system' || typeof message.content === 'string') {
+            return message;
+        }
+        const content = message.content.map((block) => block.type === 'tool_addition' && block.tool.type === 'tool_definition' ?
+            { ...block, tool: { ...block.tool, definition: toolDefinition(block.tool.definition) } }
+            : block);
+        return { ...message, content };
+    });
+}
+async function generateToolResponse(runnable, available, lastMessage, requestOptions, calls) {
     // Only process if the last message is from the assistant and has tool use blocks
     if (!lastMessage ||
         lastMessage.role !== 'assistant' ||
@@ -45190,44 +45396,53 @@ async function generateToolResponse(runnable, available, lastMessage, requestOpt
     if (toolUseBlocks.length === 0) {
         return null;
     }
-    const toolResults = await Promise.all(toolUseBlocks.map(async (toolUse) => {
-        // A `tool_removal` is only a hint to the model, which may still emit a tool_use for a
-        // withdrawn tool — treat those exactly like a tool that was never defined.
-        const tool = available.has(toolUse.name) ? runnable.get(toolUse.name) : undefined;
-        if (!tool) {
-            return toolNotFoundResult(toolUse);
+    const toolResults = await Promise.all(toolUseBlocks.map((toolUse) => {
+        const call = calls?.get(toolUse.id);
+        if (call?.status === 'started') {
+            return call.result;
         }
-        try {
-            let input = toolUse.input;
-            if ('parse' in tool && tool.parse) {
-                input = tool.parse(input);
-            }
-            const result = await tool.run(input, {
-                toolUse: toolUse,
-                toolUseBlock: toolUse,
-                signal: requestOptions?.signal,
-            });
-            return {
-                type: 'tool_result',
-                tool_use_id: toolUse.id,
-                content: result,
-            };
-        }
-        catch (error) {
-            return {
-                type: 'tool_result',
-                tool_use_id: toolUse.id,
-                content: error instanceof ToolError_1.ToolError ?
-                    error.content
-                    : `Error: ${error instanceof Error ? error.message : String(error)}`,
-                is_error: true,
-            };
-        }
+        const result = runToolCall(runnable, available, toolUse, requestOptions);
+        calls?.set(toolUse.id, { status: 'started', result });
+        return result;
     }));
     return {
         role: 'user',
         content: toolResults,
     };
+}
+async function runToolCall(runnable, available, toolUse, requestOptions) {
+    // A `tool_removal` is only a hint to the model, which may still emit a tool_use for a
+    // withdrawn tool — treat those exactly like a tool that was never defined.
+    const tool = available.has(toolUse.name) ? runnable.get(toolUse.name) : undefined;
+    if (!tool) {
+        return toolNotFoundResult(toolUse);
+    }
+    try {
+        let input = toolUse.input;
+        if ('parse' in tool && tool.parse) {
+            input = tool.parse(input);
+        }
+        const result = await tool.run(input, {
+            toolUse: toolUse,
+            toolUseBlock: toolUse,
+            signal: requestOptions?.signal,
+        });
+        return {
+            type: 'tool_result',
+            tool_use_id: toolUse.id,
+            content: result,
+        };
+    }
+    catch (error) {
+        return {
+            type: 'tool_result',
+            tool_use_id: toolUse.id,
+            content: error instanceof ToolError_1.ToolError ?
+                error.content
+                : `Error: ${error instanceof Error ? error.message : String(error)}`,
+            is_error: true,
+        };
+    }
 }
 /**
  * Response content is sent back as request content unchanged. The generated request type of the
@@ -45310,41 +45525,6 @@ function determineNextStepFromStopReason(stopReason) {
 
 /***/ }),
 
-/***/ 58963:
-/***/ ((__unused_webpack_module, exports) => {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.DEFAULT_SUMMARY_PROMPT = exports.DEFAULT_TOKEN_THRESHOLD = void 0;
-exports.DEFAULT_TOKEN_THRESHOLD = 100000;
-exports.DEFAULT_SUMMARY_PROMPT = `You have been working on the task described above but have not yet completed it. Write a continuation summary that will allow you (or another instance of yourself) to resume work efficiently in a future context window where the conversation history will be replaced with this summary. Your summary should be structured, concise, and actionable. Include:
-1. Task Overview
-The user's core request and success criteria
-Any clarifications or constraints they specified
-2. Current State
-What has been completed so far
-Files created, modified, or analyzed (with paths if relevant)
-Key outputs or artifacts produced
-3. Important Discoveries
-Technical constraints or requirements uncovered
-Decisions made and their rationale
-Errors encountered and how they were resolved
-What approaches were tried that didn't work (and why)
-4. Next Steps
-Specific actions needed to complete the task
-Any blockers or open questions to resolve
-Priority order if multiple steps remain
-5. Context to Preserve
-User preferences or style requirements
-Domain-specific details that aren't obvious
-Any promises made to the user
-Be concise but complete—err on the side of including information that would prevent duplicate work or repeated mistakes. Write in a way that enables immediate resumption of the task.
-Wrap your summary in <summary></summary> tags.`;
-//# sourceMappingURL=CompactionControl.js.map
-
-/***/ }),
-
 /***/ 41757:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -45381,16 +45561,23 @@ const SEND_BACKOFF_CAP_MS = 30000;
 const SEND_RETRY_WINDOW_MS = 5 * 60000;
 /** Default {@link SessionToolRunnerOptions.maxIdleMs}: 60 seconds. */
 exports.DEFAULT_MAX_IDLE_MS = 60000;
-/** Returns true if `ev` is a `session.status_idle` with `stop_reason` `end_turn`. */
-function isEndTurnIdle(ev) {
-    return ev.type === 'session.status_idle' && ev.stop_reason?.type === 'end_turn';
+/**
+ * Whether `ev` is a `session.status_idle` whose turn is over. Only
+ * `requires_action` leaves the turn open: the session resumes once a client
+ * resolves the events it names. Every other stop reason ends the turn, including
+ * one newer than this SDK's types.
+ */
+function endsTurn(ev) {
+    if (ev.type !== 'session.status_idle')
+        return false;
+    return ev.stop_reason?.type !== 'requires_action';
 }
 var IdleClock = /* @__PURE__ */ (() => {
     /**
      * The `maxIdleMs` stop-countdown, including its deferral. {@link noteEvent}
-     * arms on `session.status_idle` with `stop_reason: end_turn` and disarms on
-     * anything else. Gated tool work registered via {@link block} — a call held for
-     * user confirmation, or a user-approved call still dispatching — keeps
+     * arms on an idle that ends the turn and disarms on anything else. Gated tool
+     * work registered via {@link block} — a call held for user confirmation, or a
+     * user-approved call still dispatching — keeps
      * {@link arm} pending until {@link unblock} retires the last blocker, at which
      * point the countdown starts. Event-driven — there is no polling watchdog.
      */
@@ -45407,7 +45594,7 @@ var IdleClock = /* @__PURE__ */ (() => {
             tslib_1.__classPrivateFieldSet(this, _IdleClock_onExpire, onExpire, "f");
         }
         /**
-         * Arm on `status_idle{end_turn}`; disarm otherwise. `user.tool_confirmation`
+         * Arm on an idle that ends the turn; disarm otherwise. `user.tool_confirmation`
          * is neutral: it signals neither agent activity nor an idle, and its effect
          * on the clock flows through {@link block} / {@link unblock} instead —
          * disarming here would discard the pending arm the verdict is about to
@@ -45416,7 +45603,7 @@ var IdleClock = /* @__PURE__ */ (() => {
         noteEvent(ev) {
             if (ev.type === 'user.tool_confirmation')
                 return;
-            if (isEndTurnIdle(ev))
+            if (endsTurn(ev))
                 this.arm();
             else
                 this.disarm();
@@ -45495,17 +45682,17 @@ var SessionToolRunner = /* @__PURE__ */ (() => {
      * executed and posts nothing (the denial resolves the call server-side), but is
      * still yielded (`confirmation="deny"`, `posted=false`, `result=undefined`) so
      * the consumer can observe it. A held call — and a user-approved one still
-     * dispatching — defers the `maxIdleMs` countdown, so an `end_turn` idle
-     * observed in the meantime cannot stop the runner: it waits until the verdict
-     * arrives, the session terminates, or the abort signal fires — pass
+     * dispatching — defers the `maxIdleMs` countdown, so an idle observed in the
+     * meantime cannot stop the runner: it waits until the verdict arrives, the
+     * session terminates, or the abort signal fires — pass
      * `AbortSignal.timeout(...)` for a wall-clock bound.
      *
      * Iteration ends when the session terminates (`session.status_terminated` /
      * `session.deleted`), when the consumer `break`s out of the loop or aborts the
-     * supplied signal, or — once the session has gone idle with
-     * `stop_reason.type === "end_turn"` — when `maxIdleMs` elapses with no new
-     * event (any new event resets that countdown; it re-arms on the next `end_turn`
-     * idle; `maxIdleMs <= 0` disables it). The `finally` branch drains any in-flight
+     * supplied signal, or — once the session has gone idle with any `stop_reason.type`
+     * but `"requires_action"` — when `maxIdleMs` elapses with no new event (any
+     * new event resets that countdown; it re-arms on the next such idle;
+     * `maxIdleMs <= 0` disables it). The `finally` branch drains any in-flight
      * tool calls and runs each tool's `close()` cleanup hook. It does *not* touch
      * the work-item lease — wrap it in an `EnvironmentWorker` if you need
      * heartbeating / force-stop.
@@ -45556,7 +45743,7 @@ var SessionToolRunner = /* @__PURE__ */ (() => {
             tslib_1.__classPrivateFieldSet(this, _SessionToolRunner_detachExternal, (0, abort_1.linkAbort)(opts.signal, tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_controller, "f")), "f");
             tslib_1.__classPrivateFieldSet(this, _SessionToolRunner_requestOpts, opts.requestOptions, "f");
             tslib_1.__classPrivateFieldSet(this, _SessionToolRunner_idleClock, new IdleClock(this.maxIdleMs, () => {
-                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").info('session idle after end_turn; stopping', {
+                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").info('session idle after its turn ended; stopping', {
                     component: 'session-tool-runner',
                     session_id: this.sessionId,
                     max_idle_ms: this.maxIdleMs,
@@ -45644,401 +45831,408 @@ var SessionToolRunner = /* @__PURE__ */ (() => {
             }
         }
     }
-    return SessionToolRunner;
-})();
-exports.SessionToolRunner = SessionToolRunner;
-_SessionToolRunner_requestOptions = function _SessionToolRunner_requestOptions() {
-    return {
-        ...tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_requestOpts, "f"),
-        headers: (0, headers_1.buildHeaders)([(0, stainless_helper_header_1.helperHeader)('session-tool-runner'), tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_requestOpts, "f")?.headers]),
-        signal: tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_controller, "f").signal,
-    };
-}, _SessionToolRunner_streamLoop = 
-// ===== event stream =====
-async function _SessionToolRunner_streamLoop() {
-    const ctrl = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_controller, "f");
-    let backoff = STREAM_BACKOFF_START_MS;
-    while (!ctrl.signal.aborted) {
+    _SessionToolRunner_requestOptions = function _SessionToolRunner_requestOptions() {
+        return {
+            ...tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_requestOpts, "f"),
+            headers: (0, headers_1.buildHeaders)([(0, stainless_helper_header_1.helperHeader)('session-tool-runner'), tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_requestOpts, "f")?.headers]),
+            signal: tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_controller, "f").signal,
+        };
+    }, _SessionToolRunner_streamLoop = 
+    // ===== event stream =====
+    async function _SessionToolRunner_streamLoop() {
+        const ctrl = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_controller, "f");
+        let backoff = STREAM_BACKOFF_START_MS;
+        while (!ctrl.signal.aborted) {
+            try {
+                // Establish the event stream *before* reconciling history, so an event
+                // emitted in the gap between listing and attaching is buffered on the
+                // stream rather than lost. `seen`/`answered` dedup any event that shows
+                // up both in the reconcile pass and on the live stream.
+                const stream = await this.client.beta.sessions.events.stream(this.sessionId, {}, tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_requestOptions).call(this));
+                await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_reconcile).call(this);
+                for await (const ev of stream) {
+                    backoff = STREAM_BACKOFF_START_MS;
+                    if (await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_handleStreamEvent).call(this, ev))
+                        return;
+                }
+            }
+            catch (e) {
+                // An abort throws to unwind the caller (the iterator's `streamPromise`
+                // `.catch`) rather than returning early and letting it carry on.
+                ctrl.signal.throwIfAborted();
+                if ((0, backoff_1.isFatal4xx)(e)) {
+                    tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").error('permanent stream failure, shutting down', { error: String(e) });
+                    ctrl.abort();
+                    throw e;
+                }
+                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").warn('stream disconnected, reconnecting', {
+                    error: String(e),
+                    backoff_ms: backoff,
+                });
+            }
+            ctrl.signal.throwIfAborted();
+            await (0, sleep_1.sleep)(backoff, ctrl.signal);
+            backoff = Math.min(backoff * 2, STREAM_BACKOFF_CAP_MS);
+        }
+    }, _SessionToolRunner_reconcile = 
+    /**
+     * Read full history before dispatching so a `tool_use` whose result appears
+     * later in the same history is not re-executed. Runs after the live stream is
+     * already attached (see {@link SessionToolRunner.#streamLoop}).
+     */
+    async function _SessionToolRunner_reconcile() {
+        const ctrl = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_controller, "f");
+        const pending = [];
+        let lastEndedTurn = false;
         try {
-            // Establish the event stream *before* reconciling history, so an event
-            // emitted in the gap between listing and attaching is buffered on the
-            // stream rather than lost. `seen`/`answered` dedup any event that shows
-            // up both in the reconcile pass and on the live stream.
-            const stream = await this.client.beta.sessions.events.stream(this.sessionId, {}, tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_requestOptions).call(this));
-            await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_reconcile).call(this);
-            for await (const ev of stream) {
-                backoff = STREAM_BACKOFF_START_MS;
-                if (await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_handleStreamEvent).call(this, ev))
-                    return;
+            for await (const ev of this.client.beta.sessions.events.list(this.sessionId, { limit: 1000 }, tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_requestOptions).call(this))) {
+                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_ingestHistory).call(this, ev, pending);
+                // Neutral here as in `IdleClock.noteEvent`: a verdict is neither agent
+                // activity nor an idle.
+                if (ev.type !== 'user.tool_confirmation')
+                    lastEndedTurn = endsTurn(ev);
             }
         }
         catch (e) {
-            // An abort throws to unwind the caller (the iterator's `streamPromise`
-            // `.catch`) rather than returning early and letting it carry on.
+            // An abort throws to unwind the caller; a real list failure is
+            // non-fatal — undo the speculative `seen` entries and let `#streamLoop`
+            // carry on with the live stream.
             ctrl.signal.throwIfAborted();
-            if ((0, backoff_1.isFatal4xx)(e)) {
-                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").error('permanent stream failure, shutting down', { error: String(e) });
-                ctrl.abort();
-                throw e;
-            }
-            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").warn('stream disconnected, reconnecting', {
-                error: String(e),
-                backoff_ms: backoff,
-            });
+            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").warn('reconcile list failed', { error: String(e) });
+            // If list itself failed, undo the speculative `seen` entries so the next
+            // reconcile pass (or the live stream) can pick them up. Leave the idle
+            // timer untouched — the history we read may be incomplete.
+            for (const ev of pending)
+                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_seen, "f").delete(ev.id);
+            return;
         }
-        ctrl.signal.throwIfAborted();
-        await (0, sleep_1.sleep)(backoff, ctrl.signal);
-        backoff = Math.min(backoff * 2, STREAM_BACKOFF_CAP_MS);
-    }
-}, _SessionToolRunner_reconcile = 
-/**
- * Read full history before dispatching so a `tool_use` whose result appears
- * later in the same history is not re-executed. Runs after the live stream is
- * already attached (see {@link SessionToolRunner.#streamLoop}).
- */
-async function _SessionToolRunner_reconcile() {
-    const ctrl = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_controller, "f");
-    const pending = [];
-    let lastWasEndTurn = false;
-    try {
-        for await (const ev of this.client.beta.sessions.events.list(this.sessionId, { limit: 1000 }, tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_requestOptions).call(this))) {
-            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_ingestHistory).call(this, ev, pending);
-            lastWasEndTurn = isEndTurnIdle(ev);
-        }
-    }
-    catch (e) {
-        // An abort throws to unwind the caller; a real list failure is
-        // non-fatal — undo the speculative `seen` entries and let `#streamLoop`
-        // carry on with the live stream.
-        ctrl.signal.throwIfAborted();
-        tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").warn('reconcile list failed', { error: String(e) });
-        // If list itself failed, undo the speculative `seen` entries so the next
-        // reconcile pass (or the live stream) can pick them up. Leave the idle
-        // timer untouched — the history we read may be incomplete.
-        for (const ev of pending)
-            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_seen, "f").delete(ev.id);
-        return;
-    }
-    const unanswered = pending.filter((ev) => !tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").has(ev.id));
-    // Disarm before routing: `#execute` runs inline here, so a timer left armed
-    // from before the reconnect could fire over an in-flight tool.
-    tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_idleClock, "f").disarm();
-    for (const ev of unanswered)
-        await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_routeToolEvent).call(this, ev);
-    // A held call's verdict is normally applied by the routing pass above; if
-    // its tool_use fell outside the listed window the pass never saw it, so
-    // apply the verdict to the held copy here.
-    for (const held of [...tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_awaitingConfirmation, "f").values()]) {
-        const verdict = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_confirmationVerdicts, "f").get(held.id);
-        if (verdict !== undefined)
-            await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_applyVerdict).call(this, held, verdict);
-    }
-    // Routing resolves denied calls in place (marking them answered) and holds
-    // ask-gated calls for their `user.tool_confirmation`. If the most recent
-    // event in history is an `end_turn` idle and no tool work is outstanding,
-    // the session is done — arm the idle clock so the runner stops even if that
-    // `end_turn` arrived during a disconnect. A held call is not outstanding
-    // here: it blocks the clock, so this arm stays pending until the verdict
-    // (and, for an allow, the dispatch it releases) resolves it.
-    const outstanding = unanswered.filter((ev) => !tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").has(ev.id) && !tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_awaitingConfirmation, "f").has(ev.id));
-    if (lastWasEndTurn && outstanding.length === 0)
-        tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_idleClock, "f").arm();
-    else
+        const unanswered = pending.filter((ev) => !tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").has(ev.id));
+        // Disarm before routing: `#execute` runs inline here, so a timer left armed
+        // from before the reconnect could fire over an in-flight tool.
         tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_idleClock, "f").disarm();
-}, _SessionToolRunner_ingestHistory = function _SessionToolRunner_ingestHistory(ev, pending) {
-    if (ev.type === 'agent.tool_use' || ev.type === 'agent.custom_tool_use') {
-        // Mark the event seen so a replay on the live stream is not dispatched
-        // twice, but decide whether it still needs executing from `answered`, not
-        // `seen`: a call whose result post failed is seen-but-unanswered, and must
-        // be retried on the next reconcile pass rather than silently dropped.
-        tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_seen, "f").add(ev.id);
-        if (!tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").has(ev.id))
-            pending.push(ev);
-    }
-    else if (ev.type === 'user.tool_result') {
-        tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").add(ev.tool_use_id);
-    }
-    else if (ev.type === 'user.custom_tool_result') {
-        tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").add(ev.custom_tool_use_id);
-    }
-    else if (ev.type === 'user.tool_confirmation') {
-        // Record the verdict only, before the pending pass, so a call whose
-        // confirmation appears later in the same history routes with its verdict
-        // already known. Releasing a held call here as well would dispatch it a
-        // second time when the routing pass reaches its tool_use event.
-        if (!tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").has(ev.tool_use_id))
-            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_confirmationVerdicts, "f").set(ev.tool_use_id, ev.result);
-    }
-}, _SessionToolRunner_handleStreamEvent = 
-/** Returns true when the runner should exit. */
-async function _SessionToolRunner_handleStreamEvent(ev) {
-    tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_idleClock, "f").noteEvent(ev);
-    switch (ev.type) {
-        case 'agent.tool_use':
-        case 'agent.custom_tool_use':
-            if (!tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_seen, "f").has(ev.id)) {
-                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_seen, "f").add(ev.id);
-                await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_routeToolEvent).call(this, ev);
-            }
-            return false;
-        case 'user.tool_confirmation':
-            await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_noteConfirmation).call(this, ev);
-            return false;
-        case 'user.tool_result':
-            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").add(ev.tool_use_id);
-            return false;
-        case 'user.custom_tool_result':
-            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").add(ev.custom_tool_use_id);
-            return false;
-        case 'session.status_terminated':
-        case 'session.deleted':
-            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").info('session terminated', {
-                component: 'session-tool-runner',
-                session_id: this.sessionId,
-            });
-            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_controller, "f").abort();
-            return true;
-        default:
-            return false;
-    }
-}, _SessionToolRunner_routeToolEvent = 
-// ===== confirmation gating (always_ask tools) =====
-/**
- * Dispatch `ev`, honoring its evaluated permission. A call the server gated
- * (`evaluated_permission == "ask"`) is held until its `user.tool_confirmation`
- * arrives. Fails closed: only an explicit `allow` verdict releases a gated
- * call; a server-side `deny` overrides any recorded verdict; an unrecognized
- * permission is held like `ask` and an unrecognized verdict is denied.
- */
-async function _SessionToolRunner_routeToolEvent(ev) {
-    // `getattr`-style read: today only `agent.tool_use` carries
-    // `evaluated_permission`, but if it ever lands on `agent.custom_tool_use`
-    // the gate must keep failing closed rather than dispatch by event type.
-    const permission = ev.evaluated_permission;
-    // A server-side `deny` overrides any (stray) recorded verdict.
-    const verdict = permission === 'deny' ? 'deny' : tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_confirmationVerdicts, "f").get(ev.id);
-    if (verdict === undefined) {
-        if (permission === undefined || permission === 'allow') {
-            await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_execute).call(this, ev, undefined);
+        for (const ev of unanswered)
+            await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_routeToolEvent).call(this, ev);
+        // A held call's verdict is normally applied by the routing pass above; if
+        // its tool_use fell outside the listed window the pass never saw it, so
+        // apply the verdict to the held copy here.
+        for (const held of [...tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_awaitingConfirmation, "f").values()]) {
+            const verdict = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_confirmationVerdicts, "f").get(held.id);
+            if (verdict !== undefined)
+                await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_applyVerdict).call(this, held, verdict);
         }
-        else if (!tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_awaitingConfirmation, "f").has(ev.id)) {
-            // "ask" — or a permission this SDK does not recognize, which must not
-            // dispatch unconfirmed — waits for the user's verdict. (Already-held: a
-            // reconcile after reconnect re-routes the call; keep the existing hold.)
-            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").info('tool call awaiting confirmation; holding', {
+        // Routing resolves denied calls in place (marking them answered) and holds
+        // ask-gated calls for their `user.tool_confirmation`. If the most recent
+        // event in history ends the turn and no tool work is outstanding,
+        // the session is done — arm the idle clock so the runner stops even if that
+        // idle arrived during a disconnect. A held call is not outstanding
+        // here: it blocks the clock, so this arm stays pending until the verdict
+        // (and, for an allow, the dispatch it releases) resolves it.
+        const outstanding = unanswered.filter((ev) => !tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").has(ev.id) && !tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_awaitingConfirmation, "f").has(ev.id));
+        if (lastEndedTurn && outstanding.length === 0)
+            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_idleClock, "f").arm();
+        else
+            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_idleClock, "f").disarm();
+    }, _SessionToolRunner_ingestHistory = function _SessionToolRunner_ingestHistory(ev, pending) {
+        if (ev.type === 'agent.tool_use' || ev.type === 'agent.custom_tool_use') {
+            // Mark the event seen so a replay on the live stream is not dispatched
+            // twice, but decide whether it still needs executing from `answered`, not
+            // `seen`: a call whose result post failed is seen-but-unanswered, and must
+            // be retried on the next reconcile pass rather than silently dropped.
+            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_seen, "f").add(ev.id);
+            if (!tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").has(ev.id))
+                pending.push(ev);
+        }
+        else if (ev.type === 'user.tool_result') {
+            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").add(ev.tool_use_id);
+        }
+        else if (ev.type === 'user.custom_tool_result') {
+            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").add(ev.custom_tool_use_id);
+        }
+        else if (ev.type === 'user.tool_confirmation') {
+            // Record the verdict only, before the pending pass, so a call whose
+            // confirmation appears later in the same history routes with its verdict
+            // already known. Releasing a held call here as well would dispatch it a
+            // second time when the routing pass reaches its tool_use event.
+            if (!tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").has(ev.tool_use_id))
+                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_confirmationVerdicts, "f").set(ev.tool_use_id, ev.result);
+        }
+    }, _SessionToolRunner_handleStreamEvent = 
+    /** Returns true when the runner should exit. */
+    async function _SessionToolRunner_handleStreamEvent(ev) {
+        tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_idleClock, "f").noteEvent(ev);
+        switch (ev.type) {
+            case 'agent.tool_use':
+            case 'agent.custom_tool_use':
+                if (!tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_seen, "f").has(ev.id)) {
+                    tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_seen, "f").add(ev.id);
+                    await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_routeToolEvent).call(this, ev);
+                }
+                return false;
+            case 'user.tool_confirmation':
+                await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_noteConfirmation).call(this, ev);
+                return false;
+            case 'user.tool_result':
+                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").add(ev.tool_use_id);
+                return false;
+            case 'user.custom_tool_result':
+                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").add(ev.custom_tool_use_id);
+                return false;
+            case 'session.status_terminated':
+            case 'session.deleted':
+                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").info('session terminated', {
+                    component: 'session-tool-runner',
+                    session_id: this.sessionId,
+                });
+                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_controller, "f").abort();
+                return true;
+            default:
+                return false;
+        }
+    }, _SessionToolRunner_routeToolEvent = 
+    // ===== confirmation gating (always_ask tools) =====
+    /**
+     * Dispatch `ev`, honoring its evaluated permission. A call the server gated
+     * (`evaluated_permission == "ask"`) is held until its `user.tool_confirmation`
+     * arrives. Fails closed: only an explicit `allow` verdict releases a gated
+     * call; a server-side `deny` overrides any recorded verdict; an unrecognized
+     * permission is held like `ask` and an unrecognized verdict is denied.
+     */
+    async function _SessionToolRunner_routeToolEvent(ev) {
+        // `getattr`-style read: today only `agent.tool_use` carries
+        // `evaluated_permission`, but if it ever lands on `agent.custom_tool_use`
+        // the gate must keep failing closed rather than dispatch by event type.
+        const permission = ev.evaluated_permission;
+        // A server-side `deny` overrides any (stray) recorded verdict.
+        const verdict = permission === 'deny' ? 'deny' : tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_confirmationVerdicts, "f").get(ev.id);
+        if (verdict === undefined) {
+            if (permission === undefined || permission === 'allow') {
+                await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_execute).call(this, ev, undefined);
+            }
+            else if (!tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_awaitingConfirmation, "f").has(ev.id)) {
+                // "ask" — or a permission this SDK does not recognize, which must not
+                // dispatch unconfirmed — waits for the user's verdict. (Already-held: a
+                // reconcile after reconnect re-routes the call; keep the existing hold.)
+                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").info('tool call awaiting confirmation; holding', {
+                    component: 'session-tool-runner',
+                    session_id: this.sessionId,
+                    tool: ev.name,
+                    tool_use_id: ev.id,
+                });
+                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_awaitingConfirmation, "f").set(ev.id, ev);
+                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_idleClock, "f").block(ev.id);
+            }
+            return;
+        }
+        await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_applyVerdict).call(this, ev, verdict);
+    }, _SessionToolRunner_noteConfirmation = 
+    /** Record an allow/deny verdict and release the held call it gates, if any. */
+    async function _SessionToolRunner_noteConfirmation(ev) {
+        tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_confirmationVerdicts, "f").set(ev.tool_use_id, ev.result);
+        const held = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_awaitingConfirmation, "f").get(ev.tool_use_id);
+        // Nothing held: the verdict gates a call this runner has not seen yet (or
+        // one it never gates, e.g. an `agent.mcp_tool_use`). Keeping it in
+        // `#confirmationVerdicts` lets a later route of that call resolve instantly.
+        if (held === undefined)
+            return;
+        await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_applyVerdict).call(this, held, ev.result);
+    }, _SessionToolRunner_applyVerdict = 
+    /**
+     * Dispatch or resolve a gated call according to its verdict.
+     *
+     * The idle-clock blocker accounting lives here: a denial retires the held
+     * call's blocker, while an allow keeps one on the call — taking it now if the
+     * verdict was already known when the call was routed, so it was never held —
+     * until `#execute` has finished with it. The countdown must not run over
+     * gated work that is still in flight.
+     */
+    async function _SessionToolRunner_applyVerdict(ev, verdict) {
+        const wasHeld = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_awaitingConfirmation, "f").delete(ev.id);
+        if (verdict === 'allow') {
+            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").info('tool call confirmed', {
                 component: 'session-tool-runner',
                 session_id: this.sessionId,
                 tool: ev.name,
                 tool_use_id: ev.id,
             });
-            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_awaitingConfirmation, "f").set(ev.id, ev);
-            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_idleClock, "f").block(ev.id);
+            if (!wasHeld)
+                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_idleClock, "f").block(ev.id);
+            try {
+                await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_execute).call(this, ev, 'allow');
+            }
+            finally {
+                // The approved call is fully disposed of (executed, or moot because it
+                // was answered elsewhere) — the sole place an allow's blocker retires.
+                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_idleClock, "f").unblock(ev.id);
+            }
+            return;
         }
-        return;
-    }
-    await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_applyVerdict).call(this, ev, verdict);
-}, _SessionToolRunner_noteConfirmation = 
-/** Record an allow/deny verdict and release the held call it gates, if any. */
-async function _SessionToolRunner_noteConfirmation(ev) {
-    tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_confirmationVerdicts, "f").set(ev.tool_use_id, ev.result);
-    const held = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_awaitingConfirmation, "f").get(ev.tool_use_id);
-    // Nothing held: the verdict gates a call this runner has not seen yet (or
-    // one it never gates, e.g. an `agent.mcp_tool_use`). Keeping it in
-    // `#confirmationVerdicts` lets a later route of that call resolve instantly.
-    if (held === undefined)
-        return;
-    await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_applyVerdict).call(this, held, ev.result);
-}, _SessionToolRunner_applyVerdict = 
-/**
- * Dispatch or resolve a gated call according to its verdict.
- *
- * The idle-clock blocker accounting lives here: a denial retires the held
- * call's blocker, while an allow keeps one on the call — taking it now if the
- * verdict was already known when the call was routed, so it was never held —
- * until `#execute` has finished with it. The countdown must not run over
- * gated work that is still in flight.
- */
-async function _SessionToolRunner_applyVerdict(ev, verdict) {
-    const wasHeld = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_awaitingConfirmation, "f").delete(ev.id);
-    if (verdict === 'allow') {
-        tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").info('tool call confirmed', {
+        // "deny" — or any value other than an explicit "allow" (fail closed). The
+        // denial resolves the call server-side, so mark it answered and yield it
+        // (nothing ran, nothing posted).
+        if (wasHeld)
+            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_idleClock, "f").unblock(ev.id);
+        tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").add(ev.id);
+        tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").info('tool call denied; not executing', {
             component: 'session-tool-runner',
             session_id: this.sessionId,
             tool: ev.name,
             tool_use_id: ev.id,
         });
-        if (!wasHeld)
-            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_idleClock, "f").block(ev.id);
-        try {
-            await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_execute).call(this, ev, 'allow');
-        }
-        finally {
-            // The approved call is fully disposed of (executed, or moot because it
-            // was answered elsewhere) — the sole place an allow's blocker retires.
-            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_idleClock, "f").unblock(ev.id);
-        }
-        return;
-    }
-    // "deny" — or any value other than an explicit "allow" (fail closed). The
-    // denial resolves the call server-side, so mark it answered and yield it
-    // (nothing ran, nothing posted).
-    if (wasHeld)
-        tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_idleClock, "f").unblock(ev.id);
-    tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").add(ev.id);
-    tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").info('tool call denied; not executing', {
-        component: 'session-tool-runner',
-        session_id: this.sessionId,
-        tool: ev.name,
-        tool_use_id: ev.id,
-    });
-    tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_surfaceCall).call(this, {
-        event: ev,
-        toolUseId: ev.id,
-        name: ev.name,
-        isError: false,
-        posted: false,
-        confirmation: 'deny',
-    });
-}, _SessionToolRunner_surfaceCall = function _SessionToolRunner_surfaceCall(call) {
-    tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_results, "f").push(call);
-}, _SessionToolRunner_execute = 
-// ===== tool execution =====
-async function _SessionToolRunner_execute(ev, confirmation) {
-    var _a, _b;
-    if (tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").has(ev.id))
-        return;
-    tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").info('executing tool', {
-        component: 'session-tool-runner',
-        session_id: this.sessionId,
-        tool: ev.name,
-        tool_use_id: ev.id,
-    });
-    tslib_1.__classPrivateFieldSet(this, _SessionToolRunner_inFlightCount, (_a = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_inFlightCount, "f"), _a++, _a), "f");
-    try {
-        const tool = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_toolByName, "f").get(ev.name);
-        if (!tool) {
-            // Skip (split-client partial fulfilment): a name this runner
-            // is not registered for belongs to the other client servicing this
-            // session (typically the customer's app backend handling custom tools).
-            // Post NO result, do not mark it answered, and leave the tool_use_id
-            // pending for its owner — claiming it would corrupt the conversation.
-            // Still yield the call so the consumer can observe the unowned
-            // dispatch; nothing was sent, so `posted`/`isError` stay false and no
-            // `result` event is populated. The id stays unanswered, so reconcile
-            // keeps it out of the idle/end-turn accounting and re-surfaces it after
-            // a reconnect until its owner answers it.
-            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").info('tool not owned by this runner; leaving the tool_use_id pending for its owner', {
-                component: 'session-tool-runner',
-                session_id: this.sessionId,
-                tool: ev.name,
-                tool_use_id: ev.id,
-            });
-            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_surfaceCall).call(this, {
-                event: ev,
-                toolUseId: ev.id,
-                name: ev.name,
-                isError: false,
-                posted: false,
-                confirmation,
-            });
-            return;
-        }
-        let content;
-        let isError;
-        // Per-tool controller: aborts on the runner's own signal *or* the
-        // per-tool timeout, so an in-flight tool stops promptly when the runner
-        // is aborted instead of running until the timeout.
-        const toolCtrl = new AbortController();
-        const detachTool = (0, abort_1.linkAbort)(tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_controller, "f").signal, toolCtrl);
-        const timer = setTimeout(() => toolCtrl.abort(), TOOL_TIMEOUT_MS);
-        try {
-            // Pass the source `agent.tool_use` / `agent.custom_tool_use` event
-            // straight through as the run context's `toolUse` — it is a union
-            // member of `BetaToolUse`, no Messages-block adapter needed.
-            const outcome = await (0, BetaRunnableTool_1.runRunnableTool)(tool, ev.input, {
-                toolUse: ev,
-                toolUseBlock: ev,
-                signal: toolCtrl.signal,
-            });
-            content = outcome.content;
-            isError = outcome.isError;
-        }
-        finally {
-            clearTimeout(timer);
-            detachTool();
-        }
-        // Answer with the result event that matches the call kind: a
-        // `user.tool_result` for an `agent.tool_use`, a `user.custom_tool_result`
-        // for an `agent.custom_tool_use`. Posting the wrong one leaves the call
-        // unanswered and the session stuck.
-        const result = buildResultEvent(ev, isError, toSessionContent(content));
-        const posted = await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_sendResult).call(this, result, ev.id);
         tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_surfaceCall).call(this, {
             event: ev,
-            result,
             toolUseId: ev.id,
             name: ev.name,
-            isError,
-            posted,
-            confirmation,
+            isError: false,
+            posted: false,
+            confirmation: 'deny',
         });
-    }
-    finally {
-        tslib_1.__classPrivateFieldSet(this, _SessionToolRunner_inFlightCount, (_b = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_inFlightCount, "f"), _b--, _b), "f");
-        if (tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_inFlightCount, "f") === 0)
-            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_onIdle, "f")?.call(this);
-    }
-}, _SessionToolRunner_sendResult = async function _SessionToolRunner_sendResult(result, toolUseId) {
-    const ctrl = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_controller, "f");
-    const start = Date.now();
-    let lastErr;
-    let attempt = 0;
-    while (true) {
-        attempt++;
-        // An abort throws to unwind the caller rather than returning a
-        // `posted: false` result the iterator would carry on past.
-        ctrl.signal.throwIfAborted();
+    }, _SessionToolRunner_surfaceCall = function _SessionToolRunner_surfaceCall(call) {
+        tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_results, "f").push(call);
+    }, _SessionToolRunner_execute = 
+    // ===== tool execution =====
+    async function _SessionToolRunner_execute(ev, confirmation) {
+        var _a, _b;
+        if (tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").has(ev.id))
+            return;
+        tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").info('executing tool', {
+            component: 'session-tool-runner',
+            session_id: this.sessionId,
+            tool: ev.name,
+            tool_use_id: ev.id,
+        });
+        tslib_1.__classPrivateFieldSet(this, _SessionToolRunner_inFlightCount, (_a = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_inFlightCount, "f"), _a++, _a), "f");
         try {
-            await this.client.beta.sessions.events.send(this.sessionId, { events: [result] }, tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_requestOptions).call(this));
-            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").add(toolUseId);
-            return true;
-        }
-        catch (e) {
-            lastErr = e;
-            // Only short-circuit on a permanent 4xx; 408/409/429 deserve the
-            // remaining retries (aligned with the core client's retry policy).
-            if ((0, backoff_1.isFatal4xx)(e))
-                break;
-            const remainingMs = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_sendRetryWindowMs, "f") - (Date.now() - start);
-            if (remainingMs <= 0)
-                break;
-            const waitMs = Math.min((0, backoff_1.applyJitter)((0, backoff_1.backoff)(attempt - 1, SEND_BACKOFF_START_MS, SEND_BACKOFF_CAP_MS)), remainingMs);
-            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").warn('tool result send failed; retrying', {
-                tool_use_id: toolUseId,
-                attempt,
-                backoff_ms: waitMs,
-                error: String(e),
+            const tool = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_toolByName, "f").get(ev.name);
+            if (!tool) {
+                // Skip (split-client partial fulfilment): a name this runner
+                // is not registered for belongs to the other client servicing this
+                // session (typically the customer's app backend handling custom tools).
+                // Post NO result, do not mark it answered, and leave the tool_use_id
+                // pending for its owner — claiming it would corrupt the conversation.
+                // Still yield the call so the consumer can observe the unowned
+                // dispatch; nothing was sent, so `posted`/`isError` stay false and no
+                // `result` event is populated. The id stays unanswered, so reconcile
+                // keeps it out of the idle/end-turn accounting and re-surfaces it after
+                // a reconnect until its owner answers it.
+                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").info('tool not owned by this runner; leaving the tool_use_id pending for its owner', {
+                    component: 'session-tool-runner',
+                    session_id: this.sessionId,
+                    tool: ev.name,
+                    tool_use_id: ev.id,
+                });
+                // The approval kept the idle countdown pending on this call. Drop it
+                // instead of starting it: the owner still has to answer.
+                if (confirmation === 'allow')
+                    tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_idleClock, "f").disarm();
+                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_surfaceCall).call(this, {
+                    event: ev,
+                    toolUseId: ev.id,
+                    name: ev.name,
+                    isError: false,
+                    posted: false,
+                    confirmation,
+                });
+                return;
+            }
+            let content;
+            let isError;
+            // Per-tool controller: aborts on the runner's own signal *or* the
+            // per-tool timeout, so an in-flight tool stops promptly when the runner
+            // is aborted instead of running until the timeout.
+            const toolCtrl = new AbortController();
+            const detachTool = (0, abort_1.linkAbort)(tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_controller, "f").signal, toolCtrl);
+            const timer = setTimeout(() => toolCtrl.abort(), TOOL_TIMEOUT_MS);
+            try {
+                // Pass the source `agent.tool_use` / `agent.custom_tool_use` event
+                // straight through as the run context's `toolUse` — it is a union
+                // member of `BetaToolUse`, no Messages-block adapter needed.
+                const outcome = await (0, BetaRunnableTool_1.runRunnableTool)(tool, ev.input, {
+                    toolUse: ev,
+                    toolUseBlock: ev,
+                    signal: toolCtrl.signal,
+                });
+                content = outcome.content;
+                isError = outcome.isError;
+            }
+            finally {
+                clearTimeout(timer);
+                detachTool();
+            }
+            // Answer with the result event that matches the call kind: a
+            // `user.tool_result` for an `agent.tool_use`, a `user.custom_tool_result`
+            // for an `agent.custom_tool_use`. Posting the wrong one leaves the call
+            // unanswered and the session stuck.
+            const result = buildResultEvent(ev, isError, toSessionContent(content));
+            const posted = await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_sendResult).call(this, result, ev.id);
+            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_surfaceCall).call(this, {
+                event: ev,
+                result,
+                toolUseId: ev.id,
+                name: ev.name,
+                isError,
+                posted,
+                confirmation,
             });
-            await (0, sleep_1.sleep)(waitMs, ctrl.signal);
         }
-    }
-    tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").error('failed to send tool result', {
-        tool_use_id: toolUseId,
-        attempts: attempt,
-        error: String(lastErr),
-    });
-    return false;
-}, _SessionToolRunner_drain = 
-/** Wait (bounded) for in-flight tool executions to finish during teardown. */
-async function _SessionToolRunner_drain() {
-    if (tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_inFlightCount, "f") === 0)
-        return;
-    await Promise.race([new Promise((r) => (tslib_1.__classPrivateFieldSet(this, _SessionToolRunner_onIdle, r, "f"))), (0, sleep_1.sleep)(DRAIN_TIMEOUT_MS)]);
-    tslib_1.__classPrivateFieldSet(this, _SessionToolRunner_onIdle, null, "f");
-    if (tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_inFlightCount, "f") > 0) {
-        tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").warn('drain timeout exceeded');
-    }
-};
+        finally {
+            tslib_1.__classPrivateFieldSet(this, _SessionToolRunner_inFlightCount, (_b = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_inFlightCount, "f"), _b--, _b), "f");
+            if (tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_inFlightCount, "f") === 0)
+                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_onIdle, "f")?.call(this);
+        }
+    }, _SessionToolRunner_sendResult = async function _SessionToolRunner_sendResult(result, toolUseId) {
+        const ctrl = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_controller, "f");
+        const start = Date.now();
+        let lastErr;
+        let attempt = 0;
+        while (true) {
+            attempt++;
+            // An abort throws to unwind the caller rather than returning a
+            // `posted: false` result the iterator would carry on past.
+            ctrl.signal.throwIfAborted();
+            try {
+                await this.client.beta.sessions.events.send(this.sessionId, { events: [result] }, tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_requestOptions).call(this));
+                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").add(toolUseId);
+                return true;
+            }
+            catch (e) {
+                lastErr = e;
+                // Only short-circuit on a permanent 4xx; 408/409/429 deserve the
+                // remaining retries (aligned with the core client's retry policy).
+                if ((0, backoff_1.isFatal4xx)(e))
+                    break;
+                const remainingMs = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_sendRetryWindowMs, "f") - (Date.now() - start);
+                if (remainingMs <= 0)
+                    break;
+                const waitMs = Math.min((0, backoff_1.applyJitter)((0, backoff_1.backoff)(attempt - 1, SEND_BACKOFF_START_MS, SEND_BACKOFF_CAP_MS)), remainingMs);
+                tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").warn('tool result send failed; retrying', {
+                    tool_use_id: toolUseId,
+                    attempt,
+                    backoff_ms: waitMs,
+                    error: String(e),
+                });
+                await (0, sleep_1.sleep)(waitMs, ctrl.signal);
+            }
+        }
+        tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").error('failed to send tool result', {
+            tool_use_id: toolUseId,
+            attempts: attempt,
+            error: String(lastErr),
+        });
+        return false;
+    }, _SessionToolRunner_drain = 
+    /** Wait (bounded) for in-flight tool executions to finish during teardown. */
+    async function _SessionToolRunner_drain() {
+        if (tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_inFlightCount, "f") === 0)
+            return;
+        await Promise.race([new Promise((r) => (tslib_1.__classPrivateFieldSet(this, _SessionToolRunner_onIdle, r, "f"))), (0, sleep_1.sleep)(DRAIN_TIMEOUT_MS)]);
+        tslib_1.__classPrivateFieldSet(this, _SessionToolRunner_onIdle, null, "f");
+        if (tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_inFlightCount, "f") > 0) {
+            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").warn('drain timeout exceeded');
+        }
+    };
+    return SessionToolRunner;
+})();
+exports.SessionToolRunner = SessionToolRunner;
 /**
  * Build the result event that answers `ev`: a `user.tool_result` for a builtin
  * `agent.tool_use`, a `user.custom_tool_result` for a custom
@@ -46261,6 +46455,18 @@ function _transformJSONSchema(jsonSchema) {
 
 /***/ }),
 
+/***/ 79221:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+const tslib_1 = __nccwpck_require__(14839);
+tslib_1.__exportStar(__nccwpck_require__(40318), exports);
+//# sourceMappingURL=beta.js.map
+
+/***/ }),
+
 /***/ 50303:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -46413,6 +46619,21 @@ var Agents = /* @__PURE__ */ (() => {
 })();
 exports.Agents = Agents;
 //# sourceMappingURL=agents.js.map
+
+/***/ }),
+
+/***/ 81677:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Versions = exports.Agents = void 0;
+var agents_1 = __nccwpck_require__(50303);
+Object.defineProperty(exports, "Agents", ({ enumerable: true, get: function () { return agents_1.Agents; } }));
+var versions_1 = __nccwpck_require__(96464);
+Object.defineProperty(exports, "Versions", ({ enumerable: true, get: function () { return versions_1.Versions; } }));
+//# sourceMappingURL=index.js.map
 
 /***/ }),
 
@@ -47194,6 +47415,21 @@ exports.Environments = Environments;
 
 /***/ }),
 
+/***/ 13001:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Work = exports.Environments = void 0;
+var environments_1 = __nccwpck_require__(33275);
+Object.defineProperty(exports, "Environments", ({ enumerable: true, get: function () { return environments_1.Environments; } }));
+var work_1 = __nccwpck_require__(24732);
+Object.defineProperty(exports, "Work", ({ enumerable: true, get: function () { return work_1.Work; } }));
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
 /***/ 24732:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -47612,6 +47848,69 @@ class Files extends resource_1.APIResource {
 }
 exports.Files = Files;
 //# sourceMappingURL=files.js.map
+
+/***/ }),
+
+/***/ 40318:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Webhooks = exports.Vaults = exports.UserProfiles = exports.Tunnels = exports.Skills = exports.Sessions = exports.Organization = exports.Models = exports.MemoryStores = exports.Files = exports.Environments = exports.Dreams = exports.Deployments = exports.DeploymentRuns = exports.Beta = exports.Messages = exports.BETA_CLIENT_TOOL_UNION_KEYS = exports.Agents = void 0;
+var index_1 = __nccwpck_require__(81677);
+Object.defineProperty(exports, "Agents", ({ enumerable: true, get: function () { return index_1.Agents; } }));
+var index_2 = __nccwpck_require__(72723);
+Object.defineProperty(exports, "BETA_CLIENT_TOOL_UNION_KEYS", ({ enumerable: true, get: function () { return index_2.BETA_CLIENT_TOOL_UNION_KEYS; } }));
+Object.defineProperty(exports, "Messages", ({ enumerable: true, get: function () { return index_2.Messages; } }));
+var beta_1 = __nccwpck_require__(90846);
+Object.defineProperty(exports, "Beta", ({ enumerable: true, get: function () { return beta_1.Beta; } }));
+var deployment_runs_1 = __nccwpck_require__(55650);
+Object.defineProperty(exports, "DeploymentRuns", ({ enumerable: true, get: function () { return deployment_runs_1.DeploymentRuns; } }));
+var deployments_1 = __nccwpck_require__(83178);
+Object.defineProperty(exports, "Deployments", ({ enumerable: true, get: function () { return deployments_1.Deployments; } }));
+var dreams_1 = __nccwpck_require__(58076);
+Object.defineProperty(exports, "Dreams", ({ enumerable: true, get: function () { return dreams_1.Dreams; } }));
+var index_3 = __nccwpck_require__(13001);
+Object.defineProperty(exports, "Environments", ({ enumerable: true, get: function () { return index_3.Environments; } }));
+var files_1 = __nccwpck_require__(28185);
+Object.defineProperty(exports, "Files", ({ enumerable: true, get: function () { return files_1.Files; } }));
+var index_4 = __nccwpck_require__(97481);
+Object.defineProperty(exports, "MemoryStores", ({ enumerable: true, get: function () { return index_4.MemoryStores; } }));
+var models_1 = __nccwpck_require__(90574);
+Object.defineProperty(exports, "Models", ({ enumerable: true, get: function () { return models_1.Models; } }));
+var index_5 = __nccwpck_require__(7872);
+Object.defineProperty(exports, "Organization", ({ enumerable: true, get: function () { return index_5.Organization; } }));
+var index_6 = __nccwpck_require__(51010);
+Object.defineProperty(exports, "Sessions", ({ enumerable: true, get: function () { return index_6.Sessions; } }));
+var index_7 = __nccwpck_require__(80941);
+Object.defineProperty(exports, "Skills", ({ enumerable: true, get: function () { return index_7.Skills; } }));
+var index_8 = __nccwpck_require__(2666);
+Object.defineProperty(exports, "Tunnels", ({ enumerable: true, get: function () { return index_8.Tunnels; } }));
+var user_profiles_1 = __nccwpck_require__(48742);
+Object.defineProperty(exports, "UserProfiles", ({ enumerable: true, get: function () { return user_profiles_1.UserProfiles; } }));
+var index_9 = __nccwpck_require__(61130);
+Object.defineProperty(exports, "Vaults", ({ enumerable: true, get: function () { return index_9.Vaults; } }));
+var webhooks_1 = __nccwpck_require__(70786);
+Object.defineProperty(exports, "Webhooks", ({ enumerable: true, get: function () { return webhooks_1.Webhooks; } }));
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
+/***/ 97481:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.MemoryVersions = exports.MemoryStores = exports.Memories = void 0;
+var memories_1 = __nccwpck_require__(65626);
+Object.defineProperty(exports, "Memories", ({ enumerable: true, get: function () { return memories_1.Memories; } }));
+var memory_stores_1 = __nccwpck_require__(14353);
+Object.defineProperty(exports, "MemoryStores", ({ enumerable: true, get: function () { return memory_stores_1.MemoryStores; } }));
+var memory_versions_1 = __nccwpck_require__(198);
+Object.defineProperty(exports, "MemoryVersions", ({ enumerable: true, get: function () { return memory_versions_1.MemoryVersions; } }));
+//# sourceMappingURL=index.js.map
 
 /***/ }),
 
@@ -48261,13 +48560,32 @@ exports.Batches = Batches;
 
 /***/ }),
 
+/***/ 72723:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Batches = exports.ToolError = exports.BetaToolRunner = exports.Messages = exports.BETA_CLIENT_TOOL_UNION_KEYS = void 0;
+var messages_1 = __nccwpck_require__(44115);
+Object.defineProperty(exports, "BETA_CLIENT_TOOL_UNION_KEYS", ({ enumerable: true, get: function () { return messages_1.BETA_CLIENT_TOOL_UNION_KEYS; } }));
+Object.defineProperty(exports, "Messages", ({ enumerable: true, get: function () { return messages_1.Messages; } }));
+var messages_2 = __nccwpck_require__(44115);
+Object.defineProperty(exports, "BetaToolRunner", ({ enumerable: true, get: function () { return messages_2.BetaToolRunner; } }));
+Object.defineProperty(exports, "ToolError", ({ enumerable: true, get: function () { return messages_2.ToolError; } }));
+var batches_1 = __nccwpck_require__(24251);
+Object.defineProperty(exports, "Batches", ({ enumerable: true, get: function () { return batches_1.Batches; } }));
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
 /***/ 44115:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.ToolError = exports.BetaToolRunner = exports.Messages = void 0;
+exports.ToolError = exports.BetaToolRunner = exports.BETA_CLIENT_TOOL_UNION_KEYS = exports.Messages = void 0;
 const tslib_1 = __nccwpck_require__(14839);
 const error_1 = __nccwpck_require__(97735);
 const BatchesAPI = tslib_1.__importStar(__nccwpck_require__(24251));
@@ -48280,7 +48598,10 @@ const BetaMessageStream_1 = __nccwpck_require__(27816);
 const BetaToolRunner_1 = __nccwpck_require__(16891);
 const ToolError_1 = __nccwpck_require__(81429);
 const batches_1 = __nccwpck_require__(24251);
-const DEPRECATED_MODELS = {};
+const DEPRECATED_MODELS = {
+    'claude-sonnet-4-5': 'November 30th, 2026',
+    'claude-sonnet-4-5-20250929': 'November 30th, 2026',
+};
 const MODELS_TO_WARN_WITH_THINKING_ENABLED = ['claude-mythos-preview', 'claude-opus-4-6'];
 var Messages = /* @__PURE__ */ (() => {
     class Messages extends resource_1.APIResource {
@@ -48421,6 +48742,24 @@ function transformOutputFormat(params) {
         },
     };
 }
+exports.BETA_CLIENT_TOOL_UNION_KEYS = [
+    'input_schema',
+    'name',
+    'allowed_callers',
+    'cache_control',
+    'defer_loading',
+    'description',
+    'eager_input_streaming',
+    'input_examples',
+    'strict',
+    'type',
+    'configs',
+    'display_height_px',
+    'display_width_px',
+    'display_number',
+    'enable_zoom',
+    'max_characters',
+];
 var BetaToolRunner_2 = __nccwpck_require__(16891);
 Object.defineProperty(exports, "BetaToolRunner", ({ enumerable: true, get: function () { return BetaToolRunner_2.BetaToolRunner; } }));
 var ToolError_2 = __nccwpck_require__(81429);
@@ -48498,6 +48837,608 @@ class Models extends resource_1.APIResource {
 }
 exports.Models = Models;
 //# sourceMappingURL=models.js.map
+
+/***/ }),
+
+/***/ 4219:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Analytics = void 0;
+const tslib_1 = __nccwpck_require__(14839);
+const resource_1 = __nccwpck_require__(82941);
+const ArtifactsAPI = tslib_1.__importStar(__nccwpck_require__(77356));
+const artifacts_1 = __nccwpck_require__(77356);
+const ConnectorsAPI = tslib_1.__importStar(__nccwpck_require__(60091));
+const connectors_1 = __nccwpck_require__(60091);
+const CostReportAPI = tslib_1.__importStar(__nccwpck_require__(90521));
+const cost_report_1 = __nccwpck_require__(90521);
+const PluginsAPI = tslib_1.__importStar(__nccwpck_require__(48883));
+const plugins_1 = __nccwpck_require__(48883);
+const SkillsAPI = tslib_1.__importStar(__nccwpck_require__(82033));
+const skills_1 = __nccwpck_require__(82033);
+const SummariesAPI = tslib_1.__importStar(__nccwpck_require__(5751));
+const summaries_1 = __nccwpck_require__(5751);
+const UsageReportAPI = tslib_1.__importStar(__nccwpck_require__(39703));
+const usage_report_1 = __nccwpck_require__(39703);
+const UserCostReportAPI = tslib_1.__importStar(__nccwpck_require__(47659));
+const user_cost_report_1 = __nccwpck_require__(47659);
+const UserUsageReportAPI = tslib_1.__importStar(__nccwpck_require__(66777));
+const user_usage_report_1 = __nccwpck_require__(66777);
+const UsersAPI = tslib_1.__importStar(__nccwpck_require__(45523));
+const users_1 = __nccwpck_require__(45523);
+const AppsAPI = tslib_1.__importStar(__nccwpck_require__(50450));
+const apps_1 = __nccwpck_require__(50450);
+var Analytics = /* @__PURE__ */ (() => {
+    class Analytics extends resource_1.APIResource {
+        constructor() {
+            super(...arguments);
+            this.summaries = new SummariesAPI.Summaries(this._client);
+            this.users = new UsersAPI.Users(this._client);
+            this.apps = new AppsAPI.Apps(this._client);
+            this.connectors = new ConnectorsAPI.Connectors(this._client);
+            this.plugins = new PluginsAPI.Plugins(this._client);
+            this.skills = new SkillsAPI.Skills(this._client);
+            this.artifacts = new ArtifactsAPI.Artifacts(this._client);
+            this.usageReport = new UsageReportAPI.UsageReport(this._client);
+            this.userUsageReport = new UserUsageReportAPI.UserUsageReport(this._client);
+            this.costReport = new CostReportAPI.CostReport(this._client);
+            this.userCostReport = new UserCostReportAPI.UserCostReport(this._client);
+        }
+    }
+    Analytics.Summaries = summaries_1.Summaries;
+    Analytics.Users = users_1.Users;
+    Analytics.Apps = apps_1.Apps;
+    Analytics.Connectors = connectors_1.Connectors;
+    Analytics.Plugins = plugins_1.Plugins;
+    Analytics.Skills = skills_1.Skills;
+    Analytics.Artifacts = artifacts_1.Artifacts;
+    Analytics.UsageReport = usage_report_1.UsageReport;
+    Analytics.UserUsageReport = user_usage_report_1.UserUsageReport;
+    Analytics.CostReport = cost_report_1.CostReport;
+    Analytics.UserCostReport = user_cost_report_1.UserCostReport;
+    return Analytics;
+})();
+exports.Analytics = Analytics;
+//# sourceMappingURL=analytics.js.map
+
+/***/ }),
+
+/***/ 50450:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Apps = void 0;
+const tslib_1 = __nccwpck_require__(14839);
+const resource_1 = __nccwpck_require__(82941);
+const ChatAPI = tslib_1.__importStar(__nccwpck_require__(83041));
+const chat_1 = __nccwpck_require__(83041);
+var Apps = /* @__PURE__ */ (() => {
+    class Apps extends resource_1.APIResource {
+        constructor() {
+            super(...arguments);
+            this.chat = new ChatAPI.Chat(this._client);
+        }
+    }
+    Apps.Chat = chat_1.Chat;
+    return Apps;
+})();
+exports.Apps = Apps;
+//# sourceMappingURL=apps.js.map
+
+/***/ }),
+
+/***/ 83041:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Chat = void 0;
+const tslib_1 = __nccwpck_require__(14839);
+const resource_1 = __nccwpck_require__(82941);
+const ProjectsAPI = tslib_1.__importStar(__nccwpck_require__(21397));
+const projects_1 = __nccwpck_require__(21397);
+var Chat = /* @__PURE__ */ (() => {
+    class Chat extends resource_1.APIResource {
+        constructor() {
+            super(...arguments);
+            this.projects = new ProjectsAPI.Projects(this._client);
+        }
+    }
+    Chat.Projects = projects_1.Projects;
+    return Chat;
+})();
+exports.Chat = Chat;
+//# sourceMappingURL=chat.js.map
+
+/***/ }),
+
+/***/ 52843:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Projects = exports.Chat = void 0;
+var chat_1 = __nccwpck_require__(83041);
+Object.defineProperty(exports, "Chat", ({ enumerable: true, get: function () { return chat_1.Chat; } }));
+var projects_1 = __nccwpck_require__(21397);
+Object.defineProperty(exports, "Projects", ({ enumerable: true, get: function () { return projects_1.Projects; } }));
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
+/***/ 21397:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Projects = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+class Projects extends resource_1.APIResource {
+    /**
+     * Get per-project activity for a given day, with cursor-based pagination.
+     *
+     * Returns activity metrics for each project in the organization, sorted by project
+     * ID. Use `group_by[]` to break projects out per member or per RBAC group, and
+     * `filter[]` to scope results; the parameter descriptions list the supported
+     * dimensions. Available to organizations on a Claude Enterprise plan. Requires an
+     * API key with the `read:analytics` scope.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaAnalyticsProjectActivity of client.beta.organization.analytics.apps.chat.projects.list()) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(query = {}, options) {
+        return this._client.getAPIList('/v1/organizations/analytics/apps/chat/projects?beta=true', (pagination_1.PageCursor), { query, ...options });
+    }
+}
+exports.Projects = Projects;
+//# sourceMappingURL=projects.js.map
+
+/***/ }),
+
+/***/ 13828:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Chat = exports.Apps = void 0;
+var apps_1 = __nccwpck_require__(50450);
+Object.defineProperty(exports, "Apps", ({ enumerable: true, get: function () { return apps_1.Apps; } }));
+var index_1 = __nccwpck_require__(52843);
+Object.defineProperty(exports, "Chat", ({ enumerable: true, get: function () { return index_1.Chat; } }));
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
+/***/ 77356:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Artifacts = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+class Artifacts extends resource_1.APIResource {
+    /**
+     * Get artifact-creation activity for a given day, broken out by MIME type.
+     *
+     * Returns the full (`artifact_type`, `is_shared`) cube for the organization;
+     * `next_page` is null except for grouped queries, which paginate. The cube can be
+     * broken out per product, per member, or per RBAC group via `group_by[]`, and
+     * scoped via `filter[]`. Requires an API key with the `read:analytics` scope.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaAnalyticsArtifactActivity of client.beta.organization.analytics.artifacts.list(
+     *   { date: '2019-12-27' },
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(query, options) {
+        return this._client.getAPIList('/v1/organizations/analytics/artifacts?beta=true', (pagination_1.PageCursor), { query, ...options });
+    }
+}
+exports.Artifacts = Artifacts;
+//# sourceMappingURL=artifacts.js.map
+
+/***/ }),
+
+/***/ 60091:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Connectors = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+class Connectors extends resource_1.APIResource {
+    /**
+     * Get per-connector usage for a given day, with cursor-based pagination.
+     *
+     * Returns connector usage metrics for the organization, sorted by connector name.
+     * Connector names are normalized from their various sources — for example,
+     * "Atlassian MCP server" and "mcp-atlassian" both appear as "atlassian". Use
+     * `group_by[]` to break usage out per member, per RBAC group, or per product
+     * surface, and `filter[]` to scope results; the parameter descriptions list the
+     * supported dimensions. Available to organizations on a Claude Enterprise plan.
+     * Requires an API key with the `read:analytics` scope.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaAnalyticsConnectorActivity of client.beta.organization.analytics.connectors.list()) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(query = {}, options) {
+        return this._client.getAPIList('/v1/organizations/analytics/connectors?beta=true', (pagination_1.PageCursor), { query, ...options });
+    }
+}
+exports.Connectors = Connectors;
+//# sourceMappingURL=connectors.js.map
+
+/***/ }),
+
+/***/ 90521:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.CostReport = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+class CostReport extends resource_1.APIResource {
+    /**
+     * Get cost in USD over time across a date range.
+     *
+     * Returns cost bucketed by minute, hour, or day, optionally broken down by
+     * product, model, context window, inference region, speed, cost type, or token
+     * type. Available to organizations on a Claude Enterprise plan. Requires an API
+     * key with the `read:analytics` scope.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaAnalyticsCostReportTimeBucket of client.beta.organization.analytics.costReport.list(
+     *   { starting_at: '2019-12-27T18:11:19.117Z' },
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(query, options) {
+        return this._client.getAPIList('/v1/organizations/analytics/cost_report?beta=true', (pagination_1.PageCursor), { query, ...options });
+    }
+}
+exports.CostReport = CostReport;
+//# sourceMappingURL=cost-report.js.map
+
+/***/ }),
+
+/***/ 57383:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Users = exports.UserUsageReport = exports.UserCostReport = exports.UsageReport = exports.Summaries = exports.Skills = exports.Plugins = exports.CostReport = exports.Connectors = exports.Artifacts = exports.Apps = exports.Analytics = void 0;
+var analytics_1 = __nccwpck_require__(4219);
+Object.defineProperty(exports, "Analytics", ({ enumerable: true, get: function () { return analytics_1.Analytics; } }));
+var index_1 = __nccwpck_require__(13828);
+Object.defineProperty(exports, "Apps", ({ enumerable: true, get: function () { return index_1.Apps; } }));
+var artifacts_1 = __nccwpck_require__(77356);
+Object.defineProperty(exports, "Artifacts", ({ enumerable: true, get: function () { return artifacts_1.Artifacts; } }));
+var connectors_1 = __nccwpck_require__(60091);
+Object.defineProperty(exports, "Connectors", ({ enumerable: true, get: function () { return connectors_1.Connectors; } }));
+var cost_report_1 = __nccwpck_require__(90521);
+Object.defineProperty(exports, "CostReport", ({ enumerable: true, get: function () { return cost_report_1.CostReport; } }));
+var plugins_1 = __nccwpck_require__(48883);
+Object.defineProperty(exports, "Plugins", ({ enumerable: true, get: function () { return plugins_1.Plugins; } }));
+var skills_1 = __nccwpck_require__(82033);
+Object.defineProperty(exports, "Skills", ({ enumerable: true, get: function () { return skills_1.Skills; } }));
+var summaries_1 = __nccwpck_require__(5751);
+Object.defineProperty(exports, "Summaries", ({ enumerable: true, get: function () { return summaries_1.Summaries; } }));
+var usage_report_1 = __nccwpck_require__(39703);
+Object.defineProperty(exports, "UsageReport", ({ enumerable: true, get: function () { return usage_report_1.UsageReport; } }));
+var user_cost_report_1 = __nccwpck_require__(47659);
+Object.defineProperty(exports, "UserCostReport", ({ enumerable: true, get: function () { return user_cost_report_1.UserCostReport; } }));
+var user_usage_report_1 = __nccwpck_require__(66777);
+Object.defineProperty(exports, "UserUsageReport", ({ enumerable: true, get: function () { return user_usage_report_1.UserUsageReport; } }));
+var users_1 = __nccwpck_require__(45523);
+Object.defineProperty(exports, "Users", ({ enumerable: true, get: function () { return users_1.Users; } }));
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
+/***/ 48883:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Plugins = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+class Plugins extends resource_1.APIResource {
+    /**
+     * Get per-plugin install + invocation usage for a given day, with pagination.
+     *
+     * Returns plugin usage metrics for the organization across Cowork and Claude Code,
+     * sorted by plugin name. The `plugin_name` value `third-party` is an aggregate
+     * bucket, not a plugin: it collects plugin activity, from either surface, for
+     * which the reporting client did not provide a plugin name — so an organization's
+     * own plugins can contribute both to their own named rows and to this bucket. Use
+     * `group_by[]` to break usage out per member, per RBAC group, or per product
+     * surface (Cowork / Claude Code), and `filter[]` to scope results; the parameter
+     * descriptions list the supported dimensions. Requires an API key with the
+     * `read:analytics` scope. `starting_date` / `ending_date` select range-rollup mode
+     * like `/skills`.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaAnalyticsPluginActivity of client.beta.organization.analytics.plugins.list()) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(query = {}, options) {
+        return this._client.getAPIList('/v1/organizations/analytics/plugins?beta=true', (pagination_1.PageCursor), { query, ...options });
+    }
+}
+exports.Plugins = Plugins;
+//# sourceMappingURL=plugins.js.map
+
+/***/ }),
+
+/***/ 82033:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Skills = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+class Skills extends resource_1.APIResource {
+    /**
+     * Get per-skill usage for a given day, with cursor-based pagination.
+     *
+     * Returns skill usage metrics for the organization, sorted by skill name. Use
+     * `group_by[]` to break usage out per member, per RBAC group, or per product
+     * surface, and `filter[]` to scope results; the parameter descriptions list the
+     * supported dimensions. Available to organizations on a Claude Enterprise plan.
+     * Requires an API key with the `read:analytics` scope.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaAnalyticsSkillActivity of client.beta.organization.analytics.skills.list()) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(query = {}, options) {
+        return this._client.getAPIList('/v1/organizations/analytics/skills?beta=true', (pagination_1.PageCursor), { query, ...options });
+    }
+}
+exports.Skills = Skills;
+//# sourceMappingURL=skills.js.map
+
+/***/ }),
+
+/***/ 5751:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Summaries = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+class Summaries extends resource_1.APIResource {
+    /**
+     * Get organization-wide activity summaries for a date range.
+     *
+     * Returns one entry per day from `starting_date` (inclusive) to `ending_date`
+     * (exclusive) in `data`, the same `data` / `next_page` envelope as the other
+     * analytics list endpoints; the series is currently returned in full, so
+     * `next_page` is always null (`summaries` is a deprecated alias of `data`). Data
+     * is typically available with a 1-day lag and may be revised by a few percent over
+     * the following days: when `ending_date` is omitted it defaults to the most recent
+     * available day + 1, so the last entry covers the most recent available day. The
+     * series can be scoped to an RBAC group via `filter[]=rbac_group_id:{id}`.
+     * Available to organizations on a Claude Enterprise plan. Requires an API key with
+     * the `read:analytics` scope.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaAnalyticsSingleDayActivitySummary of client.beta.organization.analytics.summaries.list(
+     *   { starting_date: '2019-12-27' },
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(query, options) {
+        return this._client.getAPIList('/v1/organizations/analytics/summaries?beta=true', (pagination_1.PageCursor), { query, ...options });
+    }
+}
+exports.Summaries = Summaries;
+//# sourceMappingURL=summaries.js.map
+
+/***/ }),
+
+/***/ 39703:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.UsageReport = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+class UsageReport extends resource_1.APIResource {
+    /**
+     * Get token usage over time across a date range.
+     *
+     * Returns token usage bucketed by minute, hour, or day, optionally broken down by
+     * product, model, context window, inference region, or speed. Available to
+     * organizations on a Claude Enterprise plan. Requires an API key with the
+     * `read:analytics` scope.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaAnalyticsUsageReportTimeBucket of client.beta.organization.analytics.usageReport.list(
+     *   { starting_at: '2019-12-27T18:11:19.117Z' },
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(query, options) {
+        return this._client.getAPIList('/v1/organizations/analytics/usage_report?beta=true', (pagination_1.PageCursor), { query, ...options });
+    }
+}
+exports.UsageReport = UsageReport;
+//# sourceMappingURL=usage-report.js.map
+
+/***/ }),
+
+/***/ 47659:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.UserCostReport = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+class UserCostReport extends resource_1.APIResource {
+    /**
+     * Get per-user cost in USD across a date range.
+     *
+     * Returns one row per user, ranked by spend. Use this to see which users account
+     * for the most cost. Only cost attributable to a seat user is included; for
+     * organization-wide totals including direct API-key and automation traffic, use
+     * the bucketed `/v1/organizations/analytics/cost_report` endpoint. Available to
+     * organizations on a Claude Enterprise plan. Requires an API key with the
+     * `read:analytics` scope.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaAnalyticsCostUsersItem of client.beta.organization.analytics.userCostReport.list(
+     *   { starting_at: '2019-12-27T18:11:19.117Z' },
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(query, options) {
+        return this._client.getAPIList('/v1/organizations/analytics/user_cost_report?beta=true', (pagination_1.PageCursor), { query, ...options });
+    }
+}
+exports.UserCostReport = UserCostReport;
+//# sourceMappingURL=user-cost-report.js.map
+
+/***/ }),
+
+/***/ 66777:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.UserUsageReport = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+class UserUsageReport extends resource_1.APIResource {
+    /**
+     * Get per-user token usage across a date range.
+     *
+     * Returns one row per user, ranked by the chosen token metric. Use this to see
+     * which users consume the most tokens. Only usage attributable to a seat user is
+     * included; for organization-wide totals including direct API-key and automation
+     * traffic, use the bucketed `/v1/organizations/analytics/usage_report` endpoint.
+     * Available to organizations on a Claude Enterprise plan. Requires an API key with
+     * the `read:analytics` scope.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaAnalyticsUsageUsersItem of client.beta.organization.analytics.userUsageReport.list(
+     *   { starting_at: '2019-12-27T18:11:19.117Z' },
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(query, options) {
+        return this._client.getAPIList('/v1/organizations/analytics/user_usage_report?beta=true', (pagination_1.PageCursor), { query, ...options });
+    }
+}
+exports.UserUsageReport = UserUsageReport;
+//# sourceMappingURL=user-usage-report.js.map
+
+/***/ }),
+
+/***/ 45523:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Users = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+class Users extends resource_1.APIResource {
+    /**
+     * Get per-user activity for a given day, with cursor-based pagination.
+     *
+     * Returns activity metrics for each user in the organization, sorted by email
+     * address. Use `group_by[]` for per-RBAC-group aggregates, or `filter[]` to scope
+     * results to specific members, groups, or a chat project. Available to
+     * organizations on a Claude Enterprise plan. Requires an API key with the
+     * `read:analytics` scope.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaAnalyticsUserActivity of client.beta.organization.analytics.users.list()) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(query = {}, options) {
+        return this._client.getAPIList('/v1/organizations/analytics/users?beta=true', (pagination_1.PageCursor), { query, ...options });
+    }
+}
+exports.Users = Users;
+//# sourceMappingURL=users.js.map
 
 /***/ }),
 
@@ -48776,6 +49717,23 @@ exports.Federation = Federation;
 
 /***/ }),
 
+/***/ 1524:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Rules = exports.Issuers = exports.Federation = void 0;
+var federation_1 = __nccwpck_require__(82135);
+Object.defineProperty(exports, "Federation", ({ enumerable: true, get: function () { return federation_1.Federation; } }));
+var issuers_1 = __nccwpck_require__(50192);
+Object.defineProperty(exports, "Issuers", ({ enumerable: true, get: function () { return issuers_1.Issuers; } }));
+var index_1 = __nccwpck_require__(20940);
+Object.defineProperty(exports, "Rules", ({ enumerable: true, get: function () { return index_1.Rules; } }));
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
 /***/ 50192:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -48948,6 +49906,21 @@ class Issuers extends resource_1.APIResource {
 }
 exports.Issuers = Issuers;
 //# sourceMappingURL=issuers.js.map
+
+/***/ }),
+
+/***/ 20940:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Workspaces = exports.Rules = void 0;
+var rules_1 = __nccwpck_require__(38875);
+Object.defineProperty(exports, "Rules", ({ enumerable: true, get: function () { return rules_1.Rules; } }));
+var workspaces_1 = __nccwpck_require__(81480);
+Object.defineProperty(exports, "Workspaces", ({ enumerable: true, get: function () { return workspaces_1.Workspaces; } }));
+//# sourceMappingURL=index.js.map
 
 /***/ }),
 
@@ -49278,6 +50251,49 @@ exports.Workspaces = Workspaces;
 
 /***/ }),
 
+/***/ 7872:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Workspaces = exports.Users = exports.SpendLimits = exports.ServiceAccounts = exports.RateLimits = exports.RBACRoles = exports.RBACGroups = exports.Plugins = exports.PluginMarketplaces = exports.Organization = exports.Invites = exports.Federation = exports.ExternalKeys = exports.ComplianceSettings = exports.Analytics = exports.APIKeys = void 0;
+var api_keys_1 = __nccwpck_require__(1381);
+Object.defineProperty(exports, "APIKeys", ({ enumerable: true, get: function () { return api_keys_1.APIKeys; } }));
+var index_1 = __nccwpck_require__(57383);
+Object.defineProperty(exports, "Analytics", ({ enumerable: true, get: function () { return index_1.Analytics; } }));
+var compliance_settings_1 = __nccwpck_require__(14471);
+Object.defineProperty(exports, "ComplianceSettings", ({ enumerable: true, get: function () { return compliance_settings_1.ComplianceSettings; } }));
+var external_keys_1 = __nccwpck_require__(22142);
+Object.defineProperty(exports, "ExternalKeys", ({ enumerable: true, get: function () { return external_keys_1.ExternalKeys; } }));
+var index_2 = __nccwpck_require__(1524);
+Object.defineProperty(exports, "Federation", ({ enumerable: true, get: function () { return index_2.Federation; } }));
+var invites_1 = __nccwpck_require__(24954);
+Object.defineProperty(exports, "Invites", ({ enumerable: true, get: function () { return invites_1.Invites; } }));
+var organization_1 = __nccwpck_require__(25293);
+Object.defineProperty(exports, "Organization", ({ enumerable: true, get: function () { return organization_1.Organization; } }));
+var plugin_marketplaces_1 = __nccwpck_require__(77258);
+Object.defineProperty(exports, "PluginMarketplaces", ({ enumerable: true, get: function () { return plugin_marketplaces_1.PluginMarketplaces; } }));
+var index_3 = __nccwpck_require__(59407);
+Object.defineProperty(exports, "Plugins", ({ enumerable: true, get: function () { return index_3.Plugins; } }));
+var index_4 = __nccwpck_require__(9456);
+Object.defineProperty(exports, "RBACGroups", ({ enumerable: true, get: function () { return index_4.RBACGroups; } }));
+var index_5 = __nccwpck_require__(68465);
+Object.defineProperty(exports, "RBACRoles", ({ enumerable: true, get: function () { return index_5.RBACRoles; } }));
+var rate_limits_1 = __nccwpck_require__(6309);
+Object.defineProperty(exports, "RateLimits", ({ enumerable: true, get: function () { return rate_limits_1.RateLimits; } }));
+var index_6 = __nccwpck_require__(52379);
+Object.defineProperty(exports, "ServiceAccounts", ({ enumerable: true, get: function () { return index_6.ServiceAccounts; } }));
+var index_7 = __nccwpck_require__(91226);
+Object.defineProperty(exports, "SpendLimits", ({ enumerable: true, get: function () { return index_7.SpendLimits; } }));
+var users_1 = __nccwpck_require__(11184);
+Object.defineProperty(exports, "Users", ({ enumerable: true, get: function () { return users_1.Users; } }));
+var index_8 = __nccwpck_require__(93755);
+Object.defineProperty(exports, "Workspaces", ({ enumerable: true, get: function () { return index_8.Workspaces; } }));
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
 /***/ 24954:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -49377,14 +50393,26 @@ const ExternalKeysAPI = tslib_1.__importStar(__nccwpck_require__(22142));
 const external_keys_1 = __nccwpck_require__(22142);
 const InvitesAPI = tslib_1.__importStar(__nccwpck_require__(24954));
 const invites_1 = __nccwpck_require__(24954);
+const PluginMarketplacesAPI = tslib_1.__importStar(__nccwpck_require__(77258));
+const plugin_marketplaces_1 = __nccwpck_require__(77258);
 const RateLimitsAPI = tslib_1.__importStar(__nccwpck_require__(6309));
 const rate_limits_1 = __nccwpck_require__(6309);
 const UsersAPI = tslib_1.__importStar(__nccwpck_require__(11184));
 const users_1 = __nccwpck_require__(11184);
+const AnalyticsAPI = tslib_1.__importStar(__nccwpck_require__(4219));
+const analytics_1 = __nccwpck_require__(4219);
 const FederationAPI = tslib_1.__importStar(__nccwpck_require__(82135));
 const federation_1 = __nccwpck_require__(82135);
+const PluginsAPI = tslib_1.__importStar(__nccwpck_require__(68635));
+const plugins_1 = __nccwpck_require__(68635);
+const RBACGroupsAPI = tslib_1.__importStar(__nccwpck_require__(27207));
+const rbac_groups_1 = __nccwpck_require__(27207);
+const RBACRolesAPI = tslib_1.__importStar(__nccwpck_require__(20193));
+const rbac_roles_1 = __nccwpck_require__(20193);
 const ServiceAccountsAPI = tslib_1.__importStar(__nccwpck_require__(5693));
 const service_accounts_1 = __nccwpck_require__(5693);
+const SpendLimitsAPI = tslib_1.__importStar(__nccwpck_require__(82359));
+const spend_limits_1 = __nccwpck_require__(82359);
 const WorkspacesAPI = tslib_1.__importStar(__nccwpck_require__(70013));
 const workspaces_1 = __nccwpck_require__(70013);
 var Organization = /* @__PURE__ */ (() => {
@@ -49400,6 +50428,12 @@ var Organization = /* @__PURE__ */ (() => {
             this.workspaces = new WorkspacesAPI.Workspaces(this._client);
             this.rateLimits = new RateLimitsAPI.RateLimits(this._client);
             this.complianceSettings = new ComplianceSettingsAPI.ComplianceSettings(this._client);
+            this.analytics = new AnalyticsAPI.Analytics(this._client);
+            this.spendLimits = new SpendLimitsAPI.SpendLimits(this._client);
+            this.rbacGroups = new RBACGroupsAPI.RBACGroups(this._client);
+            this.rbacRoles = new RBACRolesAPI.RBACRoles(this._client);
+            this.plugins = new PluginsAPI.Plugins(this._client);
+            this.pluginMarketplaces = new PluginMarketplacesAPI.PluginMarketplaces(this._client);
         }
         /**
          * Retrieve information about the organization associated with the authenticated
@@ -49424,10 +50458,949 @@ var Organization = /* @__PURE__ */ (() => {
     Organization.Workspaces = workspaces_1.Workspaces;
     Organization.RateLimits = rate_limits_1.RateLimits;
     Organization.ComplianceSettings = compliance_settings_1.ComplianceSettings;
+    Organization.Analytics = analytics_1.Analytics;
+    Organization.SpendLimits = spend_limits_1.SpendLimits;
+    Organization.RBACGroups = rbac_groups_1.RBACGroups;
+    Organization.RBACRoles = rbac_roles_1.RBACRoles;
+    Organization.Plugins = plugins_1.Plugins;
+    Organization.PluginMarketplaces = plugin_marketplaces_1.PluginMarketplaces;
     return Organization;
 })();
 exports.Organization = Organization;
 //# sourceMappingURL=organization.js.map
+
+/***/ }),
+
+/***/ 77258:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.PluginMarketplaces = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+const headers_1 = __nccwpck_require__(60017);
+const uploads_1 = __nccwpck_require__(59629);
+const path_1 = __nccwpck_require__(43002);
+class PluginMarketplaces extends resource_1.APIResource {
+    /**
+     * Retrieve a plugin marketplace by ID.
+     *
+     * **Accepted credentials:** an Admin API key with the `read:plugins` or
+     * `read:org_audit` scope, or a Compliance Access Key with the
+     * `read:compliance_org_data` scope.
+     *
+     * Every request must include the beta header
+     * `anthropic-beta: ce-plugins-2026-09-01`. A request without it returns `404`,
+     * exactly as if the endpoint did not exist. The Plugins API is in beta and is
+     * available to Claude Enterprise organizations only. It is not available to Claude
+     * Platform (Claude Console) organizations, or to organizations with HIPAA
+     * readiness enabled.
+     *
+     * @example
+     * ```ts
+     * const betaPluginMarketplace =
+     *   await client.beta.organization.pluginMarketplaces.retrieve(
+     *     'marketplace_id',
+     *   );
+     * ```
+     */
+    retrieve(marketplaceID, params = {}, options) {
+        const { betas, ...query } = params ?? {};
+        return this._client.get((0, path_1.path) `/v1/organizations/plugin_marketplaces/${marketplaceID}?beta=true`, {
+            query,
+            ...options,
+            headers: (0, headers_1.buildHeaders)([
+                { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
+                options?.headers,
+            ]),
+        });
+    }
+    /**
+     * Set the default installation setting of one of the organization's own plugin
+     * marketplaces. Every Plugin in it without a setting of its own gets this default
+     * as its organization-wide setting, including Plugins added later.
+     *
+     * Pass it as `default_installation_preference`. A member's personal marketplace
+     * cannot be updated here (403).
+     *
+     * **Accepted credentials:** an Admin API key with the `write:plugins` scope.
+     *
+     * Every request must include the beta header
+     * `anthropic-beta: ce-plugins-2026-09-01`. A request without it returns `404`,
+     * exactly as if the endpoint did not exist. The Plugins API is in beta and is
+     * available to Claude Enterprise organizations only. It is not available to Claude
+     * Platform (Claude Console) organizations, or to organizations with HIPAA
+     * readiness enabled.
+     *
+     * @example
+     * ```ts
+     * const betaPluginMarketplace =
+     *   await client.beta.organization.pluginMarketplaces.update(
+     *     'marketplace_id',
+     *     { default_installation_preference: 'available' },
+     *   );
+     * ```
+     */
+    update(marketplaceID, params, options) {
+        const { betas, ...body } = params;
+        return this._client.post((0, path_1.path) `/v1/organizations/plugin_marketplaces/${marketplaceID}?beta=true`, {
+            body,
+            ...options,
+            headers: (0, headers_1.buildHeaders)([
+                { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
+                options?.headers,
+            ]),
+        });
+    }
+    /**
+     * List the plugin marketplaces Plugins live in, newest first: the organization's
+     * own and its members' personal ones.
+     *
+     * Plugin marketplaces are created, connected to a repository and deleted in
+     * claude.ai, not through this API. The organization's library marketplace, the
+     * organization-owned `manual` marketplace that uploads go to when no marketplace
+     * is named, is created the first time something is put in it and is listed from
+     * then on.
+     *
+     * **Accepted credentials:** an Admin API key with the `read:plugins` or
+     * `read:org_audit` scope, or a Compliance Access Key with the
+     * `read:compliance_org_data` scope.
+     *
+     * Every request must include the beta header
+     * `anthropic-beta: ce-plugins-2026-09-01`. A request without it returns `404`,
+     * exactly as if the endpoint did not exist. The Plugins API is in beta and is
+     * available to Claude Enterprise organizations only. It is not available to Claude
+     * Platform (Claude Console) organizations, or to organizations with HIPAA
+     * readiness enabled.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaPluginMarketplace of client.beta.organization.pluginMarketplaces.list()) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(params = {}, options) {
+        const { betas, ...query } = params ?? {};
+        return this._client.getAPIList('/v1/organizations/plugin_marketplaces?beta=true', (pagination_1.PageCursor), {
+            query,
+            ...options,
+            headers: (0, headers_1.buildHeaders)([
+                { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
+                options?.headers,
+            ]),
+        });
+    }
+    /**
+     * Check whether a plugin marketplace, uploaded as a `.zip` of the marketplace
+     * directory, would synchronize into claude.ai, without connecting or storing it.
+     *
+     * To check a public GitHub repository instead, use Validate Plugin Marketplace
+     * Repository.
+     *
+     * The report says whether `marketplace.json` is well-formed, which plugins a
+     * synchronization would skip and why, and which plugins would synchronize only in
+     * part, with some files left out. An archive that cannot be read as a marketplace
+     * is reported, not refused: the response is a report with `valid: false`. Plugin
+     * sources outside the marketplace are fetched anonymously from GitHub, so a
+     * private one is reported as not found; a source on any other host is not fetched
+     * here, and the report notes that it will be checked when the marketplace actually
+     * synchronizes.
+     *
+     * Nothing is recorded on the Compliance API activity feed.
+     *
+     * For a worked example, see
+     * [Validate marketplace content](/docs/en/manage-claude/plugins-api#validate-marketplace-content)
+     * in the Plugins API guide.
+     *
+     * **Accepted credentials:** an Admin API key with the `read:plugins` or
+     * `write:plugins` scope; `read:org_audit` and `read:compliance_org_data` do not
+     * grant it.
+     *
+     * Every request must include the beta header
+     * `anthropic-beta: ce-plugins-2026-09-01`. A request without it returns `404`,
+     * exactly as if the endpoint did not exist. The Plugins API is in beta and is
+     * available to Claude Enterprise organizations only. It is not available to Claude
+     * Platform (Claude Console) organizations, or to organizations with HIPAA
+     * readiness enabled.
+     *
+     * @example
+     * ```ts
+     * const betaPluginMarketplaceValidationReport =
+     *   await client.beta.organization.pluginMarketplaces.validateArchive(
+     *     { archive: fs.createReadStream('path/to/file') },
+     *   );
+     * ```
+     */
+    validateArchive(params, options) {
+        const { betas, ...body } = params;
+        return this._client.post('/v1/organizations/plugin_marketplaces/validate_archive?beta=true', (0, uploads_1.multipartFormRequestOptions)({
+            body,
+            ...options,
+            headers: (0, headers_1.buildHeaders)([
+                { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
+                options?.headers,
+            ]),
+        }, this._client));
+    }
+    /**
+     * Check whether a plugin marketplace held in a public GitHub repository would
+     * synchronize into claude.ai, without connecting or storing it.
+     *
+     * To check a `.zip` of the marketplace directory instead, use Validate Plugin
+     * Marketplace Archive.
+     *
+     * The report says whether `marketplace.json` is well-formed, which plugins a
+     * synchronization would skip and why, and which plugins would synchronize only in
+     * part, with some files left out. A repository that is missing, private, or has no
+     * such branch or commit is reported, not refused: the response is a report with
+     * `valid: false`. Plugin sources outside the marketplace are fetched anonymously
+     * from GitHub, so a private one is reported as not found; a source on any other
+     * host is not fetched here, and the report notes that it will be checked when the
+     * marketplace actually synchronizes.
+     *
+     * Nothing is recorded on the Compliance API activity feed.
+     *
+     * For a worked example, see
+     * [Validate marketplace content](/docs/en/manage-claude/plugins-api#validate-marketplace-content)
+     * in the Plugins API guide.
+     *
+     * **Accepted credentials:** an Admin API key with the `read:plugins` or
+     * `write:plugins` scope; `read:org_audit` and `read:compliance_org_data` do not
+     * grant it.
+     *
+     * Every request must include the beta header
+     * `anthropic-beta: ce-plugins-2026-09-01`. A request without it returns `404`,
+     * exactly as if the endpoint did not exist. The Plugins API is in beta and is
+     * available to Claude Enterprise organizations only. It is not available to Claude
+     * Platform (Claude Console) organizations, or to organizations with HIPAA
+     * readiness enabled.
+     *
+     * @example
+     * ```ts
+     * const betaPluginMarketplaceValidationReport =
+     *   await client.beta.organization.pluginMarketplaces.validateRepository(
+     *     {
+     *       repository_url:
+     *         'https://github.com/example-org/example-marketplace',
+     *     },
+     *   );
+     * ```
+     */
+    validateRepository(params, options) {
+        const { betas, ...body } = params;
+        return this._client.post('/v1/organizations/plugin_marketplaces/validate_repository?beta=true', {
+            body,
+            ...options,
+            headers: (0, headers_1.buildHeaders)([
+                { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
+                options?.headers,
+            ]),
+        });
+    }
+}
+exports.PluginMarketplaces = PluginMarketplaces;
+//# sourceMappingURL=plugin-marketplaces.js.map
+
+/***/ }),
+
+/***/ 59407:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Versions = exports.Shares = exports.Plugins = exports.InstallationSettings = void 0;
+var installation_settings_1 = __nccwpck_require__(87889);
+Object.defineProperty(exports, "InstallationSettings", ({ enumerable: true, get: function () { return installation_settings_1.InstallationSettings; } }));
+var plugins_1 = __nccwpck_require__(68635);
+Object.defineProperty(exports, "Plugins", ({ enumerable: true, get: function () { return plugins_1.Plugins; } }));
+var shares_1 = __nccwpck_require__(94275);
+Object.defineProperty(exports, "Shares", ({ enumerable: true, get: function () { return shares_1.Shares; } }));
+var versions_1 = __nccwpck_require__(69178);
+Object.defineProperty(exports, "Versions", ({ enumerable: true, get: function () { return versions_1.Versions; } }));
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
+/***/ 87889:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.InstallationSettings = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+const headers_1 = __nccwpck_require__(60017);
+const path_1 = __nccwpck_require__(43002);
+class InstallationSettings extends resource_1.APIResource {
+    /**
+     * List an organization-owned Plugin's installation settings, which say which
+     * members it is for, most recently created first.
+     *
+     * The list holds the Plugin's own organization-wide setting (absent while the
+     * Plugin inherits its marketplace's default) and each RBAC Group's own setting. A
+     * member-owned Plugin has shares instead, so this path returns 404 for one.
+     *
+     * **Accepted credentials:** an Admin API key with the `read:plugins` or
+     * `read:org_audit` scope, or a Compliance Access Key with the
+     * `read:compliance_org_data` scope.
+     *
+     * Every request must include the beta header
+     * `anthropic-beta: ce-plugins-2026-09-01`. A request without it returns `404`,
+     * exactly as if the endpoint did not exist. The Plugins API is in beta and is
+     * available to Claude Enterprise organizations only. It is not available to Claude
+     * Platform (Claude Console) organizations, or to organizations with HIPAA
+     * readiness enabled.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaPluginInstallationSetting of client.beta.organization.plugins.installationSettings.list(
+     *   'plugin_id',
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(pluginID, params = {}, options) {
+        const { betas, ...query } = params ?? {};
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/plugins/${pluginID}/installation_settings?beta=true`, (pagination_1.PageCursor), {
+            query,
+            ...options,
+            headers: (0, headers_1.buildHeaders)([
+                { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
+                options?.headers,
+            ]),
+        });
+    }
+    /**
+     * Remove an organization-owned Plugin's own installation setting for the whole
+     * organization or for one RBAC Group.
+     *
+     * Removing the `organization` target returns the Plugin to its marketplace's
+     * default installation setting and leaves the groups' settings in place. Removing
+     * a group's setting makes the group's members fall back to the Plugin's
+     * organization-wide setting or to the settings of their other groups.
+     *
+     * A target that holds no setting of its own returns 404 (a Plugin that already
+     * inherits its marketplace's default holds no `organization` setting), and so does
+     * a member-owned Plugin.
+     *
+     * A removal counts as one of the Plugin's installation-setting writes: send all of
+     * those writes one at a time. If several arrive for the same Plugin at the same
+     * time, the server handles them one after another and can answer some of them with
+     * `503` and `x-should-retry: true` instead of applying them; wait a second or two
+     * and send the removal again. A `404` on the repeat means the setting is already
+     * gone.
+     *
+     * **Accepted credentials:** an Admin API key with the `write:plugins` scope.
+     *
+     * Every request must include the beta header
+     * `anthropic-beta: ce-plugins-2026-09-01`. A request without it returns `404`,
+     * exactly as if the endpoint did not exist. The Plugins API is in beta and is
+     * available to Claude Enterprise organizations only. It is not available to Claude
+     * Platform (Claude Console) organizations, or to organizations with HIPAA
+     * readiness enabled.
+     *
+     * @example
+     * ```ts
+     * const betaDeletedPluginInstallationSetting =
+     *   await client.beta.organization.plugins.installationSettings.remove(
+     *     'target',
+     *     { plugin_id: 'plugin_id' },
+     *   );
+     * ```
+     */
+    remove(target, params, options) {
+        const { plugin_id, betas } = params;
+        return this._client.delete((0, path_1.path) `/v1/organizations/plugins/${plugin_id}/installation_settings/${target}?beta=true`, {
+            ...options,
+            headers: (0, headers_1.buildHeaders)([
+                { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
+                options?.headers,
+            ]),
+        });
+    }
+    /**
+     * Set or change an organization-owned Plugin's installation setting for the whole
+     * organization or for one RBAC Group.
+     *
+     * Writing the value a target already holds of its own changes nothing.
+     *
+     * A member-owned Plugin has shares instead of installation settings, so this path
+     * returns 404 for one.
+     *
+     * Send a Plugin's installation-setting writes one at a time. If several writes for
+     * the same Plugin arrive at the same time, the server handles them one after
+     * another and can answer some of them with `503` instead of applying them. That
+     * `503` carries `x-should-retry: true`, and the write is safe to repeat: wait a
+     * second or two, then send it again.
+     *
+     * **Accepted credentials:** an Admin API key with the `write:plugins` scope.
+     *
+     * Every request must include the beta header
+     * `anthropic-beta: ce-plugins-2026-09-01`. A request without it returns `404`,
+     * exactly as if the endpoint did not exist. The Plugins API is in beta and is
+     * available to Claude Enterprise organizations only. It is not available to Claude
+     * Platform (Claude Console) organizations, or to organizations with HIPAA
+     * readiness enabled.
+     *
+     * @example
+     * ```ts
+     * const betaPluginInstallationSetting =
+     *   await client.beta.organization.plugins.installationSettings.set(
+     *     'target',
+     *     {
+     *       plugin_id: 'plugin_id',
+     *       installation_preference: 'required',
+     *     },
+     *   );
+     * ```
+     */
+    set(target, params, options) {
+        const { plugin_id, betas, ...body } = params;
+        return this._client.post((0, path_1.path) `/v1/organizations/plugins/${plugin_id}/installation_settings/${target}?beta=true`, {
+            body,
+            ...options,
+            headers: (0, headers_1.buildHeaders)([
+                { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
+                options?.headers,
+            ]),
+        });
+    }
+}
+exports.InstallationSettings = InstallationSettings;
+//# sourceMappingURL=installation-settings.js.map
+
+/***/ }),
+
+/***/ 68635:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Plugins = void 0;
+const tslib_1 = __nccwpck_require__(14839);
+const resource_1 = __nccwpck_require__(82941);
+const InstallationSettingsAPI = tslib_1.__importStar(__nccwpck_require__(87889));
+const installation_settings_1 = __nccwpck_require__(87889);
+const SharesAPI = tslib_1.__importStar(__nccwpck_require__(94275));
+const shares_1 = __nccwpck_require__(94275);
+const VersionsAPI = tslib_1.__importStar(__nccwpck_require__(69178));
+const versions_1 = __nccwpck_require__(69178);
+const pagination_1 = __nccwpck_require__(27117);
+const headers_1 = __nccwpck_require__(60017);
+const uploads_1 = __nccwpck_require__(59629);
+const path_1 = __nccwpck_require__(43002);
+var Plugins = /* @__PURE__ */ (() => {
+    class Plugins extends resource_1.APIResource {
+        constructor() {
+            super(...arguments);
+            this.versions = new VersionsAPI.Versions(this._client);
+            this.installationSettings = new InstallationSettingsAPI.InstallationSettings(this._client);
+            this.shares = new SharesAPI.Shares(this._client);
+        }
+        /**
+         * Create an organization-owned Plugin and its first version by uploading the
+         * version's files.
+         *
+         * The upload is `multipart/form-data`: the version's files (`files`, each part
+         * sent as `files[]`), with an optional `marketplace_id` and `release_notes`. The
+         * manifest's `name` becomes the Plugin's `name`, and `display_name`, `description`
+         * and `manifest_version` come from the manifest too.
+         *
+         * `name` may contain lowercase letters (from any alphabet), digits, and hyphens,
+         * up to 64 characters. Uppercase letters, spaces, underscores, and other
+         * punctuation are rejected.
+         *
+         * The `name` must be unique within the marketplace: a name already taken returns a
+         * 409 with `error_code` `plugin_name_taken` and, when a Plugin holds it, that
+         * Plugin's ID in `details.plugin_id`. A Plugin going into the organization's
+         * library marketplace is also refused with a 409 when one of its skills has the
+         * name of an organization skill (a skill an administrator uploaded for the whole
+         * organization in claude.ai): `error_code` `skill_name_taken`, with that name in
+         * `details.skill_name`; rename the skill, or remove the organization skill in
+         * claude.ai. A 503 with `error_code` `registration_pending` means the Plugin and
+         * its version were stored (their IDs are in `details`) but are not yet usable in
+         * claude.ai: do not retry the create (the retry would return `plugin_name_taken`);
+         * create a version on the stored Plugin instead, which completes it.
+         *
+         * For a worked example, see
+         * [Create a plugin](/docs/en/manage-claude/plugins-api#create-a-plugin) in the
+         * Plugins API guide.
+         *
+         * **Accepted credentials:** an Admin API key with the `write:plugins` scope.
+         *
+         * Every request must include the beta header
+         * `anthropic-beta: ce-plugins-2026-09-01`. A request without it returns `404`,
+         * exactly as if the endpoint did not exist. The Plugins API is in beta and is
+         * available to Claude Enterprise organizations only. It is not available to Claude
+         * Platform (Claude Console) organizations, or to organizations with HIPAA
+         * readiness enabled.
+         *
+         * @example
+         * ```ts
+         * const betaPlugin =
+         *   await client.beta.organization.plugins.create({
+         *     files: [fs.createReadStream('path/to/file')],
+         *   });
+         * ```
+         */
+        create(params, options) {
+            const { betas, ...body } = params;
+            return this._client.post('/v1/organizations/plugins?beta=true', (0, uploads_1.multipartFormRequestOptions)({
+                body,
+                ...options,
+                headers: (0, headers_1.buildHeaders)([
+                    { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
+                    options?.headers,
+                ]),
+            }, this._client));
+        }
+        /**
+         * Retrieve a Plugin by ID.
+         *
+         * **Accepted credentials:** an Admin API key with the `read:plugins` or
+         * `read:org_audit` scope, or a Compliance Access Key with the
+         * `read:compliance_org_data` scope.
+         *
+         * Every request must include the beta header
+         * `anthropic-beta: ce-plugins-2026-09-01`. A request without it returns `404`,
+         * exactly as if the endpoint did not exist. The Plugins API is in beta and is
+         * available to Claude Enterprise organizations only. It is not available to Claude
+         * Platform (Claude Console) organizations, or to organizations with HIPAA
+         * readiness enabled.
+         *
+         * @example
+         * ```ts
+         * const betaPlugin =
+         *   await client.beta.organization.plugins.retrieve(
+         *     'plugin_id',
+         *   );
+         * ```
+         */
+        retrieve(pluginID, params = {}, options) {
+            const { betas, ...query } = params ?? {};
+            return this._client.get((0, path_1.path) `/v1/organizations/plugins/${pluginID}?beta=true`, {
+                query,
+                ...options,
+                headers: (0, headers_1.buildHeaders)([
+                    { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
+                    options?.headers,
+                ]),
+            });
+        }
+        /**
+         * Change which stored version of an organization-owned Plugin is served to
+         * members, for example to roll back to an earlier one. This pins the served
+         * version: later uploads are stored but no longer change what is served, and
+         * pinning cannot currently be undone, here or in claude.ai.
+         *
+         * Pass the version as `served_version_id`: an earlier one to roll back, a later
+         * one to start serving a version that was stored without being served, or the one
+         * already served to pin it without changing what is served. No new version is
+         * created.
+         *
+         * When the organization has content scanning enabled, a version whose scan is
+         * still running is refused with a 409 (`error_code` `scan_pending`; retry once the
+         * scan finishes) and one whose scan failed, errored or reached no verdict with a
+         * 400 (`scan_failed`; a `warn` is accepted). When the Plugin is in the
+         * organization's library marketplace, a version other than the one served is also
+         * refused with a 409 when one of its skills has a name that an organization skill
+         * (one an administrator uploaded for the whole organization in claude.ai) has
+         * since taken: `error_code` `skill_name_taken`, with that name in
+         * `details.skill_name`. A member-owned Plugin cannot be updated here (403).
+         *
+         * This endpoint does not write installation settings; they are written at
+         * `/v1/organizations/plugins/{plugin_id}/installation_settings/{target}`.
+         *
+         * **Accepted credentials:** an Admin API key with the `write:plugins` scope.
+         *
+         * Every request must include the beta header
+         * `anthropic-beta: ce-plugins-2026-09-01`. A request without it returns `404`,
+         * exactly as if the endpoint did not exist. The Plugins API is in beta and is
+         * available to Claude Enterprise organizations only. It is not available to Claude
+         * Platform (Claude Console) organizations, or to organizations with HIPAA
+         * readiness enabled.
+         *
+         * @example
+         * ```ts
+         * const betaPlugin =
+         *   await client.beta.organization.plugins.update(
+         *     'plugin_id',
+         *     {
+         *       served_version_id:
+         *         'pluginver_01KaZmQpRsTuVwXyZ2b4c6d8',
+         *     },
+         *   );
+         * ```
+         */
+        update(pluginID, params, options) {
+            const { betas, ...body } = params;
+            return this._client.post((0, path_1.path) `/v1/organizations/plugins/${pluginID}?beta=true`, {
+                body,
+                ...options,
+                headers: (0, headers_1.buildHeaders)([
+                    { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
+                    options?.headers,
+                ]),
+            });
+        }
+        /**
+         * List the Plugins created under the organization, newest first: those in the
+         * organization's own plugin marketplaces and those in members' personal plugin
+         * marketplaces.
+         *
+         * Plugins in members' personal marketplaces are listed with the same detail as the
+         * organization's own, and their files can be downloaded through the version
+         * archive endpoint, which records each such download on the Compliance API
+         * activity feed.
+         *
+         * **Accepted credentials:** an Admin API key with the `read:plugins` or
+         * `read:org_audit` scope, or a Compliance Access Key with the
+         * `read:compliance_org_data` scope.
+         *
+         * Every request must include the beta header
+         * `anthropic-beta: ce-plugins-2026-09-01`. A request without it returns `404`,
+         * exactly as if the endpoint did not exist. The Plugins API is in beta and is
+         * available to Claude Enterprise organizations only. It is not available to Claude
+         * Platform (Claude Console) organizations, or to organizations with HIPAA
+         * readiness enabled.
+         *
+         * @example
+         * ```ts
+         * // Automatically fetches more pages as needed.
+         * for await (const betaPlugin of client.beta.organization.plugins.list()) {
+         *   // ...
+         * }
+         * ```
+         */
+        list(params = {}, options) {
+            const { betas, ...query } = params ?? {};
+            return this._client.getAPIList('/v1/organizations/plugins?beta=true', (pagination_1.PageCursor), {
+                query,
+                ...options,
+                headers: (0, headers_1.buildHeaders)([
+                    { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
+                    options?.headers,
+                ]),
+            });
+        }
+        /**
+         * Permanently delete a Plugin and every version it holds, exactly as when an
+         * administrator deletes it in claude.ai. The Plugin may belong to the organization
+         * or to a member, including a member who has since left the organization.
+         *
+         * An organization-owned Plugin's installation settings go with it; a member-owned
+         * Plugin's shares are withdrawn and its owner no longer has it.
+         *
+         * To take an organization-owned Plugin out of use reversibly, set its
+         * organization-wide installation setting to `not_available` instead (and remove or
+         * change any group settings, which override it for their members). Only a Plugin
+         * in a `manual` marketplace can be deleted here; one synchronized from a
+         * repository is removed by removing it from the repository (400).
+         *
+         * **Accepted credentials:** an Admin API key with the `write:plugins` scope.
+         *
+         * Every request must include the beta header
+         * `anthropic-beta: ce-plugins-2026-09-01`. A request without it returns `404`,
+         * exactly as if the endpoint did not exist. The Plugins API is in beta and is
+         * available to Claude Enterprise organizations only. It is not available to Claude
+         * Platform (Claude Console) organizations, or to organizations with HIPAA
+         * readiness enabled.
+         *
+         * @example
+         * ```ts
+         * const betaDeletedPlugin =
+         *   await client.beta.organization.plugins.delete(
+         *     'plugin_id',
+         *   );
+         * ```
+         */
+        delete(pluginID, params = {}, options) {
+            const { betas } = params ?? {};
+            return this._client.delete((0, path_1.path) `/v1/organizations/plugins/${pluginID}?beta=true`, {
+                ...options,
+                headers: (0, headers_1.buildHeaders)([
+                    { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
+                    options?.headers,
+                ]),
+            });
+        }
+    }
+    Plugins.Versions = versions_1.Versions;
+    Plugins.InstallationSettings = installation_settings_1.InstallationSettings;
+    Plugins.Shares = shares_1.Shares;
+    return Plugins;
+})();
+exports.Plugins = Plugins;
+//# sourceMappingURL=plugins.js.map
+
+/***/ }),
+
+/***/ 94275:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Shares = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+const headers_1 = __nccwpck_require__(60017);
+const path_1 = __nccwpck_require__(43002);
+class Shares extends resource_1.APIResource {
+    /**
+     * List the shares the owner of a member-owned Plugin has given — to every member
+     * of the organization, to an RBAC Group, or to one member — most recently granted
+     * first.
+     *
+     * Shares are read-only in this API: members give and withdraw them in claude.ai,
+     * and who gave a share is recorded on the Compliance API activity feed rather than
+     * on the share. An organization-owned Plugin has installation settings instead, so
+     * this path returns 404 for one.
+     *
+     * **Accepted credentials:** an Admin API key with the `read:plugins` or
+     * `read:org_audit` scope, or a Compliance Access Key with the
+     * `read:compliance_org_data` scope.
+     *
+     * Every request must include the beta header
+     * `anthropic-beta: ce-plugins-2026-09-01`. A request without it returns `404`,
+     * exactly as if the endpoint did not exist. The Plugins API is in beta and is
+     * available to Claude Enterprise organizations only. It is not available to Claude
+     * Platform (Claude Console) organizations, or to organizations with HIPAA
+     * readiness enabled.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaPluginShare of client.beta.organization.plugins.shares.list(
+     *   'plugin_id',
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(pluginID, params = {}, options) {
+        const { betas, ...query } = params ?? {};
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/plugins/${pluginID}/shares?beta=true`, (pagination_1.PageCursor), {
+            query,
+            ...options,
+            headers: (0, headers_1.buildHeaders)([
+                { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
+                options?.headers,
+            ]),
+        });
+    }
+}
+exports.Shares = Shares;
+//# sourceMappingURL=shares.js.map
+
+/***/ }),
+
+/***/ 69178:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Versions = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+const headers_1 = __nccwpck_require__(60017);
+const uploads_1 = __nccwpck_require__(59629);
+const path_1 = __nccwpck_require__(43002);
+class Versions extends resource_1.APIResource {
+    /**
+     * Add a version to an organization-owned Plugin by uploading the new version's
+     * files; it becomes the version served to members unless the Plugin's served
+     * version has been pinned.
+     *
+     * The upload is the same `multipart/form-data` as creating a Plugin: the version's
+     * files (`files`, each part sent as `files[]`) and optional `release_notes`. The
+     * uploaded manifest's `name` must equal the Plugin's `name`. Returns the stored
+     * version; read the Plugin back to see which version it serves.
+     *
+     * Only a Plugin in a `manual` marketplace takes uploads; a Plugin synchronized
+     * from a repository gets its versions from the repository. When the Plugin is in
+     * the organization's library marketplace, a version that adds a skill with the
+     * name of an organization skill (a skill an administrator uploaded for the whole
+     * organization in claude.ai) is refused with a 409: `error_code`
+     * `skill_name_taken`, with that name in `details.skill_name`. A 503 with
+     * `error_code` `registration_pending` means the version was stored but is not yet
+     * usable; a later version create on the Plugin completes it.
+     *
+     * For a worked example, see
+     * [Create a version](/docs/en/manage-claude/plugins-api#create-a-version) in the
+     * Plugins API guide.
+     *
+     * **Accepted credentials:** an Admin API key with the `write:plugins` scope.
+     *
+     * Every request must include the beta header
+     * `anthropic-beta: ce-plugins-2026-09-01`. A request without it returns `404`,
+     * exactly as if the endpoint did not exist. The Plugins API is in beta and is
+     * available to Claude Enterprise organizations only. It is not available to Claude
+     * Platform (Claude Console) organizations, or to organizations with HIPAA
+     * readiness enabled.
+     *
+     * @example
+     * ```ts
+     * const betaPluginVersion =
+     *   await client.beta.organization.plugins.versions.create(
+     *     'plugin_id',
+     *     { files: [fs.createReadStream('path/to/file')] },
+     *   );
+     * ```
+     */
+    create(pluginID, params, options) {
+        const { betas, ...body } = params;
+        return this._client.post((0, path_1.path) `/v1/organizations/plugins/${pluginID}/versions?beta=true`, (0, uploads_1.multipartFormRequestOptions)({
+            body,
+            ...options,
+            headers: (0, headers_1.buildHeaders)([
+                { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
+                options?.headers,
+            ]),
+        }, this._client));
+    }
+    /**
+     * Retrieve one version of a Plugin by its ID, or the Plugin's newest version.
+     *
+     * **Accepted credentials:** an Admin API key with the `read:plugins` or
+     * `read:org_audit` scope, or a Compliance Access Key with the
+     * `read:compliance_org_data` scope.
+     *
+     * Every request must include the beta header
+     * `anthropic-beta: ce-plugins-2026-09-01`. A request without it returns `404`,
+     * exactly as if the endpoint did not exist. The Plugins API is in beta and is
+     * available to Claude Enterprise organizations only. It is not available to Claude
+     * Platform (Claude Console) organizations, or to organizations with HIPAA
+     * readiness enabled.
+     *
+     * @example
+     * ```ts
+     * const betaPluginVersion =
+     *   await client.beta.organization.plugins.versions.retrieve(
+     *     'version',
+     *     { plugin_id: 'plugin_id' },
+     *   );
+     * ```
+     */
+    retrieve(version, params, options) {
+        const { plugin_id, betas, ...query } = params;
+        return this._client.get((0, path_1.path) `/v1/organizations/plugins/${plugin_id}/versions/${version}?beta=true`, {
+            query,
+            ...options,
+            headers: (0, headers_1.buildHeaders)([
+                { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
+                options?.headers,
+            ]),
+        });
+    }
+    /**
+     * List a Plugin's versions, newest first.
+     *
+     * The first item of the first page is the version the Plugin's `latest_version_id`
+     * refers to.
+     *
+     * **Accepted credentials:** an Admin API key with the `read:plugins` or
+     * `read:org_audit` scope, or a Compliance Access Key with the
+     * `read:compliance_org_data` scope.
+     *
+     * Every request must include the beta header
+     * `anthropic-beta: ce-plugins-2026-09-01`. A request without it returns `404`,
+     * exactly as if the endpoint did not exist. The Plugins API is in beta and is
+     * available to Claude Enterprise organizations only. It is not available to Claude
+     * Platform (Claude Console) organizations, or to organizations with HIPAA
+     * readiness enabled.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaPluginVersion of client.beta.organization.plugins.versions.list(
+     *   'plugin_id',
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(pluginID, params = {}, options) {
+        const { betas, ...query } = params ?? {};
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/plugins/${pluginID}/versions?beta=true`, (pagination_1.PageCursor), {
+            query,
+            ...options,
+            headers: (0, headers_1.buildHeaders)([
+                { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
+                options?.headers,
+            ]),
+        });
+    }
+    /**
+     * Download one version's `.zip` archive, exactly as stored. Each download of a
+     * Plugin from a member's personal plugin marketplace is recorded on the Compliance
+     * API activity feed.
+     *
+     * The response body is the archive (`Content-Type: application/zip`), sent as an
+     * attachment whose filename is derived from the Plugin's name; name saved files
+     * from the IDs in the request path, since that filename is not unique.
+     *
+     * **Accepted credentials:** an Admin API key with the `read:plugins` or
+     * `read:org_audit` scope, or a Compliance Access Key with the
+     * `read:compliance_org_data` scope.
+     *
+     * Every read scope above (`read:plugins`, `read:org_audit`, and
+     * `read:compliance_org_data`) can download the files of plugins in members'
+     * personal marketplaces, including files that claude.ai's admin settings do not
+     * show, and a `read:org_audit` or `read:compliance_org_data` key created for all
+     * of your parent organization's linked organizations can do this in any
+     * organization under it that has access to this API, by passing `organization_id`.
+     * Each such download records a `claude_plugin_archive_accessed` event on the
+     * Compliance API activity feed, identifying the key, the plugin, the version, and
+     * the member. Downloads of organization-owned plugins are not recorded.
+     *
+     * Every request must include the beta header
+     * `anthropic-beta: ce-plugins-2026-09-01`. A request without it returns `404`,
+     * exactly as if the endpoint did not exist. The Plugins API is in beta and is
+     * available to Claude Enterprise organizations only. It is not available to Claude
+     * Platform (Claude Console) organizations, or to organizations with HIPAA
+     * readiness enabled.
+     *
+     * @example
+     * ```ts
+     * const response =
+     *   await client.beta.organization.plugins.versions.download(
+     *     'version',
+     *     { plugin_id: 'plugin_id' },
+     *   );
+     *
+     * const content = await response.blob();
+     * console.log(content);
+     * ```
+     */
+    download(version, params, options) {
+        const { plugin_id, betas, ...query } = params;
+        return this._client.get((0, path_1.path) `/v1/organizations/plugins/${plugin_id}/versions/${version}/content?beta=true`, {
+            query,
+            ...options,
+            headers: (0, headers_1.buildHeaders)([
+                {
+                    'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString(),
+                    Accept: 'application/binary',
+                },
+                options?.headers,
+            ]),
+            __binaryResponse: true,
+        });
+    }
+}
+exports.Versions = Versions;
+//# sourceMappingURL=versions.js.map
 
 /***/ }),
 
@@ -49465,6 +51438,345 @@ class RateLimits extends resource_1.APIResource {
 }
 exports.RateLimits = RateLimits;
 //# sourceMappingURL=rate-limits.js.map
+
+/***/ }),
+
+/***/ 9456:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.RBACGroups = exports.Members = void 0;
+var members_1 = __nccwpck_require__(32871);
+Object.defineProperty(exports, "Members", ({ enumerable: true, get: function () { return members_1.Members; } }));
+var rbac_groups_1 = __nccwpck_require__(27207);
+Object.defineProperty(exports, "RBACGroups", ({ enumerable: true, get: function () { return rbac_groups_1.RBACGroups; } }));
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
+/***/ 32871:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Members = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+const path_1 = __nccwpck_require__(43002);
+class Members extends resource_1.APIResource {
+    /**
+     * List members of an RBAC Group.
+     *
+     * The RBAC Groups API is available to Claude Enterprise organizations only.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaRBACGroupMember of client.beta.organization.rbacGroups.members.list(
+     *   'rbac_group_id',
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(rbacGroupID, query = {}, options) {
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/rbac_groups/${rbacGroupID}/members?beta=true`, (pagination_1.PageCursor), { query, ...options });
+    }
+    /**
+     * Add a User to an RBAC Group. Membership of groups provisioned by an identity
+     * provider (source type `"scim"`) cannot be modified via the API while an
+     * organization in the tenant uses SCIM provisioning.
+     *
+     * The RBAC Groups API is available to Claude Enterprise organizations only.
+     *
+     * @example
+     * ```ts
+     * const betaRBACGroupMember =
+     *   await client.beta.organization.rbacGroups.members.add(
+     *     'rbac_group_id',
+     *     { user_id: 'user_01WCz1FkmYMm4gnmykNKUu3Q' },
+     *   );
+     * ```
+     */
+    add(rbacGroupID, body, options) {
+        return this._client.post((0, path_1.path) `/v1/organizations/rbac_groups/${rbacGroupID}/members?beta=true`, {
+            body,
+            ...options,
+        });
+    }
+    /**
+     * Remove a User from an RBAC Group. Membership of groups provisioned by an
+     * identity provider (source type `"scim"`) cannot be modified via the API while an
+     * organization in the tenant uses SCIM provisioning.
+     *
+     * The RBAC Groups API is available to Claude Enterprise organizations only.
+     *
+     * @example
+     * ```ts
+     * const member =
+     *   await client.beta.organization.rbacGroups.members.remove(
+     *     'user_id',
+     *     { rbac_group_id: 'rbac_group_id' },
+     *   );
+     * ```
+     */
+    remove(userID, params, options) {
+        const { rbac_group_id } = params;
+        return this._client.delete((0, path_1.path) `/v1/organizations/rbac_groups/${rbac_group_id}/members/${userID}?beta=true`, options);
+    }
+}
+exports.Members = Members;
+//# sourceMappingURL=members.js.map
+
+/***/ }),
+
+/***/ 27207:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.RBACGroups = void 0;
+const tslib_1 = __nccwpck_require__(14839);
+const resource_1 = __nccwpck_require__(82941);
+const MembersAPI = tslib_1.__importStar(__nccwpck_require__(32871));
+const members_1 = __nccwpck_require__(32871);
+const pagination_1 = __nccwpck_require__(27117);
+const path_1 = __nccwpck_require__(43002);
+var RBACGroups = /* @__PURE__ */ (() => {
+    class RBACGroups extends resource_1.APIResource {
+        constructor() {
+            super(...arguments);
+            this.members = new MembersAPI.Members(this._client);
+        }
+        /**
+         * Create an RBAC Group in the Claude Enterprise tenant. Groups created via the API
+         * have source type `"direct"`.
+         *
+         * The RBAC Groups API is available to Claude Enterprise organizations only.
+         *
+         * @example
+         * ```ts
+         * const betaRBACGroup =
+         *   await client.beta.organization.rbacGroups.create({
+         *     name: 'Engineering',
+         *   });
+         * ```
+         */
+        create(body, options) {
+            return this._client.post('/v1/organizations/rbac_groups?beta=true', { body, ...options });
+        }
+        /**
+         * Retrieve an RBAC Group by ID.
+         *
+         * The RBAC Groups API is available to Claude Enterprise organizations only.
+         *
+         * @example
+         * ```ts
+         * const betaRBACGroup =
+         *   await client.beta.organization.rbacGroups.retrieve(
+         *     'rbac_group_id',
+         *   );
+         * ```
+         */
+        retrieve(rbacGroupID, options) {
+            return this._client.get((0, path_1.path) `/v1/organizations/rbac_groups/${rbacGroupID}?beta=true`, options);
+        }
+        /**
+         * Update an RBAC Group's name. Groups provisioned by an identity provider (source
+         * type `"scim"`) cannot be modified via the API while an organization in the
+         * tenant uses SCIM provisioning.
+         *
+         * The RBAC Groups API is available to Claude Enterprise organizations only.
+         *
+         * @example
+         * ```ts
+         * const betaRBACGroup =
+         *   await client.beta.organization.rbacGroups.update(
+         *     'rbac_group_id',
+         *   );
+         * ```
+         */
+        update(rbacGroupID, body, options) {
+            return this._client.post((0, path_1.path) `/v1/organizations/rbac_groups/${rbacGroupID}?beta=true`, {
+                body,
+                ...options,
+            });
+        }
+        /**
+         * List RBAC Groups in the Claude Enterprise tenant.
+         *
+         * The RBAC Groups API is available to Claude Enterprise organizations only.
+         *
+         * @example
+         * ```ts
+         * // Automatically fetches more pages as needed.
+         * for await (const betaRBACGroup of client.beta.organization.rbacGroups.list()) {
+         *   // ...
+         * }
+         * ```
+         */
+        list(query = {}, options) {
+            return this._client.getAPIList('/v1/organizations/rbac_groups?beta=true', (pagination_1.PageCursor), {
+                query,
+                ...options,
+            });
+        }
+        /**
+         * Delete an RBAC Group. Groups provisioned by an identity provider (source type
+         * `"scim"`) cannot be deleted via the API while an organization in the tenant uses
+         * SCIM provisioning.
+         *
+         * The RBAC Groups API is available to Claude Enterprise organizations only.
+         *
+         * @example
+         * ```ts
+         * const rbacGroup =
+         *   await client.beta.organization.rbacGroups.delete(
+         *     'rbac_group_id',
+         *   );
+         * ```
+         */
+        delete(rbacGroupID, options) {
+            return this._client.delete((0, path_1.path) `/v1/organizations/rbac_groups/${rbacGroupID}?beta=true`, options);
+        }
+    }
+    RBACGroups.Members = members_1.Members;
+    return RBACGroups;
+})();
+exports.RBACGroups = RBACGroups;
+//# sourceMappingURL=rbac-groups.js.map
+
+/***/ }),
+
+/***/ 68465:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.RBACRoles = exports.Permissions = void 0;
+var permissions_1 = __nccwpck_require__(37629);
+Object.defineProperty(exports, "Permissions", ({ enumerable: true, get: function () { return permissions_1.Permissions; } }));
+var rbac_roles_1 = __nccwpck_require__(20193);
+Object.defineProperty(exports, "RBACRoles", ({ enumerable: true, get: function () { return rbac_roles_1.RBACRoles; } }));
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
+/***/ 37629:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Permissions = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+const path_1 = __nccwpck_require__(43002);
+class Permissions extends resource_1.APIResource {
+    /**
+     * List the permissions an RBAC Role grants.
+     *
+     * The RBAC Roles API is available to Claude Enterprise organizations only.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaRBACRolePermission of client.beta.organization.rbacRoles.permissions.list(
+     *   'rbac_role_id',
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(rbacRoleID, query = {}, options) {
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/rbac_roles/${rbacRoleID}/permissions?beta=true`, (pagination_1.PageCursor), { query, ...options });
+    }
+}
+exports.Permissions = Permissions;
+//# sourceMappingURL=permissions.js.map
+
+/***/ }),
+
+/***/ 20193:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.RBACRoles = void 0;
+const tslib_1 = __nccwpck_require__(14839);
+const resource_1 = __nccwpck_require__(82941);
+const PermissionsAPI = tslib_1.__importStar(__nccwpck_require__(37629));
+const permissions_1 = __nccwpck_require__(37629);
+const pagination_1 = __nccwpck_require__(27117);
+const path_1 = __nccwpck_require__(43002);
+var RBACRoles = /* @__PURE__ */ (() => {
+    class RBACRoles extends resource_1.APIResource {
+        constructor() {
+            super(...arguments);
+            this.permissions = new PermissionsAPI.Permissions(this._client);
+        }
+        /**
+         * Retrieve an RBAC Role by ID.
+         *
+         * The RBAC Roles API is available to Claude Enterprise organizations only.
+         *
+         * @example
+         * ```ts
+         * const betaRBACRole =
+         *   await client.beta.organization.rbacRoles.retrieve(
+         *     'rbac_role_id',
+         *   );
+         * ```
+         */
+        retrieve(rbacRoleID, options) {
+            return this._client.get((0, path_1.path) `/v1/organizations/rbac_roles/${rbacRoleID}?beta=true`, options);
+        }
+        /**
+         * List RBAC Roles in the organization.
+         *
+         * The RBAC Roles API is available to Claude Enterprise organizations only.
+         *
+         * @example
+         * ```ts
+         * // Automatically fetches more pages as needed.
+         * for await (const betaRBACRole of client.beta.organization.rbacRoles.list()) {
+         *   // ...
+         * }
+         * ```
+         */
+        list(query = {}, options) {
+            return this._client.getAPIList('/v1/organizations/rbac_roles?beta=true', (pagination_1.PageCursor), {
+                query,
+                ...options,
+            });
+        }
+    }
+    RBACRoles.Permissions = permissions_1.Permissions;
+    return RBACRoles;
+})();
+exports.RBACRoles = RBACRoles;
+//# sourceMappingURL=rbac-roles.js.map
+
+/***/ }),
+
+/***/ 52379:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Workspaces = exports.ServiceAccounts = void 0;
+var service_accounts_1 = __nccwpck_require__(5693);
+Object.defineProperty(exports, "ServiceAccounts", ({ enumerable: true, get: function () { return service_accounts_1.ServiceAccounts; } }));
+var workspaces_1 = __nccwpck_require__(68349);
+Object.defineProperty(exports, "Workspaces", ({ enumerable: true, get: function () { return workspaces_1.Workspaces; } }));
+//# sourceMappingURL=index.js.map
 
 /***/ }),
 
@@ -49782,6 +52094,263 @@ exports.Workspaces = Workspaces;
 
 /***/ }),
 
+/***/ 54683:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Effective = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+class Effective extends resource_1.APIResource {
+    /**
+     * List each member's effective spend limit and period-to-date spend.
+     *
+     * Returns one row per (member, period) the member resolves a spend limit for, with
+     * the `source` scope the spend limit was inherited from. Paginates by member, so a
+     * member's periods never split across pages.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaSpendSummary of client.beta.organization.spendLimits.effective.list()) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(query = {}, options) {
+        return this._client.getAPIList('/v1/organizations/spend_limits/effective?beta=true', (pagination_1.PageCursor), { query, ...options });
+    }
+}
+exports.Effective = Effective;
+//# sourceMappingURL=effective.js.map
+
+/***/ }),
+
+/***/ 23179:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.IncreaseRequests = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+const path_1 = __nccwpck_require__(43002);
+class IncreaseRequests extends resource_1.APIResource {
+    /**
+     * Retrieve a spend limit increase request.
+     *
+     * While `pending`, the response includes a live `spend_summary` for the requester
+     * at the request's period.
+     *
+     * @example
+     * ```ts
+     * const betaSpendLimitIncreaseRequest =
+     *   await client.beta.organization.spendLimits.increaseRequests.retrieve(
+     *     'spend_limit_increase_request_id',
+     *   );
+     * ```
+     */
+    retrieve(spendLimitIncreaseRequestID, options) {
+        return this._client.get((0, path_1.path) `/v1/organizations/spend_limit_increase_requests/${spendLimitIncreaseRequestID}?beta=true`, options);
+    }
+    /**
+     * List spend limit increase requests, most recent first.
+     *
+     * Pending requests include a live `spend_summary` for the requester. Requests
+     * whose requester is no longer a member are excluded.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaSpendLimitIncreaseRequest of client.beta.organization.spendLimits.increaseRequests.list()) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(query = {}, options) {
+        return this._client.getAPIList('/v1/organizations/spend_limit_increase_requests?beta=true', (pagination_1.PageCursor), { query, ...options });
+    }
+    /**
+     * Approve a pending spend limit increase request.
+     *
+     * Writes a per-user spend limit at `amount` for the requester and transitions the
+     * request to `approved`. `period` defaults to the period the member was blocked
+     * on. Anthropic emails the requester unless `suppress_notification` is set.
+     *
+     * @example
+     * ```ts
+     * const response =
+     *   await client.beta.organization.spendLimits.increaseRequests.approve(
+     *     'spend_limit_increase_request_id',
+     *     { amount: '50000' },
+     *   );
+     * ```
+     */
+    approve(spendLimitIncreaseRequestID, body, options) {
+        return this._client.post((0, path_1.path) `/v1/organizations/spend_limit_increase_requests/${spendLimitIncreaseRequestID}/approve?beta=true`, { body, ...options });
+    }
+    /**
+     * Deny a pending spend limit increase request.
+     *
+     * Idempotent on `denied`; denying an already-`approved` request returns 400.
+     * Anthropic emails the requester unless `suppress_notification` is set.
+     *
+     * @example
+     * ```ts
+     * const betaSpendLimitIncreaseRequest =
+     *   await client.beta.organization.spendLimits.increaseRequests.deny(
+     *     'spend_limit_increase_request_id',
+     *   );
+     * ```
+     */
+    deny(spendLimitIncreaseRequestID, body, options) {
+        return this._client.post((0, path_1.path) `/v1/organizations/spend_limit_increase_requests/${spendLimitIncreaseRequestID}/deny?beta=true`, { body, ...options });
+    }
+}
+exports.IncreaseRequests = IncreaseRequests;
+//# sourceMappingURL=increase-requests.js.map
+
+/***/ }),
+
+/***/ 91226:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.SpendLimits = exports.IncreaseRequests = exports.Effective = void 0;
+var effective_1 = __nccwpck_require__(54683);
+Object.defineProperty(exports, "Effective", ({ enumerable: true, get: function () { return effective_1.Effective; } }));
+var increase_requests_1 = __nccwpck_require__(23179);
+Object.defineProperty(exports, "IncreaseRequests", ({ enumerable: true, get: function () { return increase_requests_1.IncreaseRequests; } }));
+var spend_limits_1 = __nccwpck_require__(82359);
+Object.defineProperty(exports, "SpendLimits", ({ enumerable: true, get: function () { return spend_limits_1.SpendLimits; } }));
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
+/***/ 82359:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.SpendLimits = void 0;
+const tslib_1 = __nccwpck_require__(14839);
+const resource_1 = __nccwpck_require__(82941);
+const EffectiveAPI = tslib_1.__importStar(__nccwpck_require__(54683));
+const effective_1 = __nccwpck_require__(54683);
+const IncreaseRequestsAPI = tslib_1.__importStar(__nccwpck_require__(23179));
+const increase_requests_1 = __nccwpck_require__(23179);
+const pagination_1 = __nccwpck_require__(27117);
+const headers_1 = __nccwpck_require__(60017);
+const path_1 = __nccwpck_require__(43002);
+var SpendLimits = /* @__PURE__ */ (() => {
+    class SpendLimits extends resource_1.APIResource {
+        constructor() {
+            super(...arguments);
+            this.effective = new EffectiveAPI.Effective(this._client);
+            this.increaseRequests = new IncreaseRequestsAPI.IncreaseRequests(this._client);
+        }
+        /**
+         * Retrieve a spend limit by ID.
+         *
+         * @example
+         * ```ts
+         * const betaSpendLimit =
+         *   await client.beta.organization.spendLimits.retrieve(
+         *     'spend_limit_id',
+         *   );
+         * ```
+         */
+        retrieve(spendLimitID, options) {
+            return this._client.get((0, path_1.path) `/v1/organizations/spend_limits/${spendLimitID}?beta=true`, options);
+        }
+        /**
+         * List the organization's spend limits.
+         *
+         * A Claude Console organization's limits come in an order that is stable across
+         * pages. A Claude Enterprise organization's are grouped by scope type, in the
+         * order `organization`, `seat_tier`, `rbac_group`, `organization_service`, `user`;
+         * within a type they come in a fixed order that is not creation order.
+         *
+         * @example
+         * ```ts
+         * // Automatically fetches more pages as needed.
+         * for await (const betaSpendLimit of client.beta.organization.spendLimits.list()) {
+         *   // ...
+         * }
+         * ```
+         */
+        list(params = {}, options) {
+            const { betas, ...query } = params ?? {};
+            return this._client.getAPIList('/v1/organizations/spend_limits?beta=true', (pagination_1.PageCursor), {
+                query,
+                ...options,
+                headers: (0, headers_1.buildHeaders)([
+                    { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
+                    options?.headers,
+                ]),
+            });
+        }
+        /**
+         * Delete a spend limit.
+         *
+         * For a Claude Enterprise organization, this deletes a per-user override, and the
+         * member falls back to any inherited spend limit at that period. Its seat-tier,
+         * group, and organization-level rows cannot be deleted via this endpoint. A Claude
+         * Console organization deletes its organization and workspace limits. Deleting
+         * them through the API is in an early access preview.
+         *
+         * @example
+         * ```ts
+         * const spendLimit =
+         *   await client.beta.organization.spendLimits.delete(
+         *     'spend_limit_id',
+         *   );
+         * ```
+         */
+        delete(spendLimitID, options) {
+            return this._client.delete((0, path_1.path) `/v1/organizations/spend_limits/${spendLimitID}?beta=true`, options);
+        }
+        /**
+         * Set a spend limit.
+         *
+         * Upsert keyed on (scope, period): setting a limit that already exists overwrites
+         * it in place. A Claude Enterprise organization sets `user` limits. Its seat-tier,
+         * group, and organization-level defaults are configured in claude.ai. A Claude
+         * Console organization sets `organization` and `workspace` limits, which are
+         * monthly and always carry an amount. Setting those limits is in an early access
+         * preview. To request access, contact your Anthropic account team.
+         *
+         * @example
+         * ```ts
+         * const betaSpendLimit =
+         *   await client.beta.organization.spendLimits.set({
+         *     amount: '50000',
+         *     scope: {
+         *       type: 'user',
+         *       user_id: 'user_01WCz1FkmYMm4gnmykNKUu3Q',
+         *     },
+         *   });
+         * ```
+         */
+        set(body, options) {
+            return this._client.post('/v1/organizations/spend_limits?beta=true', { body, ...options });
+        }
+    }
+    SpendLimits.Effective = effective_1.Effective;
+    SpendLimits.IncreaseRequests = increase_requests_1.IncreaseRequests;
+    return SpendLimits;
+})();
+exports.SpendLimits = SpendLimits;
+//# sourceMappingURL=spend-limits.js.map
+
+/***/ }),
+
 /***/ 11184:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -49852,6 +52421,25 @@ class Users extends resource_1.APIResource {
 }
 exports.Users = Users;
 //# sourceMappingURL=users.js.map
+
+/***/ }),
+
+/***/ 93755:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Workspaces = exports.ServiceAccounts = exports.RateLimits = exports.Members = void 0;
+var members_1 = __nccwpck_require__(74504);
+Object.defineProperty(exports, "Members", ({ enumerable: true, get: function () { return members_1.Members; } }));
+var rate_limits_1 = __nccwpck_require__(44398);
+Object.defineProperty(exports, "RateLimits", ({ enumerable: true, get: function () { return rate_limits_1.RateLimits; } }));
+var service_accounts_1 = __nccwpck_require__(35901);
+Object.defineProperty(exports, "ServiceAccounts", ({ enumerable: true, get: function () { return service_accounts_1.ServiceAccounts; } }));
+var workspaces_1 = __nccwpck_require__(70013);
+Object.defineProperty(exports, "Workspaces", ({ enumerable: true, get: function () { return workspaces_1.Workspaces; } }));
+//# sourceMappingURL=index.js.map
 
 /***/ }),
 
@@ -49975,11 +52563,13 @@ const pagination_1 = __nccwpck_require__(27117);
 const path_1 = __nccwpck_require__(43002);
 class RateLimits extends resource_1.APIResource {
     /**
-     * List rate-limit overrides configured for a workspace.
+     * List a workspace's rate limits.
      *
-     * Returns only the groups and limiter types that have a workspace-level override.
-     * Groups without overrides inherit the organization limits and are not listed; use
-     * `GET /v1/organizations/rate_limits` to see those.
+     * By default, returns only the groups and limiter types that have a
+     * workspace-level override. With `include_inherited=true`, returns every group
+     * with organization-level limits the workspace can see, listing for each the
+     * values it inherits from the organization as well as its own overrides. Each
+     * value's `source` says which it is.
      *
      * When `limit` is omitted, every matching entry is returned in a single page; when
      * `limit` truncates the result, follow `next_page` to fetch the remaining entries.
@@ -50457,6 +53047,25 @@ Object.defineProperty(exports, "SessionToolRunner", ({ enumerable: true, get: fu
 
 /***/ }),
 
+/***/ 51010:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Threads = exports.Sessions = exports.Resources = exports.Events = void 0;
+var events_1 = __nccwpck_require__(25513);
+Object.defineProperty(exports, "Events", ({ enumerable: true, get: function () { return events_1.Events; } }));
+var resources_1 = __nccwpck_require__(78499);
+Object.defineProperty(exports, "Resources", ({ enumerable: true, get: function () { return resources_1.Resources; } }));
+var sessions_1 = __nccwpck_require__(37749);
+Object.defineProperty(exports, "Sessions", ({ enumerable: true, get: function () { return sessions_1.Sessions; } }));
+var index_1 = __nccwpck_require__(60112);
+Object.defineProperty(exports, "Threads", ({ enumerable: true, get: function () { return index_1.Threads; } }));
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
 /***/ 78499:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -50868,6 +53477,21 @@ exports.Events = Events;
 
 /***/ }),
 
+/***/ 60112:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Threads = exports.Events = void 0;
+var events_1 = __nccwpck_require__(18147);
+Object.defineProperty(exports, "Events", ({ enumerable: true, get: function () { return events_1.Events; } }));
+var threads_1 = __nccwpck_require__(26017);
+Object.defineProperty(exports, "Threads", ({ enumerable: true, get: function () { return threads_1.Threads; } }));
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
 /***/ 26017:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -50971,6 +53595,21 @@ var Threads = /* @__PURE__ */ (() => {
 })();
 exports.Threads = Threads;
 //# sourceMappingURL=threads.js.map
+
+/***/ }),
+
+/***/ 80941:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Versions = exports.Skills = void 0;
+var skills_1 = __nccwpck_require__(89227);
+Object.defineProperty(exports, "Skills", ({ enumerable: true, get: function () { return skills_1.Skills; } }));
+var versions_1 = __nccwpck_require__(79792);
+Object.defineProperty(exports, "Versions", ({ enumerable: true, get: function () { return versions_1.Versions; } }));
+//# sourceMappingURL=index.js.map
 
 /***/ }),
 
@@ -51391,6 +54030,21 @@ class Certificates extends resource_1.APIResource {
 }
 exports.Certificates = Certificates;
 //# sourceMappingURL=certificates.js.map
+
+/***/ }),
+
+/***/ 2666:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Tunnels = exports.Certificates = void 0;
+var certificates_1 = __nccwpck_require__(12328);
+Object.defineProperty(exports, "Certificates", ({ enumerable: true, get: function () { return certificates_1.Certificates; } }));
+var tunnels_1 = __nccwpck_require__(5109);
+Object.defineProperty(exports, "Tunnels", ({ enumerable: true, get: function () { return tunnels_1.Tunnels; } }));
+//# sourceMappingURL=index.js.map
 
 /***/ }),
 
@@ -51945,6 +54599,21 @@ exports.Credentials = Credentials;
 
 /***/ }),
 
+/***/ 61130:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Vaults = exports.Credentials = void 0;
+var credentials_1 = __nccwpck_require__(37024);
+Object.defineProperty(exports, "Credentials", ({ enumerable: true, get: function () { return credentials_1.Credentials; } }));
+var vaults_1 = __nccwpck_require__(50733);
+Object.defineProperty(exports, "Vaults", ({ enumerable: true, get: function () { return vaults_1.Vaults; } }));
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
 /***/ 50733:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -52325,7 +54994,7 @@ exports.Files = Files;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.Skills = exports.Models = exports.Messages = exports.Files = exports.Completions = exports.Beta = void 0;
+exports.Skills = exports.Organization = exports.Models = exports.Messages = exports.Files = exports.Completions = exports.Beta = void 0;
 const tslib_1 = __nccwpck_require__(14839);
 tslib_1.__exportStar(__nccwpck_require__(44542), exports);
 var beta_1 = __nccwpck_require__(90846);
@@ -52338,6 +55007,8 @@ var messages_1 = __nccwpck_require__(17442);
 Object.defineProperty(exports, "Messages", ({ enumerable: true, get: function () { return messages_1.Messages; } }));
 var models_1 = __nccwpck_require__(19317);
 Object.defineProperty(exports, "Models", ({ enumerable: true, get: function () { return models_1.Models; } }));
+var organization_1 = __nccwpck_require__(61708);
+Object.defineProperty(exports, "Organization", ({ enumerable: true, get: function () { return organization_1.Organization; } }));
 var skills_1 = __nccwpck_require__(28022);
 Object.defineProperty(exports, "Skills", ({ enumerable: true, get: function () { return skills_1.Skills; } }));
 //# sourceMappingURL=index.js.map
@@ -52611,7 +55282,7 @@ var Messages = /* @__PURE__ */ (() => {
          * @example
          * ```ts
          * const message = await client.messages.parse({
-         *   model: 'claude-sonnet-4-5-20250929',
+         *   model: 'claude-sonnet-5-5',
          *   max_tokens: 1024,
          *   messages: [{ role: 'user', content: 'What is 2+2?' }],
          *   output_config: {
@@ -52634,7 +55305,7 @@ var Messages = /* @__PURE__ */ (() => {
          * @example
          * ```ts
          * const stream = client.messages.stream({
-         *   model: 'claude-sonnet-4-5-20250929',
+         *   model: 'claude-sonnet-5-5',
          *   max_tokens: 1024,
          *   messages: [{ role: 'user', content: 'What is 2+2?' }],
          *   output_config: {
@@ -52686,7 +55357,10 @@ var Messages = /* @__PURE__ */ (() => {
     return Messages;
 })();
 exports.Messages = Messages;
-const DEPRECATED_MODELS = {};
+const DEPRECATED_MODELS = {
+    'claude-sonnet-4-5': 'November 30th, 2026',
+    'claude-sonnet-4-5-20250929': 'November 30th, 2026',
+};
 const MODELS_TO_WARN_WITH_THINKING_ENABLED = ['claude-mythos-preview', 'claude-opus-4-6'];
 //# sourceMappingURL=messages.js.map
 
@@ -52759,6 +55433,1625 @@ class Models extends resource_1.APIResource {
 }
 exports.Models = Models;
 //# sourceMappingURL=models.js.map
+
+/***/ }),
+
+/***/ 48484:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.APIKeys = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+const path_1 = __nccwpck_require__(43002);
+class APIKeys extends resource_1.APIResource {
+    /**
+     * Get API Key
+     *
+     * @example
+     * ```ts
+     * const apiKey = await client.organization.apiKeys.retrieve(
+     *   'api_key_id',
+     * );
+     * ```
+     */
+    retrieve(apiKeyID, options) {
+        return this._client.get((0, path_1.path) `/v1/organizations/api_keys/${apiKeyID}`, options);
+    }
+    /**
+     * Update API Key
+     *
+     * @example
+     * ```ts
+     * const apiKey = await client.organization.apiKeys.update(
+     *   'api_key_id',
+     * );
+     * ```
+     */
+    update(apiKeyID, body, options) {
+        return this._client.post((0, path_1.path) `/v1/organizations/api_keys/${apiKeyID}`, { body, ...options });
+    }
+    /**
+     * List API Keys
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const apiKey of client.organization.apiKeys.list()) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(query = {}, options) {
+        return this._client.getAPIList('/v1/organizations/api_keys', (pagination_1.Page), { query, ...options });
+    }
+}
+exports.APIKeys = APIKeys;
+//# sourceMappingURL=api-keys.js.map
+
+/***/ }),
+
+/***/ 85756:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ComplianceSettings = void 0;
+const resource_1 = __nccwpck_require__(82941);
+class ComplianceSettings extends resource_1.APIResource {
+    /**
+     * Retrieve your organization's Compliance Settings.
+     *
+     * Compliance Settings is a singleton resource: there is exactly one per
+     * organization, addressed without an identifier. The `state` field reflects
+     * whether the Compliance API is enabled. An organization with a parent
+     * organization reads the state inherited from the parent's configuration.
+     *
+     * @example
+     * ```ts
+     * const organizationComplianceSettings =
+     *   await client.organization.complianceSettings.retrieve();
+     * ```
+     */
+    retrieve(options) {
+        return this._client.get('/v1/organizations/compliance_settings', options);
+    }
+    /**
+     * Update your organization's Compliance Settings.
+     *
+     * Setting `state` to `enabled` turns on the Compliance API and begins capturing
+     * organization activity events. Setting it to `disabled` turns both off. `state`
+     * reflects whether the Compliance API is enabled.
+     *
+     * A request that sets `state` to its current value succeeds and leaves the
+     * resource unchanged. A `disabled` request stays in effect until a later `enabled`
+     * request or the organization's next provisioning action that enables Access
+     * Transparency: enabling Access Transparency also enables the Compliance API,
+     * which serves its activity events, so such provisioning (including re-runs)
+     * re-enables the Compliance API even after a `disabled` request. Automated
+     * provisioning never disables compliance settings.
+     *
+     * @example
+     * ```ts
+     * const organizationComplianceSettings =
+     *   await client.organization.complianceSettings.update({
+     *     state: { type: 'enabled' },
+     *   });
+     * ```
+     */
+    update(body, options) {
+        return this._client.post('/v1/organizations/compliance_settings', { body, ...options });
+    }
+}
+exports.ComplianceSettings = ComplianceSettings;
+//# sourceMappingURL=compliance-settings.js.map
+
+/***/ }),
+
+/***/ 83381:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ExternalKeys = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+const path_1 = __nccwpck_require__(43002);
+class ExternalKeys extends resource_1.APIResource {
+    /**
+     * Create an external key config owned by the caller's organization.
+     *
+     * @example
+     * ```ts
+     * const externalKey =
+     *   await client.organization.externalKeys.create({
+     *     provider_config: {
+     *       kms_arn:
+     *         'arn:aws:kms:us-east-1:111122223333:key/abcd1234-5678-90ab-cdef-000011112222',
+     *       type: 'aws',
+     *     },
+     *   });
+     * ```
+     */
+    create(body, options) {
+        return this._client.post('/v1/organizations/external_keys', { body, ...options });
+    }
+    /**
+     * Retrieve a single external key config in the caller's organization by ID.
+     *
+     * @example
+     * ```ts
+     * const externalKey =
+     *   await client.organization.externalKeys.retrieve(
+     *     'external_key_id',
+     *   );
+     * ```
+     */
+    retrieve(externalKeyID, options) {
+        return this._client.get((0, path_1.path) `/v1/organizations/external_keys/${externalKeyID}`, options);
+    }
+    /**
+     * Partially update an external key config. Omitted fields are left unchanged.
+     *
+     * `display_name` is always editable. `geo` and `provider_config` cannot be changed
+     * once any workspace references this config, because previously encrypted data
+     * requires the original key identity to decrypt.
+     *
+     * @example
+     * ```ts
+     * const externalKey =
+     *   await client.organization.externalKeys.update(
+     *     'external_key_id',
+     *   );
+     * ```
+     */
+    update(externalKeyID, body, options) {
+        return this._client.post((0, path_1.path) `/v1/organizations/external_keys/${externalKeyID}`, { body, ...options });
+    }
+    /**
+     * List external key configs in the caller's organization.
+     *
+     * Results are ordered by creation time (newest first). Use the `next_page` cursor
+     * from the response to fetch subsequent pages.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const externalKey of client.organization.externalKeys.list()) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(query = {}, options) {
+        return this._client.getAPIList('/v1/organizations/external_keys', (pagination_1.PageCursor), {
+            query,
+            ...options,
+        });
+    }
+    /**
+     * Delete an external key config.
+     *
+     * The request is rejected if any workspace still references this config.
+     *
+     * @example
+     * ```ts
+     * const externalKey =
+     *   await client.organization.externalKeys.delete(
+     *     'external_key_id',
+     *   );
+     * ```
+     */
+    delete(externalKeyID, options) {
+        return this._client.delete((0, path_1.path) `/v1/organizations/external_keys/${externalKeyID}`, options);
+    }
+    /**
+     * Validate an external key config against the customer's KMS.
+     *
+     * Anthropic performs an encrypt/decrypt roundtrip against the configured KMS key
+     * and waits up to 30 seconds for the result. The response status is `success` if
+     * the roundtrip succeeded, or `failure` with an error message if it failed or
+     * timed out.
+     *
+     * @example
+     * ```ts
+     * const response =
+     *   await client.organization.externalKeys.validate(
+     *     'external_key_id',
+     *   );
+     * ```
+     */
+    validate(externalKeyID, options) {
+        return this._client.post((0, path_1.path) `/v1/organizations/external_keys/${externalKeyID}/validate`, options);
+    }
+}
+exports.ExternalKeys = ExternalKeys;
+//# sourceMappingURL=external-keys.js.map
+
+/***/ }),
+
+/***/ 85616:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Federation = void 0;
+const tslib_1 = __nccwpck_require__(14839);
+const resource_1 = __nccwpck_require__(82941);
+const IssuersAPI = tslib_1.__importStar(__nccwpck_require__(43117));
+const issuers_1 = __nccwpck_require__(43117);
+const RulesAPI = tslib_1.__importStar(__nccwpck_require__(38478));
+const rules_1 = __nccwpck_require__(38478);
+var Federation = /* @__PURE__ */ (() => {
+    class Federation extends resource_1.APIResource {
+        constructor() {
+            super(...arguments);
+            this.issuers = new IssuersAPI.Issuers(this._client);
+            this.rules = new RulesAPI.Rules(this._client);
+        }
+    }
+    Federation.Issuers = issuers_1.Issuers;
+    Federation.Rules = rules_1.Rules;
+    return Federation;
+})();
+exports.Federation = Federation;
+//# sourceMappingURL=federation.js.map
+
+/***/ }),
+
+/***/ 43117:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Issuers = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+const path_1 = __nccwpck_require__(43002);
+class Issuers extends resource_1.APIResource {
+    /**
+     * **Requires an OAuth access token with the `org:admin` scope**, from
+     * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+     * API keys are not accepted. See
+     * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+     *
+     * Register an OIDC issuer that Anthropic will trust for workload identity
+     * federation in your organization.
+     *
+     * The `jwks` field controls how the issuer's signing keys are obtained and takes
+     * one of three shapes selected by `type`: `discovery` (resolve keys through OIDC
+     * discovery), `explicit_url` (fetch keys from a fixed JWKS URL), or `inline`
+     * (provide a static key set). When `jwks.type` is `discovery` and no
+     * `discovery_base` is set, the issuer URL must be publicly reachable over HTTPS so
+     * Anthropic can fetch the discovery document; for `explicit_url` and `inline`
+     * modes the issuer URL is only matched as the JWT's `iss` claim and is not
+     * fetched.
+     *
+     * @example
+     * ```ts
+     * const federationIssuer =
+     *   await client.organization.federation.issuers.create({
+     *     issuer_url: 'x',
+     *     name: 'x',
+     *   });
+     * ```
+     */
+    create(body, options) {
+        return this._client.post('/v1/organizations/federation_issuers', { body, ...options });
+    }
+    /**
+     * **Requires an OAuth access token with the `org:admin` scope**, from
+     * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+     * API keys are not accepted. See
+     * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+     *
+     * Retrieve a federation issuer by its ID (`fdis_...`).
+     *
+     * @example
+     * ```ts
+     * const federationIssuer =
+     *   await client.organization.federation.issuers.retrieve(
+     *     'federation_issuer_id',
+     *   );
+     * ```
+     */
+    retrieve(federationIssuerID, options) {
+        return this._client.get((0, path_1.path) `/v1/organizations/federation_issuers/${federationIssuerID}`, options);
+    }
+    /**
+     * **Requires an OAuth access token with the `org:admin` scope**, from
+     * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+     * API keys are not accepted. See
+     * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+     *
+     * Partially update a federation issuer.
+     *
+     * Setting `jwks` replaces the full JWKS shape at once. Archived issuers cannot be
+     * updated; this returns 400. Create a new issuer instead.
+     *
+     * Updating an issuer that backs a rule with a scope outside `workspace:developer`
+     * or `workspace:inference` requires a Console session.
+     *
+     * @example
+     * ```ts
+     * const federationIssuer =
+     *   await client.organization.federation.issuers.update(
+     *     'federation_issuer_id',
+     *   );
+     * ```
+     */
+    update(federationIssuerID, body, options) {
+        return this._client.post((0, path_1.path) `/v1/organizations/federation_issuers/${federationIssuerID}`, {
+            body,
+            ...options,
+        });
+    }
+    /**
+     * **Requires an OAuth access token with the `org:admin` scope**, from
+     * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+     * API keys are not accepted. See
+     * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+     *
+     * List federation issuers in your organization.
+     *
+     * Archived issuers are excluded unless `include_archived=true`.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const federationIssuer of client.organization.federation.issuers.list()) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(query = {}, options) {
+        return this._client.getAPIList('/v1/organizations/federation_issuers', (pagination_1.PageCursor), {
+            query,
+            ...options,
+        });
+    }
+    /**
+     * **Requires an OAuth access token with the `org:admin` scope**, from
+     * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+     * API keys are not accepted. See
+     * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+     *
+     * Archive a federation issuer.
+     *
+     * Idempotent; re-archiving returns the issuer with its original `archived_at`.
+     * Rejected with 400 if any live (non-archived) federation rule still references
+     * the issuer; archive those rules first (a rule's issuer cannot be changed), or
+     * recreate them against another issuer.
+     *
+     * @example
+     * ```ts
+     * const federationIssuer =
+     *   await client.organization.federation.issuers.archive(
+     *     'federation_issuer_id',
+     *   );
+     * ```
+     */
+    archive(federationIssuerID, options) {
+        return this._client.post((0, path_1.path) `/v1/organizations/federation_issuers/${federationIssuerID}/archive`, options);
+    }
+}
+exports.Issuers = Issuers;
+//# sourceMappingURL=issuers.js.map
+
+/***/ }),
+
+/***/ 38478:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Rules = void 0;
+const tslib_1 = __nccwpck_require__(14839);
+const resource_1 = __nccwpck_require__(82941);
+const WorkspacesAPI = tslib_1.__importStar(__nccwpck_require__(28655));
+const workspaces_1 = __nccwpck_require__(28655);
+const pagination_1 = __nccwpck_require__(27117);
+const path_1 = __nccwpck_require__(43002);
+var Rules = /* @__PURE__ */ (() => {
+    class Rules extends resource_1.APIResource {
+        constructor() {
+            super(...arguments);
+            this.workspaces = new WorkspacesAPI.Workspaces(this._client);
+        }
+        /**
+         * **Requires an OAuth access token with the `org:admin` scope**, from
+         * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+         * API keys are not accepted. See
+         * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+         *
+         * Create a federation rule owned by your organization.
+         *
+         * The referenced issuer and the target service account must already exist in the
+         * same organization; invalid references are rejected with a 400 error. The
+         * workspace reference is validated. Membership is not checked at rule creation:
+         * token exchange resolves a single enabled workspace per call and is rejected
+         * unless the target service account is a member of that workspace (it is
+         * implicitly a member of the default workspace). Rules on well-known shared
+         * issuers (GitHub Actions, GitLab, Buildkite, Terraform Cloud, Google) must
+         * constrain tenant identity via an identity-bearing claim, a tenant-pinning
+         * subject prefix (such as `repo:YOUR_ORG/...`), or a CEL condition referencing one
+         * of those identity claims (e.g. `claims.repository_owner`). OAuth callers may
+         * only manage rules whose `oauth_scope` is `workspace:developer` or
+         * `workspace:inference`; other scopes require a Console session.
+         *
+         * @example
+         * ```ts
+         * const federationRule =
+         *   await client.organization.federation.rules.create({
+         *     issuer_id: 'issuer_id',
+         *     match: {},
+         *     name: 'x',
+         *     oauth_scope: 'x',
+         *     target: {
+         *       service_account_id: 'svac_01SDCCSbTxrXDpWc1phhtcfK',
+         *       type: 'service_account',
+         *     },
+         *   });
+         * ```
+         */
+        create(body, options) {
+            return this._client.post('/v1/organizations/federation_rules', { body, ...options });
+        }
+        /**
+         * **Requires an OAuth access token with the `org:admin` scope**, from
+         * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+         * API keys are not accepted. See
+         * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+         *
+         * Retrieve a federation rule by its ID (`fdrl_...`).
+         *
+         * @example
+         * ```ts
+         * const federationRule =
+         *   await client.organization.federation.rules.retrieve(
+         *     'federation_rule_id',
+         *   );
+         * ```
+         */
+        retrieve(federationRuleID, options) {
+            return this._client.get((0, path_1.path) `/v1/organizations/federation_rules/${federationRuleID}`, options);
+        }
+        /**
+         * **Requires an OAuth access token with the `org:admin` scope**, from
+         * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+         * API keys are not accepted. See
+         * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+         *
+         * Partially update a federation rule.
+         *
+         * `issuer_id` is immutable. `match` and `target` are replaced as whole objects
+         * when set. Referenced service accounts and workspaces must exist in your
+         * organization; invalid references are rejected with a 400 error. Archived rules
+         * cannot be updated; this returns 400. Create a new rule instead. Rules on
+         * well-known shared issuers (GitHub Actions, GitLab, Buildkite, Terraform Cloud,
+         * Google) must constrain tenant identity via an identity-bearing claim, a
+         * tenant-pinning subject prefix (such as `repo:YOUR_ORG/...`), or a CEL condition
+         * referencing one of those identity claims (e.g. `claims.repository_owner`). On
+         * these issuers the requirement is re-checked on every update; if an existing
+         * rule's stored match does not yet constrain tenant identity, any update (even a
+         * rename or description change) must also supply a conforming `match` in the same
+         * request. OAuth callers may only manage rules whose `oauth_scope` is
+         * `workspace:developer` or `workspace:inference`; other scopes require a Console
+         * session.
+         *
+         * @example
+         * ```ts
+         * const federationRule =
+         *   await client.organization.federation.rules.update(
+         *     'federation_rule_id',
+         *   );
+         * ```
+         */
+        update(federationRuleID, body, options) {
+            return this._client.post((0, path_1.path) `/v1/organizations/federation_rules/${federationRuleID}`, {
+                body,
+                ...options,
+            });
+        }
+        /**
+         * **Requires an OAuth access token with the `org:admin` scope**, from
+         * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+         * API keys are not accepted. See
+         * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+         *
+         * List federation rules in your organization.
+         *
+         * Optionally filter by issuer with `issuer_id`. Archived rules are excluded unless
+         * `include_archived=true`.
+         *
+         * @example
+         * ```ts
+         * // Automatically fetches more pages as needed.
+         * for await (const federationRule of client.organization.federation.rules.list()) {
+         *   // ...
+         * }
+         * ```
+         */
+        list(query = {}, options) {
+            return this._client.getAPIList('/v1/organizations/federation_rules', (pagination_1.PageCursor), {
+                query,
+                ...options,
+            });
+        }
+        /**
+         * **Requires an OAuth access token with the `org:admin` scope**, from
+         * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+         * API keys are not accepted. See
+         * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+         *
+         * Archive a federation rule.
+         *
+         * Token exchange through this rule stops immediately. Idempotent; re-archiving
+         * returns the rule with its original `archived_at`. Archiving clears the rule's
+         * workspace targeting (`workspace_id` and `workspace_ids` are emptied). Tokens
+         * already minted before archive remain valid until they expire. OAuth callers may
+         * only manage rules whose `oauth_scope` is `workspace:developer` or
+         * `workspace:inference`; other scopes require a Console session.
+         *
+         * @example
+         * ```ts
+         * const federationRule =
+         *   await client.organization.federation.rules.archive(
+         *     'federation_rule_id',
+         *   );
+         * ```
+         */
+        archive(federationRuleID, options) {
+            return this._client.post((0, path_1.path) `/v1/organizations/federation_rules/${federationRuleID}/archive`, options);
+        }
+    }
+    Rules.Workspaces = workspaces_1.Workspaces;
+    return Rules;
+})();
+exports.Rules = Rules;
+//# sourceMappingURL=rules.js.map
+
+/***/ }),
+
+/***/ 28655:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Workspaces = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+const path_1 = __nccwpck_require__(43002);
+class Workspaces extends resource_1.APIResource {
+    /**
+     * **Requires an OAuth access token with the `org:admin` scope**, from
+     * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+     * API keys are not accepted. See
+     * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+     *
+     * List workspaces where this federation rule is enabled.
+     *
+     * Returns all workspace enablements in a single response; the `limit` and `page`
+     * parameters are accepted but have no effect, and `next_page` is always `null`.
+     * Returns explicit per-workspace enablements only; for rules with
+     * `applies_to_all_workspaces` or a legacy single `workspace_id`, check those
+     * fields on the rule itself.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const federationRuleWorkspace of client.organization.federation.rules.workspaces.list(
+     *   'federation_rule_id',
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(federationRuleID, query = {}, options) {
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/federation_rules/${federationRuleID}/workspaces`, (pagination_1.PageCursor), { query, ...options });
+    }
+    /**
+     * **Requires an OAuth access token with the `org:admin` scope**, from
+     * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+     * API keys are not accepted. See
+     * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+     *
+     * Enable a federation rule for a workspace.
+     *
+     * Idempotent; re-enabling returns the existing enablement. The rule and workspace
+     * must both belong to your organization. Membership of the rule's target service
+     * account in this workspace is not checked at enablement: token exchange into this
+     * workspace is rejected unless the target is a member (it is implicitly a member
+     * of the default workspace). Archived rules are rejected with 400. OAuth callers
+     * may only manage rules whose `oauth_scope` is `workspace:developer` or
+     * `workspace:inference`; other scopes require a Console session.
+     *
+     * @example
+     * ```ts
+     * const federationRuleWorkspace =
+     *   await client.organization.federation.rules.workspaces.add(
+     *     'federation_rule_id',
+     *     { workspace_id: 'workspace_id' },
+     *   );
+     * ```
+     */
+    add(federationRuleID, body, options) {
+        return this._client.post((0, path_1.path) `/v1/organizations/federation_rules/${federationRuleID}/workspaces`, {
+            body,
+            ...options,
+        });
+    }
+    /**
+     * **Requires an OAuth access token with the `org:admin` scope**, from
+     * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+     * API keys are not accepted. See
+     * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+     *
+     * Disable a federation rule for a workspace.
+     *
+     * Idempotent; succeeds even if the enablement was already removed. OAuth callers
+     * may only manage rules whose `oauth_scope` is `workspace:developer` or
+     * `workspace:inference`; other scopes require a Console session.
+     *
+     * @example
+     * ```ts
+     * const workspace =
+     *   await client.organization.federation.rules.workspaces.remove(
+     *     'workspace_id',
+     *     { federation_rule_id: 'federation_rule_id' },
+     *   );
+     * ```
+     */
+    remove(workspaceID, params, options) {
+        const { federation_rule_id } = params;
+        return this._client.delete((0, path_1.path) `/v1/organizations/federation_rules/${federation_rule_id}/workspaces/${workspaceID}`, options);
+    }
+}
+exports.Workspaces = Workspaces;
+//# sourceMappingURL=workspaces.js.map
+
+/***/ }),
+
+/***/ 58929:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Invites = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+const path_1 = __nccwpck_require__(43002);
+class Invites extends resource_1.APIResource {
+    /**
+     * Invite a user to join the organization by email.
+     *
+     * On plans that draw members from a finite pool of purchased seats, the invite
+     * automatically consumes a seat from the lowest tier with availability; there is
+     * no seat-tier parameter. When no seat is free the request fails with a 400 error
+     * rather than purchasing a seat.
+     *
+     * @example
+     * ```ts
+     * const organizationInvite =
+     *   await client.organization.invites.create({
+     *     email: 'user@emaildomain.com',
+     *     role: 'user',
+     *   });
+     * ```
+     */
+    create(body, options) {
+        return this._client.post('/v1/organizations/invites', { body, ...options });
+    }
+    /**
+     * Retrieve an invite by ID.
+     *
+     * @example
+     * ```ts
+     * const organizationInvite =
+     *   await client.organization.invites.retrieve('invite_id');
+     * ```
+     */
+    retrieve(inviteID, options) {
+        return this._client.get((0, path_1.path) `/v1/organizations/invites/${inviteID}`, options);
+    }
+    /**
+     * List the organization's invites.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const organizationInvite of client.organization.invites.list()) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(query = {}, options) {
+        return this._client.getAPIList('/v1/organizations/invites', (pagination_1.Page), {
+            query,
+            ...options,
+        });
+    }
+    /**
+     * Delete a pending invite.
+     *
+     * @example
+     * ```ts
+     * const invite = await client.organization.invites.delete(
+     *   'invite_id',
+     * );
+     * ```
+     */
+    delete(inviteID, options) {
+        return this._client.delete((0, path_1.path) `/v1/organizations/invites/${inviteID}`, options);
+    }
+}
+exports.Invites = Invites;
+//# sourceMappingURL=invites.js.map
+
+/***/ }),
+
+/***/ 61708:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Organization = void 0;
+const tslib_1 = __nccwpck_require__(14839);
+const resource_1 = __nccwpck_require__(82941);
+const APIKeysAPI = tslib_1.__importStar(__nccwpck_require__(48484));
+const api_keys_1 = __nccwpck_require__(48484);
+const ComplianceSettingsAPI = tslib_1.__importStar(__nccwpck_require__(85756));
+const compliance_settings_1 = __nccwpck_require__(85756);
+const ExternalKeysAPI = tslib_1.__importStar(__nccwpck_require__(83381));
+const external_keys_1 = __nccwpck_require__(83381);
+const InvitesAPI = tslib_1.__importStar(__nccwpck_require__(58929));
+const invites_1 = __nccwpck_require__(58929);
+const RateLimitsAPI = tslib_1.__importStar(__nccwpck_require__(68358));
+const rate_limits_1 = __nccwpck_require__(68358);
+const UsersAPI = tslib_1.__importStar(__nccwpck_require__(7959));
+const users_1 = __nccwpck_require__(7959);
+const FederationAPI = tslib_1.__importStar(__nccwpck_require__(85616));
+const federation_1 = __nccwpck_require__(85616);
+const ServiceAccountsAPI = tslib_1.__importStar(__nccwpck_require__(61470));
+const service_accounts_1 = __nccwpck_require__(61470);
+const WorkspacesAPI = tslib_1.__importStar(__nccwpck_require__(46150));
+const workspaces_1 = __nccwpck_require__(46150);
+var Organization = /* @__PURE__ */ (() => {
+    class Organization extends resource_1.APIResource {
+        constructor() {
+            super(...arguments);
+            this.apiKeys = new APIKeysAPI.APIKeys(this._client);
+            this.externalKeys = new ExternalKeysAPI.ExternalKeys(this._client);
+            this.federation = new FederationAPI.Federation(this._client);
+            this.invites = new InvitesAPI.Invites(this._client);
+            this.serviceAccounts = new ServiceAccountsAPI.ServiceAccounts(this._client);
+            this.users = new UsersAPI.Users(this._client);
+            this.workspaces = new WorkspacesAPI.Workspaces(this._client);
+            this.rateLimits = new RateLimitsAPI.RateLimits(this._client);
+            this.complianceSettings = new ComplianceSettingsAPI.ComplianceSettings(this._client);
+        }
+        /**
+         * Retrieve information about the organization associated with the authenticated
+         * API key.
+         *
+         * @example
+         * ```ts
+         * const organizationInfo =
+         *   await client.organization.retrieve();
+         * ```
+         */
+        retrieve(options) {
+            return this._client.get('/v1/organizations/me', options);
+        }
+    }
+    Organization.APIKeys = api_keys_1.APIKeys;
+    Organization.ExternalKeys = external_keys_1.ExternalKeys;
+    Organization.Federation = federation_1.Federation;
+    Organization.Invites = invites_1.Invites;
+    Organization.ServiceAccounts = service_accounts_1.ServiceAccounts;
+    Organization.Users = users_1.Users;
+    Organization.Workspaces = workspaces_1.Workspaces;
+    Organization.RateLimits = rate_limits_1.RateLimits;
+    Organization.ComplianceSettings = compliance_settings_1.ComplianceSettings;
+    return Organization;
+})();
+exports.Organization = Organization;
+//# sourceMappingURL=organization.js.map
+
+/***/ }),
+
+/***/ 68358:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.RateLimits = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+class RateLimits extends resource_1.APIResource {
+    /**
+     * List Messages API rate limits for your organization.
+     *
+     * Each entry corresponds to one rate-limit group (either a model family or an
+     * API-surface category such as the Files API or Message Batches) and contains the
+     * set of limiter values that apply to it.
+     *
+     * When `limit` is omitted, every matching entry is returned in a single page; when
+     * `limit` truncates the result, follow `next_page` to fetch the remaining entries.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const organizationRateLimit of client.organization.rateLimits.list()) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(query = {}, options) {
+        return this._client.getAPIList('/v1/organizations/rate_limits', (pagination_1.PageCursor), {
+            query,
+            ...options,
+        });
+    }
+}
+exports.RateLimits = RateLimits;
+//# sourceMappingURL=rate-limits.js.map
+
+/***/ }),
+
+/***/ 61470:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ServiceAccounts = void 0;
+const tslib_1 = __nccwpck_require__(14839);
+const resource_1 = __nccwpck_require__(82941);
+const WorkspacesAPI = tslib_1.__importStar(__nccwpck_require__(2886));
+const workspaces_1 = __nccwpck_require__(2886);
+const pagination_1 = __nccwpck_require__(27117);
+const path_1 = __nccwpck_require__(43002);
+var ServiceAccounts = /* @__PURE__ */ (() => {
+    class ServiceAccounts extends resource_1.APIResource {
+        constructor() {
+            super(...arguments);
+            this.workspaces = new WorkspacesAPI.Workspaces(this._client);
+        }
+        /**
+         * **Requires an OAuth access token with the `org:admin` scope**, from
+         * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+         * API keys are not accepted. See
+         * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+         *
+         * Create a service account.
+         *
+         * A service account is a named workload identity that federation rules target.
+         * `organization_role` is `developer` (default) or `admin`; a rule may only be
+         * created or retargeted to grant `org:admin` scope when the target's
+         * `organization_role` is `admin`. Creating an `admin`-role service account
+         * requires an interactive credential (a user OAuth token or a Console session) — a
+         * workload may only create `developer`-role service accounts.
+         *
+         * @example
+         * ```ts
+         * const serviceAccount =
+         *   await client.organization.serviceAccounts.create({
+         *     name: 'ci-deploy-bot',
+         *   });
+         * ```
+         */
+        create(body, options) {
+            return this._client.post('/v1/organizations/service_accounts', { body, ...options });
+        }
+        /**
+         * **Requires an OAuth access token with the `org:admin` scope**, from
+         * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+         * API keys are not accepted. See
+         * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+         *
+         * Retrieve a service account by its ID (`svac_...`).
+         *
+         * @example
+         * ```ts
+         * const serviceAccount =
+         *   await client.organization.serviceAccounts.retrieve(
+         *     'service_account_id',
+         *   );
+         * ```
+         */
+        retrieve(serviceAccountID, options) {
+            return this._client.get((0, path_1.path) `/v1/organizations/service_accounts/${serviceAccountID}`, options);
+        }
+        /**
+         * **Requires an OAuth access token with the `org:admin` scope**, from
+         * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+         * API keys are not accepted. See
+         * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+         *
+         * Update a service account.
+         *
+         * Only `description` and `organization_role` are mutable; `name` cannot be
+         * changed. Archived service accounts cannot be updated; this returns 400. Setting
+         * `organization_role` to `admin` (even when unchanged) requires an interactive
+         * credential (a user OAuth token or a Console session).
+         *
+         * @example
+         * ```ts
+         * const serviceAccount =
+         *   await client.organization.serviceAccounts.update(
+         *     'service_account_id',
+         *   );
+         * ```
+         */
+        update(serviceAccountID, body, options) {
+            return this._client.post((0, path_1.path) `/v1/organizations/service_accounts/${serviceAccountID}`, {
+                body,
+                ...options,
+            });
+        }
+        /**
+         * **Requires an OAuth access token with the `org:admin` scope**, from
+         * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+         * API keys are not accepted. See
+         * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+         *
+         * List service accounts in the caller's organization.
+         *
+         * Results are ordered by creation time, newest first. Use `limit` and the
+         * `next_page` cursor to paginate; set `include_archived=true` to include archived
+         * service accounts.
+         *
+         * @example
+         * ```ts
+         * // Automatically fetches more pages as needed.
+         * for await (const serviceAccount of client.organization.serviceAccounts.list()) {
+         *   // ...
+         * }
+         * ```
+         */
+        list(query = {}, options) {
+            return this._client.getAPIList('/v1/organizations/service_accounts', (pagination_1.PageCursor), {
+                query,
+                ...options,
+            });
+        }
+        /**
+         * **Requires an OAuth access token with the `org:admin` scope**, from
+         * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+         * API keys are not accepted. See
+         * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+         *
+         * Archive a service account.
+         *
+         * Idempotent; re-archiving returns the service account with its original
+         * `archived_at`. Rejected with 400 if any live (non-archived) federation rule
+         * still targets this service account, same as issuer archival; archive those rules
+         * first or change their target to another service account.
+         *
+         * @example
+         * ```ts
+         * const serviceAccount =
+         *   await client.organization.serviceAccounts.archive(
+         *     'service_account_id',
+         *   );
+         * ```
+         */
+        archive(serviceAccountID, options) {
+            return this._client.post((0, path_1.path) `/v1/organizations/service_accounts/${serviceAccountID}/archive`, options);
+        }
+    }
+    ServiceAccounts.Workspaces = workspaces_1.Workspaces;
+    return ServiceAccounts;
+})();
+exports.ServiceAccounts = ServiceAccounts;
+//# sourceMappingURL=service-accounts.js.map
+
+/***/ }),
+
+/***/ 2886:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Workspaces = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+const path_1 = __nccwpck_require__(43002);
+class Workspaces extends resource_1.APIResource {
+    /**
+     * **Requires an OAuth access token with the `org:admin` scope**, from
+     * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+     * API keys are not accepted. See
+     * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+     *
+     * List the workspaces a service account is a member of.
+     *
+     * Each entry includes the service account's `workspace_role` in that workspace.
+     * Use `limit` and the `next_page` cursor to paginate. When the service account has
+     * no explicit default-workspace membership, the implicit (`implicit: true`)
+     * membership is returned as the first entry on the first page; with `limit=1` the
+     * first page may return up to 2 entries (the implicit entry plus one explicit
+     * membership) so a pagination cursor can be derived. Memberships are returned only
+     * while the service account is active. Without a `page` cursor, an archived
+     * service account returns an empty list. A `page` cursor that does not match an
+     * active membership returns a 400 invalid-request error. A cursor stops matching
+     * when the membership is removed, the workspace is deleted, or the service account
+     * is archived. Restart pagination from the first page to recover.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const serviceAccountWorkspaceMember of client.organization.serviceAccounts.workspaces.list(
+     *   'service_account_id',
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(serviceAccountID, query = {}, options) {
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/service_accounts/${serviceAccountID}/workspaces`, (pagination_1.PageCursor), { query, ...options });
+    }
+    /**
+     * **Requires an OAuth access token with the `org:admin` scope**, from
+     * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+     * API keys are not accepted. See
+     * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+     *
+     * Add a service account to a workspace with the given `workspace_role`.
+     *
+     * Mirror of `POST /workspaces/{workspace_id}/service_accounts`, addressed from the
+     * service-account side; both create the same membership. If the service account is
+     * already an explicit member of the workspace, its `workspace_role` is replaced
+     * with the value supplied here. Archived workspaces return 400. Archived service
+     * accounts cannot be added and are rejected.
+     *
+     * @example
+     * ```ts
+     * const serviceAccountWorkspaceMember =
+     *   await client.organization.serviceAccounts.workspaces.add(
+     *     'service_account_id',
+     *     {
+     *       workspace_id: 'workspace_id',
+     *       workspace_role: 'workspace_admin',
+     *     },
+     *   );
+     * ```
+     */
+    add(serviceAccountID, body, options) {
+        return this._client.post((0, path_1.path) `/v1/organizations/service_accounts/${serviceAccountID}/workspaces`, {
+            body,
+            ...options,
+        });
+    }
+    /**
+     * **Requires an OAuth access token with the `org:admin` scope**, from
+     * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+     * API keys are not accepted. See
+     * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+     *
+     * Remove a service account from a workspace.
+     *
+     * Mirror of
+     * `DELETE /workspaces/{workspace_id}/service_accounts/{service_account_id}`,
+     * addressed from the service-account side. Removal is idempotent (returns 200 even
+     * if the membership was already removed). A DELETE against the implicit
+     * default-workspace membership returns 200 but is a no-op and the membership
+     * persists; deleting an explicit default-workspace row reverts to the implicit
+     * `workspace_user` membership. Archived workspaces return 400.
+     *
+     * @example
+     * ```ts
+     * const workspace =
+     *   await client.organization.serviceAccounts.workspaces.remove(
+     *     'workspace_id',
+     *     { service_account_id: 'service_account_id' },
+     *   );
+     * ```
+     */
+    remove(workspaceID, params, options) {
+        const { service_account_id } = params;
+        return this._client.delete((0, path_1.path) `/v1/organizations/service_accounts/${service_account_id}/workspaces/${workspaceID}`, options);
+    }
+}
+exports.Workspaces = Workspaces;
+//# sourceMappingURL=workspaces.js.map
+
+/***/ }),
+
+/***/ 7959:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Users = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+const path_1 = __nccwpck_require__(43002);
+class Users extends resource_1.APIResource {
+    /**
+     * Retrieve a member of the organization by user ID.
+     *
+     * @example
+     * ```ts
+     * const organizationUser =
+     *   await client.organization.users.retrieve('user_id');
+     * ```
+     */
+    retrieve(userID, options) {
+        return this._client.get((0, path_1.path) `/v1/organizations/users/${userID}`, options);
+    }
+    /**
+     * Update a member's organization role.
+     *
+     * @example
+     * ```ts
+     * const organizationUser =
+     *   await client.organization.users.update('user_id', {
+     *     role: 'user',
+     *   });
+     * ```
+     */
+    update(userID, body, options) {
+        return this._client.post((0, path_1.path) `/v1/organizations/users/${userID}`, { body, ...options });
+    }
+    /**
+     * List the organization's members.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const organizationUser of client.organization.users.list()) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(query = {}, options) {
+        return this._client.getAPIList('/v1/organizations/users', (pagination_1.Page), { query, ...options });
+    }
+    /**
+     * Remove a member from the organization.
+     *
+     * @example
+     * ```ts
+     * const user = await client.organization.users.remove(
+     *   'user_id',
+     * );
+     * ```
+     */
+    remove(userID, options) {
+        return this._client.delete((0, path_1.path) `/v1/organizations/users/${userID}`, options);
+    }
+}
+exports.Users = Users;
+//# sourceMappingURL=users.js.map
+
+/***/ }),
+
+/***/ 22893:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Members = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+const path_1 = __nccwpck_require__(43002);
+class Members extends resource_1.APIResource {
+    /**
+     * Get Workspace Member
+     *
+     * @example
+     * ```ts
+     * const workspaceMember =
+     *   await client.organization.workspaces.members.retrieve(
+     *     'user_id',
+     *     { workspace_id: 'workspace_id' },
+     *   );
+     * ```
+     */
+    retrieve(userID, params, options) {
+        const { workspace_id } = params;
+        return this._client.get((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/members/${userID}`, options);
+    }
+    /**
+     * Update Workspace Member
+     *
+     * @example
+     * ```ts
+     * const workspaceMember =
+     *   await client.organization.workspaces.members.update(
+     *     'user_id',
+     *     {
+     *       workspace_id: 'workspace_id',
+     *       workspace_role: 'workspace_admin',
+     *     },
+     *   );
+     * ```
+     */
+    update(userID, params, options) {
+        const { workspace_id, ...body } = params;
+        return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/members/${userID}`, {
+            body,
+            ...options,
+        });
+    }
+    /**
+     * List Workspace Members
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const workspaceMember of client.organization.workspaces.members.list(
+     *   'workspace_id',
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(workspaceID, query = {}, options) {
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/members`, (pagination_1.Page), { query, ...options });
+    }
+    /**
+     * Create Workspace Member
+     *
+     * @example
+     * ```ts
+     * const workspaceMember =
+     *   await client.organization.workspaces.members.add(
+     *     'workspace_id',
+     *     {
+     *       user_id: 'user_01WCz1FkmYMm4gnmykNKUu3Q',
+     *       workspace_role: 'workspace_admin',
+     *     },
+     *   );
+     * ```
+     */
+    add(workspaceID, body, options) {
+        return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/members`, { body, ...options });
+    }
+    /**
+     * Delete Workspace Member
+     *
+     * @example
+     * ```ts
+     * const member =
+     *   await client.organization.workspaces.members.remove(
+     *     'user_id',
+     *     { workspace_id: 'workspace_id' },
+     *   );
+     * ```
+     */
+    remove(userID, params, options) {
+        const { workspace_id } = params;
+        return this._client.delete((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/members/${userID}`, options);
+    }
+}
+exports.Members = Members;
+//# sourceMappingURL=members.js.map
+
+/***/ }),
+
+/***/ 37063:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.RateLimits = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+const path_1 = __nccwpck_require__(43002);
+class RateLimits extends resource_1.APIResource {
+    /**
+     * List a workspace's rate limits.
+     *
+     * By default, returns only the groups and limiter types that have a
+     * workspace-level override. With `include_inherited=true`, returns every group
+     * with organization-level limits the workspace can see, listing for each the
+     * values it inherits from the organization as well as its own overrides. Each
+     * value's `source` says which it is.
+     *
+     * When `limit` is omitted, every matching entry is returned in a single page; when
+     * `limit` truncates the result, follow `next_page` to fetch the remaining entries.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const workspaceRateLimit of client.organization.workspaces.rateLimits.list(
+     *   'workspace_id',
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(workspaceID, query = {}, options) {
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/rate_limits`, (pagination_1.PageCursor), { query, ...options });
+    }
+}
+exports.RateLimits = RateLimits;
+//# sourceMappingURL=rate-limits.js.map
+
+/***/ }),
+
+/***/ 7550:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ServiceAccounts = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+const path_1 = __nccwpck_require__(43002);
+class ServiceAccounts extends resource_1.APIResource {
+    /**
+     * **Requires an OAuth access token with the `org:admin` scope**, from
+     * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+     * API keys are not accepted. See
+     * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+     *
+     * Retrieve a service account's membership in a workspace.
+     *
+     * Returns the membership record, including the service account's `workspace_role`
+     * in this workspace. Archived workspaces return 400. For the default workspace,
+     * returns the implicit (`implicit: true`) membership when no explicit membership
+     * exists; an explicitly added membership is returned with its assigned role. An
+     * archived service account returns 404.
+     *
+     * @example
+     * ```ts
+     * const serviceAccountWorkspaceMember =
+     *   await client.organization.workspaces.serviceAccounts.retrieve(
+     *     'service_account_id',
+     *     { workspace_id: 'workspace_id' },
+     *   );
+     * ```
+     */
+    retrieve(serviceAccountID, params, options) {
+        const { workspace_id } = params;
+        return this._client.get((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/service_accounts/${serviceAccountID}`, options);
+    }
+    /**
+     * **Requires an OAuth access token with the `org:admin` scope**, from
+     * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+     * API keys are not accepted. See
+     * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+     *
+     * Change a service account's role in a workspace.
+     *
+     * The new `workspace_role` replaces the current one. Only explicit memberships can
+     * be updated; to set a role on the implicit default-workspace membership, add the
+     * service account explicitly with
+     * `POST /workspaces/{workspace_id}/service_accounts`. Archived workspaces
+     * return 400. Archived service accounts cannot be updated and are rejected.
+     *
+     * @example
+     * ```ts
+     * const serviceAccountWorkspaceMember =
+     *   await client.organization.workspaces.serviceAccounts.update(
+     *     'service_account_id',
+     *     {
+     *       workspace_id: 'workspace_id',
+     *       workspace_role: 'workspace_admin',
+     *     },
+     *   );
+     * ```
+     */
+    update(serviceAccountID, params, options) {
+        const { workspace_id, ...body } = params;
+        return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/service_accounts/${serviceAccountID}`, { body, ...options });
+    }
+    /**
+     * **Requires an OAuth access token with the `org:admin` scope**, from
+     * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+     * API keys are not accepted. See
+     * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+     *
+     * List the service accounts that are members of a workspace.
+     *
+     * Each entry includes the service account's `workspace_role`. Use `limit` and the
+     * `next_page` cursor to paginate. Archived workspaces return 400; use
+     * `GET /service_accounts/{id}/workspaces` to audit memberships of an archived
+     * workspace. The implicit default-workspace membership is not included in this
+     * list. Memberships of archived service accounts are omitted from the results.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const serviceAccountWorkspaceMember of client.organization.workspaces.serviceAccounts.list(
+     *   'workspace_id',
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(workspaceID, query = {}, options) {
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/service_accounts`, (pagination_1.PageCursor), { query, ...options });
+    }
+    /**
+     * **Requires an OAuth access token with the `org:admin` scope**, from
+     * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+     * API keys are not accepted. See
+     * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+     *
+     * Add a service account to a workspace with the given `workspace_role`.
+     *
+     * The role determines what the service account can do in the workspace and which
+     * workspace-scoped permissions it can be granted when authenticating through
+     * federation. Every service account is already an implicit `workspace_user` member
+     * of the default workspace; adding it explicitly assigns a chosen role. If the
+     * service account is already an explicit member of the workspace, its
+     * `workspace_role` is replaced with the value supplied here. Archived workspaces
+     * return 400. Archived service accounts cannot be added and are rejected.
+     *
+     * @example
+     * ```ts
+     * const serviceAccountWorkspaceMember =
+     *   await client.organization.workspaces.serviceAccounts.add(
+     *     'workspace_id',
+     *     {
+     *       service_account_id: 'service_account_id',
+     *       workspace_role: 'workspace_admin',
+     *     },
+     *   );
+     * ```
+     */
+    add(workspaceID, body, options) {
+        return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/service_accounts`, {
+            body,
+            ...options,
+        });
+    }
+    /**
+     * **Requires an OAuth access token with the `org:admin` scope**, from
+     * `ant auth login --scope org:admin` or a workload identity federation rule; Admin
+     * API keys are not accepted. See
+     * [Manage WIF with the Admin API](/docs/en/manage-claude/wif-admin-api).
+     *
+     * Remove a service account from a workspace.
+     *
+     * Removal is idempotent (returns 200 even if the membership was already removed).
+     * A DELETE against the implicit default-workspace membership returns 200 but is a
+     * no-op and the membership persists; deleting an explicit default-workspace row
+     * reverts to the implicit `workspace_user` membership. Archived workspaces
+     * return 400.
+     *
+     * @example
+     * ```ts
+     * const serviceAccount =
+     *   await client.organization.workspaces.serviceAccounts.remove(
+     *     'service_account_id',
+     *     { workspace_id: 'workspace_id' },
+     *   );
+     * ```
+     */
+    remove(serviceAccountID, params, options) {
+        const { workspace_id } = params;
+        return this._client.delete((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/service_accounts/${serviceAccountID}`, options);
+    }
+}
+exports.ServiceAccounts = ServiceAccounts;
+//# sourceMappingURL=service-accounts.js.map
+
+/***/ }),
+
+/***/ 46150:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Workspaces = void 0;
+const tslib_1 = __nccwpck_require__(14839);
+const resource_1 = __nccwpck_require__(82941);
+const MembersAPI = tslib_1.__importStar(__nccwpck_require__(22893));
+const members_1 = __nccwpck_require__(22893);
+const RateLimitsAPI = tslib_1.__importStar(__nccwpck_require__(37063));
+const rate_limits_1 = __nccwpck_require__(37063);
+const ServiceAccountsAPI = tslib_1.__importStar(__nccwpck_require__(7550));
+const service_accounts_1 = __nccwpck_require__(7550);
+const pagination_1 = __nccwpck_require__(27117);
+const path_1 = __nccwpck_require__(43002);
+var Workspaces = /* @__PURE__ */ (() => {
+    class Workspaces extends resource_1.APIResource {
+        constructor() {
+            super(...arguments);
+            this.rateLimits = new RateLimitsAPI.RateLimits(this._client);
+            this.members = new MembersAPI.Members(this._client);
+            this.serviceAccounts = new ServiceAccountsAPI.ServiceAccounts(this._client);
+        }
+        /**
+         * Create Workspace
+         *
+         * @example
+         * ```ts
+         * const workspace =
+         *   await client.organization.workspaces.create({
+         *     name: 'x',
+         *   });
+         * ```
+         */
+        create(body, options) {
+            return this._client.post('/v1/organizations/workspaces', { body, ...options });
+        }
+        /**
+         * Get Workspace
+         *
+         * @example
+         * ```ts
+         * const workspace =
+         *   await client.organization.workspaces.retrieve(
+         *     'workspace_id',
+         *   );
+         * ```
+         */
+        retrieve(workspaceID, options) {
+            return this._client.get((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}`, options);
+        }
+        /**
+         * Update Workspace
+         *
+         * @example
+         * ```ts
+         * const workspace =
+         *   await client.organization.workspaces.update(
+         *     'workspace_id',
+         *   );
+         * ```
+         */
+        update(workspaceID, body, options) {
+            return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}`, { body, ...options });
+        }
+        /**
+         * List Workspaces
+         *
+         * @example
+         * ```ts
+         * // Automatically fetches more pages as needed.
+         * for await (const workspace of client.organization.workspaces.list()) {
+         *   // ...
+         * }
+         * ```
+         */
+        list(query = {}, options) {
+            return this._client.getAPIList('/v1/organizations/workspaces', (pagination_1.Page), { query, ...options });
+        }
+        /**
+         * Archive Workspace
+         *
+         * @example
+         * ```ts
+         * const workspace =
+         *   await client.organization.workspaces.archive(
+         *     'workspace_id',
+         *   );
+         * ```
+         */
+        archive(workspaceID, options) {
+            return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/archive`, options);
+        }
+    }
+    Workspaces.RateLimits = rate_limits_1.RateLimits;
+    Workspaces.Members = members_1.Members;
+    Workspaces.ServiceAccounts = service_accounts_1.ServiceAccounts;
+    return Workspaces;
+})();
+exports.Workspaces = Workspaces;
+//# sourceMappingURL=workspaces.js.map
 
 /***/ }),
 
@@ -53319,770 +57612,773 @@ class DeletePass {
         return true;
     }
 }
-/**
- * The memory stores attached to one session, materialised on disk.
- *
- * {@link SessionMemoryStores.download} opens a {@link LocalFileStore} at each
- * attached store's directory (its `mount_path`, or a workdir fallback — see
- * {@link SessionMemoryStores.download}), pulls its memories, and records each
- * one's `content_sha256` as the sync baseline. Each sync
- * ({@link SessionMemoryStores.syncIfDue} on the worker's cadence,
- * {@link SessionMemoryStores.finish} once at the end) reconciles disk against
- * server, per store and per path:
- *
- * - a memory changed only remotely is written to disk;
- * - a file changed only locally is uploaded — an update with a
- *   `content_sha256` precondition, or a create for a new file;
- * - a file changed on both sides logs a warning and takes the server version;
- * - a file the server refuses (too large, invalid content) is skipped —
- *   warned once and retried only after the file changes; other files keep
- *   syncing;
- * - a file deleted locally is deleted on the server after a delay and a
- *   re-check — never on the first sync that notices, and only up to a
- *   per-sync cap. `syncDeletions` gates it;
- * - a memory deleted on the server is deleted on disk — unless the local
- *   file holds un-pushed edits: a writable store re-creates the memory
- *   from the file, a read-only one keeps the file unsynced;
- * - a store attached read-only pulls but never pushes.
- *
- * A download pulls the whole store, so it lists with content included. The
- * recurring syncs instead run two phases: a content-free listing (paths and
- * shas) drives the merge decisions, then only the memories actually being
- * written to disk are fetched, a bounded number at a time. A sync that finds
- * nothing changed moves no content at all.
- *
- * A file whose write to disk failed is never in the baseline, so its absence
- * reads as a failed download — it is pulled again, never deleted. A write
- * never re-creates a store folder that vanished mid-sync: it fails, and the
- * next sync's scan finds whatever is at the path by then — nothing
- * (re-downloaded) or someone else's files (left alone) — under the rules
- * below.
- *
- * A store folder that loses its {@link MARKER_PATH} marker, is emptied,
- * or vanishes is re-downloaded rather than treated as a mass local
- * delete; a folder whose marker names another store is left as found —
- * nothing pushed, nothing deleted.
- *
- * Two things about the store's directory make
- * {@link SessionMemoryStores.download} refuse the session outright, with
- * {@link SessionMemoryError}: a `mount_path` that is not a clean absolute
- * path, and a directory already sitting at that path.
- *
- * {@link SessionMemoryStores.download} throws on the first store it cannot
- * materialise. The syncs never throw: mid-session, one bad store or one bad
- * file is logged and the rest continue. Instances are not safe for concurrent
- * use. The worker builds one on its token-scoped sub-client (the memory
- * endpoints reject the environment key): `syncIfDue` after each tool call,
- * `finish` once at a clean end, a bounded {@link SessionMemoryStores.flushWrites}
- * in every teardown, `dispose` last.
- */
-class SessionMemoryStores {
-    constructor(client, opts) {
-        _SessionMemoryStores_instances.add(this);
-        _SessionMemoryStores_client.set(this, void 0);
-        _SessionMemoryStores_workdir.set(this, void 0);
-        _SessionMemoryStores_syncIntervalMs.set(this, void 0);
-        _SessionMemoryStores_syncDeletions.set(this, void 0);
-        _SessionMemoryStores_log.set(this, void 0);
-        _SessionMemoryStores_lastSyncAt.set(this, void 0);
-        _SessionMemoryStores_finished.set(this, false);
-        _SessionMemoryStores_stores.set(this, []);
-        tslib_1.__classPrivateFieldSet(this, _SessionMemoryStores_client, client, "f");
-        tslib_1.__classPrivateFieldSet(this, _SessionMemoryStores_workdir, opts.workdir, "f");
-        tslib_1.__classPrivateFieldSet(this, _SessionMemoryStores_syncIntervalMs, opts.syncIntervalMs ?? sync_interval_1.DEFAULT_MEMORY_SYNC_INTERVAL_MS, "f");
-        (0, sync_interval_1.checkMemorySyncInterval)(tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_syncIntervalMs, "f"), 'syncIntervalMs');
-        tslib_1.__classPrivateFieldSet(this, _SessionMemoryStores_syncDeletions, opts.syncDeletions ?? 'enabled', "f");
-        tslib_1.__classPrivateFieldSet(this, _SessionMemoryStores_log, (0, log_1.loggerFor)(client), "f");
-        tslib_1.__classPrivateFieldSet(this, _SessionMemoryStores_lastSyncAt, Date.now(), "f");
-    }
+var SessionMemoryStores = /* @__PURE__ */ (() => {
     /**
-     * Every attached store's root directory.
+     * The memory stores attached to one session, materialised on disk.
      *
-     * The worker lists these as the file tools' allowed roots so a store
-     * mounted outside the workdir stays reachable.
-     */
-    get roots() {
-        return tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_stores, "f").map((s) => s.files.root().path);
-    }
-    /**
-     * Root directories of stores attached read-only.
+     * {@link SessionMemoryStores.download} opens a {@link LocalFileStore} at each
+     * attached store's directory (its `mount_path`, or a workdir fallback — see
+     * {@link SessionMemoryStores.download}), pulls its memories, and records each
+     * one's `content_sha256` as the sync baseline. Each sync
+     * ({@link SessionMemoryStores.syncIfDue} on the worker's cadence,
+     * {@link SessionMemoryStores.finish} once at the end) reconciles disk against
+     * server, per store and per path:
      *
-     * The file tools consult this to refuse writes into read-only stores.
-     */
-    get readOnlyRoots() {
-        return tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_stores, "f").filter((s) => s.readOnly).map((s) => s.files.root().path);
-    }
-    /**
-     * Download every attached store's memories to disk.
+     * - a memory changed only remotely is written to disk;
+     * - a file changed only locally is uploaded — an update with a
+     *   `content_sha256` precondition, or a create for a new file;
+     * - a file changed on both sides logs a warning and takes the server version;
+     * - a file the server refuses (too large, invalid content) is skipped —
+     *   warned once and retried only after the file changes; other files keep
+     *   syncing;
+     * - a file deleted locally is deleted on the server after a delay and a
+     *   re-check — never on the first sync that notices, and only up to a
+     *   per-sync cap. `syncDeletions` gates it;
+     * - a memory deleted on the server is deleted on disk — unless the local
+     *   file holds un-pushed edits: a writable store re-creates the memory
+     *   from the file, a read-only one keeps the file unsynced;
+     * - a store attached read-only pulls but never pushes.
      *
-     * `session` arrives already fetched — one snapshot shared with the skills
-     * download, so the two cannot disagree about the resources.
+     * A download pulls the whole store, so it lists with content included. The
+     * recurring syncs instead run two phases: a content-free listing (paths and
+     * shas) drives the merge decisions, then only the memories actually being
+     * written to disk are fetched, a bounded number at a time. A sync that finds
+     * nothing changed moves no content at all.
+     *
+     * A file whose write to disk failed is never in the baseline, so its absence
+     * reads as a failed download — it is pulled again, never deleted. A write
+     * never re-creates a store folder that vanished mid-sync: it fails, and the
+     * next sync's scan finds whatever is at the path by then — nothing
+     * (re-downloaded) or someone else's files (left alone) — under the rules
+     * below.
+     *
+     * A store folder that loses its {@link MARKER_PATH} marker, is emptied,
+     * or vanishes is re-downloaded rather than treated as a mass local
+     * delete; a folder whose marker names another store is left as found —
+     * nothing pushed, nothing deleted.
+     *
+     * Two things about the store's directory make
+     * {@link SessionMemoryStores.download} refuse the session outright, with
+     * {@link SessionMemoryError}: a `mount_path` that is not a clean absolute
+     * path, and a directory already sitting at that path.
+     *
+     * {@link SessionMemoryStores.download} throws on the first store it cannot
+     * materialise. The syncs never throw: mid-session, one bad store or one bad
+     * file is logged and the rest continue. Instances are not safe for concurrent
+     * use. The worker builds one on its token-scoped sub-client (the memory
+     * endpoints reject the environment key): `syncIfDue` after each tool call,
+     * `finish` once at a clean end, a bounded {@link SessionMemoryStores.flushWrites}
+     * in every teardown, `dispose` last.
      */
-    async download(session) {
-        for (const resource of session.resources) {
-            if (resource.type !== 'memory_store')
-                continue;
-            const root = tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_storeRoot).call(this, resource);
-            let store;
-            try {
-                store = {
-                    memoryStoreId: resource.memory_store_id,
-                    // utf8: a binary file is refused at put/get, not mid-sync.
-                    files: await file_store_1.LocalFileStore.open(root, { utf8: true }),
-                    readOnly: resource.access === 'read_only',
-                    baseline: new Map(),
-                    refusedShas: new Map(),
-                    pendingDeletes: new Map(),
-                };
-                // A root `open` did not create is a dead run's leftovers; the first
-                // sync would upload them into the customer's store.
-                if (!store.files.root().removedOnDispose) {
-                    // The configured path, not root().path — that one is resolved and
-                    // would name a symlinked mount's target.
-                    throw new SessionMemoryError(`something already exists at the memory store's path: ${root} ` +
-                        `(memory_store_id=${resource.memory_store_id}); ` +
-                        'it must not exist when the session starts');
-                }
+    class SessionMemoryStores {
+        constructor(client, opts) {
+            _SessionMemoryStores_instances.add(this);
+            _SessionMemoryStores_client.set(this, void 0);
+            _SessionMemoryStores_workdir.set(this, void 0);
+            _SessionMemoryStores_syncIntervalMs.set(this, void 0);
+            _SessionMemoryStores_syncDeletions.set(this, void 0);
+            _SessionMemoryStores_log.set(this, void 0);
+            _SessionMemoryStores_lastSyncAt.set(this, void 0);
+            _SessionMemoryStores_finished.set(this, false);
+            _SessionMemoryStores_stores.set(this, []);
+            tslib_1.__classPrivateFieldSet(this, _SessionMemoryStores_client, client, "f");
+            tslib_1.__classPrivateFieldSet(this, _SessionMemoryStores_workdir, opts.workdir, "f");
+            tslib_1.__classPrivateFieldSet(this, _SessionMemoryStores_syncIntervalMs, opts.syncIntervalMs ?? sync_interval_1.DEFAULT_MEMORY_SYNC_INTERVAL_MS, "f");
+            (0, sync_interval_1.checkMemorySyncInterval)(tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_syncIntervalMs, "f"), 'syncIntervalMs');
+            tslib_1.__classPrivateFieldSet(this, _SessionMemoryStores_syncDeletions, opts.syncDeletions ?? 'enabled', "f");
+            tslib_1.__classPrivateFieldSet(this, _SessionMemoryStores_log, (0, log_1.loggerFor)(client), "f");
+            tslib_1.__classPrivateFieldSet(this, _SessionMemoryStores_lastSyncAt, Date.now(), "f");
+        }
+        /**
+         * Every attached store's root directory.
+         *
+         * The worker lists these as the file tools' allowed roots so a store
+         * mounted outside the workdir stays reachable.
+         */
+        get roots() {
+            return tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_stores, "f").map((s) => s.files.root().path);
+        }
+        /**
+         * Root directories of stores attached read-only.
+         *
+         * The file tools consult this to refuse writes into read-only stores.
+         */
+        get readOnlyRoots() {
+            return tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_stores, "f").filter((s) => s.readOnly).map((s) => s.files.root().path);
+        }
+        /**
+         * Download every attached store's memories to disk.
+         *
+         * `session` arrives already fetched — one snapshot shared with the skills
+         * download, so the two cannot disagree about the resources.
+         */
+        async download(session) {
+            for (const resource of session.resources) {
+                if (resource.type !== 'memory_store')
+                    continue;
+                const root = tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_storeRoot).call(this, resource);
+                let store;
                 try {
-                    await store.files.createRoot();
+                    store = {
+                        memoryStoreId: resource.memory_store_id,
+                        // utf8: a binary file is refused at put/get, not mid-sync.
+                        files: await file_store_1.LocalFileStore.open(root, { utf8: true }),
+                        readOnly: resource.access === 'read_only',
+                        baseline: new Map(),
+                        refusedShas: new Map(),
+                        pendingDeletes: new Map(),
+                    };
+                    // A root `open` did not create is a dead run's leftovers; the first
+                    // sync would upload them into the customer's store.
+                    if (!store.files.root().removedOnDispose) {
+                        // The configured path, not root().path — that one is resolved and
+                        // would name a symlinked mount's target.
+                        throw new SessionMemoryError(`something already exists at the memory store's path: ${root} ` +
+                            `(memory_store_id=${resource.memory_store_id}); ` +
+                            'it must not exist when the session starts');
+                    }
+                    try {
+                        await store.files.createRoot();
+                    }
+                    catch (e) {
+                        if (!isErrno(e))
+                            throw e;
+                        // An unmountable root fails the item, not just one file.
+                        throw new SessionMemoryError(`cannot create the memory store's folder: ${root} ` +
+                            `(memory_store_id=${resource.memory_store_id}): ${e}; ` +
+                            'the worker host must make this mount path writable', e);
+                    }
+                    await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_stampAndPull).call(this, store);
+                    tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").info('downloaded memories', {
+                        count: store.baseline.size,
+                        memory_store_id: store.memoryStoreId,
+                        dest: store.files.root().path,
+                    });
+                    tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_stores, "f").push(store);
                 }
                 catch (e) {
-                    if (!isErrno(e))
+                    // A half-downloaded folder self-destructs; `dispose` leaves a refused
+                    // pre-existing directory exactly as found.
+                    if (store)
+                        await store.files.dispose().catch(() => { });
+                    // Every store must land: a session missing a folder its system prompt
+                    // names runs with amnesia and syncs nothing back.
+                    if (e instanceof SessionMemoryError)
                         throw e;
-                    // An unmountable root fails the item, not just one file.
-                    throw new SessionMemoryError(`cannot create the memory store's folder: ${root} ` +
-                        `(memory_store_id=${resource.memory_store_id}): ${e}; ` +
-                        'the worker host must make this mount path writable', e);
+                    throw new SessionMemoryError(`failed to download memory store memory_store_id=${resource.memory_store_id}: ${e}`, e);
                 }
-                await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_stampAndPull).call(this, store);
-                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").info('downloaded memories', {
-                    count: store.baseline.size,
-                    memory_store_id: store.memoryStoreId,
-                    dest: store.files.root().path,
-                });
-                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_stores, "f").push(store);
             }
-            catch (e) {
-                // A half-downloaded folder self-destructs; `dispose` leaves a refused
-                // pre-existing directory exactly as found.
-                if (store)
-                    await store.files.dispose().catch(() => { });
-                // Every store must land: a session missing a folder its system prompt
-                // names runs with amnesia and syncs nothing back.
-                if (e instanceof SessionMemoryError)
-                    throw e;
-                throw new SessionMemoryError(`failed to download memory store memory_store_id=${resource.memory_store_id}: ${e}`, e);
+            tslib_1.__classPrivateFieldSet(this, _SessionMemoryStores_lastSyncAt, Date.now(), "f");
+        }
+        /**
+         * The session's last sync — skips the delete wait, so calling it twice
+         * would undo the protection; it throws instead.
+         */
+        async finish() {
+            if (tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_finished, "f")) {
+                throw new error_1.AnthropicError("finish() was already called: it is the session's last sync and runs once");
             }
+            tslib_1.__classPrivateFieldSet(this, _SessionMemoryStores_finished, true, "f");
+            await this.syncAll(true);
         }
-        tslib_1.__classPrivateFieldSet(this, _SessionMemoryStores_lastSyncAt, Date.now(), "f");
-    }
-    /**
-     * The session's last sync — skips the delete wait, so calling it twice
-     * would undo the protection; it throws instead.
-     */
-    async finish() {
-        if (tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_finished, "f")) {
-            throw new error_1.AnthropicError("finish() was already called: it is the session's last sync and runs once");
+        /** @internal — reconcile every store once; the tests' deterministic driver */
+        async syncAll(final) {
+            await Promise.all(tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_stores, "f").map((store) => tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_syncStore).call(this, store, final)));
+            tslib_1.__classPrivateFieldSet(this, _SessionMemoryStores_lastSyncAt, Date.now(), "f");
         }
-        tslib_1.__classPrivateFieldSet(this, _SessionMemoryStores_finished, true, "f");
-        await this.syncAll(true);
-    }
-    /** @internal — reconcile every store once; the tests' deterministic driver */
-    async syncAll(final) {
-        await Promise.all(tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_stores, "f").map((store) => tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_syncStore).call(this, store, final)));
-        tslib_1.__classPrivateFieldSet(this, _SessionMemoryStores_lastSyncAt, Date.now(), "f");
-    }
-    /** Sync when `syncIntervalMs` has elapsed since the last one. Never throws. */
-    async syncIfDue() {
-        if (Date.now() - tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_lastSyncAt, "f") < tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_syncIntervalMs, "f"))
-            return;
-        await this.syncAll(false);
-    }
-    /**
-     * Upload new and changed files; send no deletes and pull nothing.
-     *
-     * The push-only rescue pass for a session ending on an error or
-     * cancel — best-effort, bounded by the caller: once `signal` aborts no
-     * further upload starts, each store cut off part-way logs how many
-     * changed files it had not finished uploading, and this resolves without
-     * waiting for requests already in flight. Each store uploads up to
-     * {@link UPLOAD_CONCURRENCY} files at a time. Skips read-only stores,
-     * refused files, files the server already holds, and folders that fail
-     * the marker check. Never throws.
-     */
-    async flushWrites(signal) {
-        await Promise.all(tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_stores, "f").map((store) => tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_flushStore).call(this, store, signal)));
-    }
-    /**
-     * Remove every store directory that {@link SessionMemoryStores.download}
-     * created. Pre-existing directories are left alone — that is
-     * {@link FileStore.dispose}'s own rule. A folder that fails the marker
-     * check is kept too — sync left it as found, so must dispose.
-     */
-    async dispose() {
-        for (const store of tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_stores, "f")) {
-            const root = store.files.root();
-            try {
-                const scan = await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_scanMarker).call(this, store);
-                if (!scan.markerOk && Object.keys(scan.files).length > 0) {
-                    tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn(`${scan.distrustReason}; leaving the memory store folder on disk`, {
-                        root: root.path,
+        /** Sync when `syncIntervalMs` has elapsed since the last one. Never throws. */
+        async syncIfDue() {
+            if (Date.now() - tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_lastSyncAt, "f") < tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_syncIntervalMs, "f"))
+                return;
+            await this.syncAll(false);
+        }
+        /**
+         * Upload new and changed files; send no deletes and pull nothing.
+         *
+         * The push-only rescue pass for a session ending on an error or
+         * cancel — best-effort, bounded by the caller: once `signal` aborts no
+         * further upload starts, each store cut off part-way logs how many
+         * changed files it had not finished uploading, and this resolves without
+         * waiting for requests already in flight. Each store uploads up to
+         * {@link UPLOAD_CONCURRENCY} files at a time. Skips read-only stores,
+         * refused files, files the server already holds, and folders that fail
+         * the marker check. Never throws.
+         */
+        async flushWrites(signal) {
+            await Promise.all(tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_stores, "f").map((store) => tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_flushStore).call(this, store, signal)));
+        }
+        /**
+         * Remove every store directory that {@link SessionMemoryStores.download}
+         * created. Pre-existing directories are left alone — that is
+         * {@link FileStore.dispose}'s own rule. A folder that fails the marker
+         * check is kept too — sync left it as found, so must dispose.
+         */
+        async dispose() {
+            for (const store of tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_stores, "f")) {
+                const root = store.files.root();
+                try {
+                    const scan = await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_scanMarker).call(this, store);
+                    if (!scan.markerOk && Object.keys(scan.files).length > 0) {
+                        tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn(`${scan.distrustReason}; leaving the memory store folder on disk`, {
+                            root: root.path,
+                            memory_store_id: store.memoryStoreId,
+                        });
+                        continue;
+                    }
+                    await store.files.dispose();
+                }
+                catch (e) {
+                    if (!(e instanceof file_store_1.FileStoreError) && !isErrno(e))
+                        throw e;
+                    tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('failed to remove the memory store folder', {
+                        root: store.files.root().path,
                         memory_store_id: store.memoryStoreId,
+                        error: String(e),
                     });
                     continue;
                 }
-                await store.files.dispose();
+                if (root.removedOnDispose) {
+                    tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").info('removed memory store dir', {
+                        dest: root.path,
+                        memory_store_id: store.memoryStoreId,
+                    });
+                }
+            }
+        }
+    }
+    _SessionMemoryStores_client = new WeakMap(), _SessionMemoryStores_workdir = new WeakMap(), _SessionMemoryStores_syncIntervalMs = new WeakMap(), _SessionMemoryStores_syncDeletions = new WeakMap(), _SessionMemoryStores_log = new WeakMap(), _SessionMemoryStores_lastSyncAt = new WeakMap(), _SessionMemoryStores_finished = new WeakMap(), _SessionMemoryStores_stores = new WeakMap(), _SessionMemoryStores_instances = new WeakSet(), _SessionMemoryStores_storeRoot = function _SessionMemoryStores_storeRoot(resource) {
+        if (resource.mount_path) {
+            if (!(0, file_store_1.isPathLegal)(resource.mount_path)) {
+                throw new SessionMemoryError(`memory store mount_path is not a clean absolute path: ${JSON.stringify(resource.mount_path)} ` +
+                    `(memory_store_id=${resource.memory_store_id})`);
+            }
+            return resource.mount_path;
+        }
+        // No mount_path at all: nothing points the agent anywhere, so the workdir
+        // is as good a home as any.
+        return node_1.path.join(tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_workdir, "f"), 'memory', resource.name || resource.memory_store_id);
+    }, _SessionMemoryStores_scanMarker = async function _SessionMemoryStores_scanMarker(store) {
+        const local = await store.files.hashtree();
+        const marker = local[exports.MARKER_PATH];
+        delete local[exports.MARKER_PATH];
+        if (marker === markerSha(store.memoryStoreId)) {
+            return { files: local, markerOk: true, distrustReason: null };
+        }
+        return {
+            files: local,
+            markerOk: false,
+            distrustReason: marker !== undefined ? 'the marker file does not match this store' : 'the marker file is gone',
+        };
+    }, _SessionMemoryStores_syncStore = async function _SessionMemoryStores_syncStore(store, final) {
+        try {
+            const scan = await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_scanMarker).call(this, store);
+            const local = scan.files;
+            if (!scan.markerOk) {
+                if (Object.keys(local).length > 0) {
+                    tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn(`${scan.distrustReason}; leaving the memory store folder as found and not syncing`, {
+                        root: store.files.root().path,
+                        memory_store_id: store.memoryStoreId,
+                    });
+                    return;
+                }
+                await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_recover).call(this, store, 'the folder or its marker is gone');
+                return;
+            }
+            // A lone file vanishing is an ordinary deletion; two or more at
+            // once with nothing left is a wiped folder.
+            if (Object.keys(local).length === 0 && store.baseline.size > 1) {
+                await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_recover).call(this, store, 'every memory file is gone at once');
+                return;
+            }
+            const remote = new Map();
+            for await (const [rel, item] of tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_listMemories).call(this, store.memoryStoreId)) {
+                remote.set(rel, item);
+            }
+            const deletes = new DeletePass(tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_syncDeletions, "f"), Math.max(DELETE_CAP_FLOOR, Math.min(DELETE_CAP_CEILING, Math.floor(store.baseline.size / 4))), final);
+            const pulls = [];
+            const baseline = new Map();
+            const paths = [...new Set([...remote.keys(), ...Object.keys(local), ...store.baseline.keys()])].sort();
+            for (const rel of paths) {
+                const remoteItem = remote.get(rel);
+                const localSha = local[rel];
+                const baseSha = store.baseline.get(rel);
+                let sha;
+                if (localSha === undefined &&
+                    baseSha !== undefined &&
+                    remoteItem !== undefined &&
+                    remoteItem.content_sha256 === baseSha &&
+                    !store.readOnly) {
+                    sha = await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_corroboratedDelete).call(this, store, rel, remoteItem, baseSha, deletes);
+                }
+                else {
+                    sha = await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_syncPath).call(this, store, rel, remoteItem, localSha, pulls);
+                }
+                if (sha !== undefined)
+                    baseline.set(rel, sha);
+            }
+            store.baseline = baseline;
+            // The content pass: everything above moved only shas.
+            await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_pullAll).call(this, store, pulls);
+            if (deletes.suppressed > 0) {
+                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").debug('remote deletes are disabled; locally deleted memories stay on the server', {
+                    count: deletes.suppressed,
+                    memory_store_id: store.memoryStoreId,
+                });
+            }
+            if (deletes.capped > 0) {
+                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn(`delete cap reached: ${deletes.mode === 'log_only' ? 'would send' : 'sent'} ` +
+                    `${deletes.attempted} deletes, held ${deletes.capped} for later syncs`, { memory_store_id: store.memoryStoreId });
+            }
+        }
+        catch (e) {
+            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('memory sync failed', { memory_store_id: store.memoryStoreId, error: String(e) });
+        }
+    }, _SessionMemoryStores_flushStore = async function _SessionMemoryStores_flushStore(store, signal) {
+        const dirty = new Map();
+        const unsent = new Set();
+        const push = async () => {
+            if (store.readOnly)
+                return;
+            const scan = await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_scanMarker).call(this, store);
+            if (!scan.markerOk) {
+                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn(`${scan.distrustReason}; not uploading anything from the memory store folder`, {
+                    root: store.files.root().path,
+                    memory_store_id: store.memoryStoreId,
+                });
+                return;
+            }
+            for (const [rel, sha] of Object.entries(scan.files)) {
+                if (sha !== store.baseline.get(rel) && store.refusedShas.get(rel) !== sha) {
+                    dirty.set(rel, sha);
+                    unsent.add(rel);
+                }
+            }
+            if (dirty.size === 0 || signal?.aborted)
+                return;
+            const remote = new Map();
+            for await (const [rel, item] of tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_listMemories).call(this, store.memoryStoreId)) {
+                if (signal?.aborted)
+                    return;
+                remote.set(rel, item);
+            }
+            const uploads = [];
+            for (const rel of [...dirty.keys()].sort()) {
+                const localSha = dirty.get(rel);
+                const baseSha = store.baseline.get(rel);
+                const existing = remote.get(rel);
+                if (existing !== undefined && existing.content_sha256 === localSha) {
+                    store.baseline.set(rel, existing.content_sha256);
+                    unsent.delete(rel);
+                    continue;
+                }
+                if (existing !== undefined && existing.content_sha256 !== baseSha) {
+                    tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('memory changed both locally and remotely; the flush leaves the remote version', {
+                        path: rel,
+                        memory_store_id: store.memoryStoreId,
+                    });
+                    unsent.delete(rel);
+                    continue;
+                }
+                uploads.push([rel, localSha, existing]);
+            }
+            await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_uploadAll).call(this, store, uploads, unsent, signal);
+        };
+        try {
+            await settledOrAborted(push(), signal);
+            if (signal?.aborted && unsent.size > 0) {
+                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn(`memory flush cut off part-way; ${unsent.size} of ${dirty.size} changed files had not finished uploading`, { memory_store_id: store.memoryStoreId });
+            }
+        }
+        catch (e) {
+            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('memory flush failed', { memory_store_id: store.memoryStoreId, error: String(e) });
+        }
+    }, _SessionMemoryStores_recover = 
+    /** Rebuild a destroyed folder from the server; sends no deletes, no uploads. */
+    async function _SessionMemoryStores_recover(store, reason) {
+        tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn(`${reason}; re-downloading the memory store folder instead of syncing`, {
+            root: store.files.root().path,
+            memory_store_id: store.memoryStoreId,
+        });
+        await store.files.createRoot();
+        await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_stampAndPull).call(this, store);
+    }, _SessionMemoryStores_stampAndPull = 
+    /**
+     * Write the marker, then pull every remote memory. Baseline is cleared
+     * first so a failed write never leaves an entry whose file is not on disk.
+     * Every memory is needed here, so the listing carries the content — pages
+     * cost far fewer round-trips than a request per memory.
+     */
+    async function _SessionMemoryStores_stampAndPull(store) {
+        store.baseline = new Map();
+        store.pendingDeletes.clear();
+        await store.files.put(exports.MARKER_PATH, `version ${MARKER_VERSION}\n${store.memoryStoreId}`);
+        for await (const [rel, item] of tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_listMemories).call(this, store.memoryStoreId, 'full')) {
+            if (await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_write).call(this, store, rel, item.content ?? '')) {
+                store.baseline.set(rel, item.content_sha256);
+            }
+        }
+    }, _SessionMemoryStores_syncPath = 
+    /**
+     * Reconcile one path. Returns the sha to record in the baseline, or
+     * `undefined` to drop the path from it.
+     *
+     * `pulls` is an output: when the remote version should be written to disk,
+     * this appends `[rel, remote]` to it instead of writing — `rel` is the
+     * file to write, `remote` the listed memory whose content `#pullAll` will
+     * fetch and write there.
+     */
+    async function _SessionMemoryStores_syncPath(store, rel, remote, localSha, pulls) {
+        const baseSha = store.baseline.get(rel);
+        if (localSha !== undefined) {
+            store.pendingDeletes.delete(rel);
+        }
+        if (!remote) {
+            if (localSha === undefined) {
+                store.pendingDeletes.delete(rel);
+                return undefined;
+            }
+            if (baseSha !== undefined) {
+                if (localSha === baseSha) {
+                    const fresh = await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_removeLocal).call(this, store, rel, baseSha);
+                    if (fresh === undefined)
+                        return undefined;
+                    if (fresh === baseSha)
+                        return baseSha;
+                    localSha = fresh;
+                }
+                // The file holds an un-pushed edit — the only copy; falling
+                // through re-creates or keeps it.
+                if (store.readOnly) {
+                    tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('memory deleted remotely but edited locally; keeping the file, ' +
+                        'which a read-only store cannot push', { path: rel, memory_store_id: store.memoryStoreId });
+                }
+                else if (store.refusedShas.get(rel) !== localSha) {
+                    tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").info('memory deleted remotely but edited locally; re-creating it from the file', {
+                        path: rel,
+                        memory_store_id: store.memoryStoreId,
+                    });
+                }
+            }
+            if (store.readOnly)
+                return undefined;
+            if (store.refusedShas.get(rel) === localSha)
+                return undefined;
+            return await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_upload).call(this, store, rel, localSha, undefined);
+        }
+        const remoteSha = remote.content_sha256;
+        const remoteChanged = remoteSha !== baseSha;
+        const locallyEdited = localSha !== undefined && localSha !== baseSha && localSha !== remoteSha;
+        // Read-only stores never push, so their local edits don't count.
+        const localChanged = !store.readOnly && locallyEdited;
+        if (localSha === undefined && baseSha !== undefined) {
+            // Only successful writes enter the baseline, so this file was verifiably
+            // on disk and is now gone: a real local deletion. The unchanged-remote
+            // case went to #corroboratedDelete.
+            if (remoteChanged) {
+                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('memory deleted locally but changed remotely; restoring the remote version', {
+                    path: rel,
+                    memory_store_id: store.memoryStoreId,
+                });
+                store.pendingDeletes.delete(rel);
+                pulls.push([rel, remote]);
+            }
+            return baseSha;
+        }
+        if (remoteChanged) {
+            // The file already holds the remote bytes — adopt without a fetch.
+            if (localSha === remoteSha)
+                return remoteSha;
+            // locallyEdited, not localChanged: warn on read-only overwrites too.
+            if (locallyEdited) {
+                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('memory changed both locally and remotely; keeping the remote version', {
+                    path: rel,
+                    memory_store_id: store.memoryStoreId,
+                });
+            }
+            pulls.push([rel, remote]);
+            return baseSha;
+        }
+        if (localChanged) {
+            if (store.refusedShas.get(rel) === localSha)
+                return remoteSha;
+            return (await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_upload).call(this, store, rel, localSha, remote)) ?? remoteSha;
+        }
+        return remoteSha;
+    }, _SessionMemoryStores_removeLocal = 
+    /**
+     * Remove the file for a memory the server no longer has, if it still holds
+     * `expectSha`. Returns `undefined` when the file is gone from disk,
+     * `expectSha` when it must stay in the baseline (I/O error), or the file's
+     * fresh sha when it was edited since the scan.
+     */
+    async function _SessionMemoryStores_removeLocal(store, rel, expectSha) {
+        // Re-read: an edit since the scan makes this file the only copy.
+        let freshSha;
+        try {
+            freshSha = await store.files.hashFile(rel);
+        }
+        catch (e) {
+            if (!(e instanceof file_store_1.FileStoreError) && !isErrno(e))
+                throw e;
+            return expectSha;
+        }
+        if (freshSha === null)
+            return undefined;
+        if (freshSha !== expectSha)
+            return freshSha;
+        try {
+            await store.files.remove(rel);
+        }
+        catch (e) {
+            if (!(e instanceof file_store_1.FileStoreError) && !isErrno(e))
+                throw e;
+            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('failed to remove memory deleted remotely', {
+                path: rel,
+                memory_store_id: store.memoryStoreId,
+                error: String(e),
+            });
+            return expectSha;
+        }
+        return undefined;
+    }, _SessionMemoryStores_write = 
+    /**
+     * Write a memory's content to disk; `false` (and a warning) on failure.
+     *
+     * A `..` component in the wire path reaches here as {@link FileStoreError} —
+     * that is the escape guard.
+     */
+    async function _SessionMemoryStores_write(store, rel, content) {
+        try {
+            await store.files.put(rel, content);
+        }
+        catch (e) {
+            if (!(e instanceof file_store_1.FileStoreError) && !isErrno(e))
+                throw e;
+            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('failed to write memory', {
+                path: rel,
+                memory_store_id: store.memoryStoreId,
+                error: String(e),
+            });
+            return false;
+        }
+        return true;
+    }, _SessionMemoryStores_pullAll = 
+    /**
+     * Fetch and write the given memories, {@link FETCH_CONCURRENCY} at a time.
+     *
+     * The sync's content pass: the listing carried no content, so each memory
+     * is fetched individually and written as it arrives. On success the path's
+     * baseline advances; on a failed fetch or write the old entry stays and the
+     * next sync retries. A 404 means the memory was deleted after the listing —
+     * the next sync reconciles it.
+     */
+    async function _SessionMemoryStores_pullAll(store, pulls) {
+        if (pulls.length === 0)
+            return;
+        const pullOne = async (rel, listed) => {
+            let item;
+            try {
+                item = await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_client, "f").beta.memoryStores.memories.retrieve(listed.id, {
+                    memory_store_id: store.memoryStoreId,
+                    view: 'full',
+                });
             }
             catch (e) {
-                if (!(e instanceof file_store_1.FileStoreError) && !isErrno(e))
-                    throw e;
-                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('failed to remove the memory store folder', {
-                    root: store.files.root().path,
+                if ((0, backoff_1.isStatus)(e, 404))
+                    return;
+                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('failed to fetch memory content', {
+                    path: rel,
                     memory_store_id: store.memoryStoreId,
                     error: String(e),
                 });
-                continue;
-            }
-            if (root.removedOnDispose) {
-                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").info('removed memory store dir', {
-                    dest: root.path,
-                    memory_store_id: store.memoryStoreId,
-                });
-            }
-        }
-    }
-}
-exports.SessionMemoryStores = SessionMemoryStores;
-_SessionMemoryStores_client = new WeakMap(), _SessionMemoryStores_workdir = new WeakMap(), _SessionMemoryStores_syncIntervalMs = new WeakMap(), _SessionMemoryStores_syncDeletions = new WeakMap(), _SessionMemoryStores_log = new WeakMap(), _SessionMemoryStores_lastSyncAt = new WeakMap(), _SessionMemoryStores_finished = new WeakMap(), _SessionMemoryStores_stores = new WeakMap(), _SessionMemoryStores_instances = new WeakSet(), _SessionMemoryStores_storeRoot = function _SessionMemoryStores_storeRoot(resource) {
-    if (resource.mount_path) {
-        if (!(0, file_store_1.isPathLegal)(resource.mount_path)) {
-            throw new SessionMemoryError(`memory store mount_path is not a clean absolute path: ${JSON.stringify(resource.mount_path)} ` +
-                `(memory_store_id=${resource.memory_store_id})`);
-        }
-        return resource.mount_path;
-    }
-    // No mount_path at all: nothing points the agent anywhere, so the workdir
-    // is as good a home as any.
-    return node_1.path.join(tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_workdir, "f"), 'memory', resource.name || resource.memory_store_id);
-}, _SessionMemoryStores_scanMarker = async function _SessionMemoryStores_scanMarker(store) {
-    const local = await store.files.hashtree();
-    const marker = local[exports.MARKER_PATH];
-    delete local[exports.MARKER_PATH];
-    if (marker === markerSha(store.memoryStoreId)) {
-        return { files: local, markerOk: true, distrustReason: null };
-    }
-    return {
-        files: local,
-        markerOk: false,
-        distrustReason: marker !== undefined ? 'the marker file does not match this store' : 'the marker file is gone',
-    };
-}, _SessionMemoryStores_syncStore = async function _SessionMemoryStores_syncStore(store, final) {
-    try {
-        const scan = await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_scanMarker).call(this, store);
-        const local = scan.files;
-        if (!scan.markerOk) {
-            if (Object.keys(local).length > 0) {
-                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn(`${scan.distrustReason}; leaving the memory store folder as found and not syncing`, {
-                    root: store.files.root().path,
-                    memory_store_id: store.memoryStoreId,
-                });
                 return;
             }
-            await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_recover).call(this, store, 'the folder or its marker is gone');
-            return;
+            if (await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_write).call(this, store, rel, item.content ?? '')) {
+                store.baseline.set(rel, item.content_sha256);
+            }
+        };
+        // A fixed pool of workers drains the queue; the write stays inside the
+        // worker so a slow disk cannot let fetched bodies pile up beyond the bound.
+        const queue = pulls[Symbol.iterator]();
+        const worker = async () => {
+            for (const [rel, listed] of queue)
+                await pullOne(rel, listed);
+        };
+        await Promise.all(Array.from({ length: Math.min(FETCH_CONCURRENCY, pulls.length) }, worker));
+    }, _SessionMemoryStores_uploadAll = 
+    /**
+     * Upload the given files, {@link UPLOAD_CONCURRENCY} at a time, taking each
+     * path off `unsent` as its upload returns. No upload starts once `signal`
+     * aborts; the ones already in flight run to completion.
+     */
+    async function _SessionMemoryStores_uploadAll(store, uploads, unsent, signal) {
+        const queue = uploads[Symbol.iterator]();
+        const worker = async () => {
+            for (const [rel, localSha, existing] of queue) {
+                if (signal?.aborted)
+                    return;
+                const sha = await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_upload).call(this, store, rel, localSha, existing);
+                unsent.delete(rel);
+                if (sha !== undefined)
+                    store.baseline.set(rel, sha);
+            }
+        };
+        await Promise.all(Array.from({ length: Math.min(exports.UPLOAD_CONCURRENCY, uploads.length) }, worker));
+    }, _SessionMemoryStores_listMemories = 
+    /**
+     * The store's memories keyed by relative path (the wire path's leading `/`
+     * stripped — `#upload` re-prefixes it) — `basic` view (shas, no content) at
+     * {@link LIST_PAGE_SIZE} per page unless the caller needs `full` pages.
+     * `memory_prefix` rollups and the reserved marker path are skipped.
+     */
+    async function* _SessionMemoryStores_listMemories(memoryStoreId, view = 'basic') {
+        const limit = view === 'basic' ? LIST_PAGE_SIZE : FULL_LIST_PAGE_SIZE;
+        for await (const item of tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_client, "f").beta.memoryStores.memories.list(memoryStoreId, { view, limit })) {
+            if (item.type !== 'memory')
+                continue;
+            const rel = item.path.replace(/^\/+/, '');
+            if (rel === exports.MARKER_PATH) {
+                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('the server listed the reserved marker path; skipping', {
+                    path: item.path,
+                    memory_store_id: memoryStoreId,
+                });
+                continue;
+            }
+            yield [rel, item];
         }
-        // A lone file vanishing is an ordinary deletion; two or more at
-        // once with nothing left is a wiped folder.
-        if (Object.keys(local).length === 0 && store.baseline.size > 1) {
-            await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_recover).call(this, store, 'every memory file is gone at once');
-            return;
+    }, _SessionMemoryStores_upload = 
+    /**
+     * Push one local file; `undefined` keeps the old baseline so the next pass retries.
+     *
+     * A refusal the server would repeat (400/413, the utf-8 gate) enters
+     * `refusedShas`: warned once, retried only after the file changes.
+     */
+    async function _SessionMemoryStores_upload(store, rel, localSha, existing) {
+        try {
+            const data = await store.files.get(rel);
+            if (data === null)
+                return undefined;
+            const content = (0, bytes_1.decodeUTF8)(data);
+            const item = existing ?
+                await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_client, "f").beta.memoryStores.memories.update(existing.id, {
+                    memory_store_id: store.memoryStoreId,
+                    content,
+                    precondition: { type: 'content_sha256', content_sha256: existing.content_sha256 },
+                })
+                : await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_client, "f").beta.memoryStores.memories.create(store.memoryStoreId, {
+                    path: '/' + rel,
+                    content,
+                });
+            store.refusedShas.delete(rel);
+            return item.content_sha256;
         }
-        const remote = new Map();
-        for await (const [rel, item] of tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_listMemories).call(this, store.memoryStoreId)) {
-            remote.set(rel, item);
-        }
-        const deletes = new DeletePass(tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_syncDeletions, "f"), Math.max(DELETE_CAP_FLOOR, Math.min(DELETE_CAP_CEILING, Math.floor(store.baseline.size / 4))), final);
-        const pulls = [];
-        const baseline = new Map();
-        const paths = [...new Set([...remote.keys(), ...Object.keys(local), ...store.baseline.keys()])].sort();
-        for (const rel of paths) {
-            const remoteItem = remote.get(rel);
-            const localSha = local[rel];
-            const baseSha = store.baseline.get(rel);
-            let sha;
-            if (localSha === undefined &&
-                baseSha !== undefined &&
-                remoteItem !== undefined &&
-                remoteItem.content_sha256 === baseSha &&
-                !store.readOnly) {
-                sha = await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_corroboratedDelete).call(this, store, rel, remoteItem, baseSha, deletes);
+        catch (e) {
+            if (existing && (0, backoff_1.isStatus)(e, 404)) {
+                // Deleted remotely since the listing, so this file is now the only copy.
+                return await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_upload).call(this, store, rel, localSha, undefined);
+            }
+            const permanent = e instanceof file_store_1.FileStoreError || (0, backoff_1.isStatus)(e, 400) || (0, backoff_1.isStatus)(e, 413);
+            if (existing && (0, backoff_1.isStatus)(e, 409)) {
+                // The precondition lost a race: the remote moved under us, so the push
+                // is dropped. The local file is now stale — the next sync sees
+                // remoteChanged and pulls the winner over it.
+                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('memory changed both locally and remotely; the upload was refused and the local edit loses', {
+                    path: rel,
+                    memory_store_id: store.memoryStoreId,
+                });
+            }
+            else if (permanent && localSha !== undefined) {
+                store.refusedShas.set(rel, localSha);
+                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('the server rejected this memory file, so it stays un-synced until its content changes', { path: rel, memory_store_id: store.memoryStoreId, rejection: String(e) });
             }
             else {
-                sha = await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_syncPath).call(this, store, rel, remoteItem, localSha, pulls);
-            }
-            if (sha !== undefined)
-                baseline.set(rel, sha);
-        }
-        store.baseline = baseline;
-        // The content pass: everything above moved only shas.
-        await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_pullAll).call(this, store, pulls);
-        if (deletes.suppressed > 0) {
-            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").debug('remote deletes are disabled; locally deleted memories stay on the server', {
-                count: deletes.suppressed,
-                memory_store_id: store.memoryStoreId,
-            });
-        }
-        if (deletes.capped > 0) {
-            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn(`delete cap reached: ${deletes.mode === 'log_only' ? 'would send' : 'sent'} ` +
-                `${deletes.attempted} deletes, held ${deletes.capped} for later syncs`, { memory_store_id: store.memoryStoreId });
-        }
-    }
-    catch (e) {
-        tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('memory sync failed', { memory_store_id: store.memoryStoreId, error: String(e) });
-    }
-}, _SessionMemoryStores_flushStore = async function _SessionMemoryStores_flushStore(store, signal) {
-    const dirty = new Map();
-    const unsent = new Set();
-    const push = async () => {
-        if (store.readOnly)
-            return;
-        const scan = await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_scanMarker).call(this, store);
-        if (!scan.markerOk) {
-            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn(`${scan.distrustReason}; not uploading anything from the memory store folder`, {
-                root: store.files.root().path,
-                memory_store_id: store.memoryStoreId,
-            });
-            return;
-        }
-        for (const [rel, sha] of Object.entries(scan.files)) {
-            if (sha !== store.baseline.get(rel) && store.refusedShas.get(rel) !== sha) {
-                dirty.set(rel, sha);
-                unsent.add(rel);
-            }
-        }
-        if (dirty.size === 0 || signal?.aborted)
-            return;
-        const remote = new Map();
-        for await (const [rel, item] of tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_listMemories).call(this, store.memoryStoreId)) {
-            if (signal?.aborted)
-                return;
-            remote.set(rel, item);
-        }
-        const uploads = [];
-        for (const rel of [...dirty.keys()].sort()) {
-            const localSha = dirty.get(rel);
-            const baseSha = store.baseline.get(rel);
-            const existing = remote.get(rel);
-            if (existing !== undefined && existing.content_sha256 === localSha) {
-                store.baseline.set(rel, existing.content_sha256);
-                unsent.delete(rel);
-                continue;
-            }
-            if (existing !== undefined && existing.content_sha256 !== baseSha) {
-                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('memory changed both locally and remotely; the flush leaves the remote version', {
+                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('failed to upload memory', {
                     path: rel,
                     memory_store_id: store.memoryStoreId,
-                });
-                unsent.delete(rel);
-                continue;
-            }
-            uploads.push([rel, localSha, existing]);
-        }
-        await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_uploadAll).call(this, store, uploads, unsent, signal);
-    };
-    try {
-        await settledOrAborted(push(), signal);
-        if (signal?.aborted && unsent.size > 0) {
-            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn(`memory flush cut off part-way; ${unsent.size} of ${dirty.size} changed files had not finished uploading`, { memory_store_id: store.memoryStoreId });
-        }
-    }
-    catch (e) {
-        tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('memory flush failed', { memory_store_id: store.memoryStoreId, error: String(e) });
-    }
-}, _SessionMemoryStores_recover = 
-/** Rebuild a destroyed folder from the server; sends no deletes, no uploads. */
-async function _SessionMemoryStores_recover(store, reason) {
-    tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn(`${reason}; re-downloading the memory store folder instead of syncing`, {
-        root: store.files.root().path,
-        memory_store_id: store.memoryStoreId,
-    });
-    await store.files.createRoot();
-    await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_stampAndPull).call(this, store);
-}, _SessionMemoryStores_stampAndPull = 
-/**
- * Write the marker, then pull every remote memory. Baseline is cleared
- * first so a failed write never leaves an entry whose file is not on disk.
- * Every memory is needed here, so the listing carries the content — pages
- * cost far fewer round-trips than a request per memory.
- */
-async function _SessionMemoryStores_stampAndPull(store) {
-    store.baseline = new Map();
-    store.pendingDeletes.clear();
-    await store.files.put(exports.MARKER_PATH, `version ${MARKER_VERSION}\n${store.memoryStoreId}`);
-    for await (const [rel, item] of tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_listMemories).call(this, store.memoryStoreId, 'full')) {
-        if (await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_write).call(this, store, rel, item.content ?? '')) {
-            store.baseline.set(rel, item.content_sha256);
-        }
-    }
-}, _SessionMemoryStores_syncPath = 
-/**
- * Reconcile one path. Returns the sha to record in the baseline, or
- * `undefined` to drop the path from it.
- *
- * `pulls` is an output: when the remote version should be written to disk,
- * this appends `[rel, remote]` to it instead of writing — `rel` is the
- * file to write, `remote` the listed memory whose content `#pullAll` will
- * fetch and write there.
- */
-async function _SessionMemoryStores_syncPath(store, rel, remote, localSha, pulls) {
-    const baseSha = store.baseline.get(rel);
-    if (localSha !== undefined) {
-        store.pendingDeletes.delete(rel);
-    }
-    if (!remote) {
-        if (localSha === undefined) {
-            store.pendingDeletes.delete(rel);
-            return undefined;
-        }
-        if (baseSha !== undefined) {
-            if (localSha === baseSha) {
-                const fresh = await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_removeLocal).call(this, store, rel, baseSha);
-                if (fresh === undefined)
-                    return undefined;
-                if (fresh === baseSha)
-                    return baseSha;
-                localSha = fresh;
-            }
-            // The file holds an un-pushed edit — the only copy; falling
-            // through re-creates or keeps it.
-            if (store.readOnly) {
-                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('memory deleted remotely but edited locally; keeping the file, ' +
-                    'which a read-only store cannot push', { path: rel, memory_store_id: store.memoryStoreId });
-            }
-            else if (store.refusedShas.get(rel) !== localSha) {
-                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").info('memory deleted remotely but edited locally; re-creating it from the file', {
-                    path: rel,
-                    memory_store_id: store.memoryStoreId,
+                    error: String(e),
                 });
             }
-        }
-        if (store.readOnly)
             return undefined;
-        if (store.refusedShas.get(rel) === localSha)
-            return undefined;
-        return await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_upload).call(this, store, rel, localSha, undefined);
-    }
-    const remoteSha = remote.content_sha256;
-    const remoteChanged = remoteSha !== baseSha;
-    const locallyEdited = localSha !== undefined && localSha !== baseSha && localSha !== remoteSha;
-    // Read-only stores never push, so their local edits don't count.
-    const localChanged = !store.readOnly && locallyEdited;
-    if (localSha === undefined && baseSha !== undefined) {
-        // Only successful writes enter the baseline, so this file was verifiably
-        // on disk and is now gone: a real local deletion. The unchanged-remote
-        // case went to #corroboratedDelete.
-        if (remoteChanged) {
-            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('memory deleted locally but changed remotely; restoring the remote version', {
-                path: rel,
-                memory_store_id: store.memoryStoreId,
-            });
-            store.pendingDeletes.delete(rel);
-            pulls.push([rel, remote]);
         }
-        return baseSha;
-    }
-    if (remoteChanged) {
-        // The file already holds the remote bytes — adopt without a fetch.
-        if (localSha === remoteSha)
-            return remoteSha;
-        // locallyEdited, not localChanged: warn on read-only overwrites too.
-        if (locallyEdited) {
-            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('memory changed both locally and remotely; keeping the remote version', {
-                path: rel,
-                memory_store_id: store.memoryStoreId,
-            });
+    }, _SessionMemoryStores_corroboratedDelete = 
+    /** Send the server delete only after the wait, the cap, and a fresh re-check all clear. */
+    async function _SessionMemoryStores_corroboratedDelete(store, rel, remote, baseSha, deletes) {
+        if (deletes.mode === 'disabled') {
+            deletes.suppressed++;
+            return baseSha;
         }
-        pulls.push([rel, remote]);
-        return baseSha;
-    }
-    if (localChanged) {
-        if (store.refusedShas.get(rel) === localSha)
-            return remoteSha;
-        return (await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_upload).call(this, store, rel, localSha, remote)) ?? remoteSha;
-    }
-    return remoteSha;
-}, _SessionMemoryStores_removeLocal = 
-/**
- * Remove the file for a memory the server no longer has, if it still holds
- * `expectSha`. Returns `undefined` when the file is gone from disk,
- * `expectSha` when it must stay in the baseline (I/O error), or the file's
- * fresh sha when it was edited since the scan.
- */
-async function _SessionMemoryStores_removeLocal(store, rel, expectSha) {
-    // Re-read: an edit since the scan makes this file the only copy.
-    let freshSha;
-    try {
-        freshSha = await store.files.hashFile(rel);
-    }
-    catch (e) {
-        if (!(e instanceof file_store_1.FileStoreError) && !isErrno(e))
-            throw e;
-        return expectSha;
-    }
-    if (freshSha === null)
-        return undefined;
-    if (freshSha !== expectSha)
-        return freshSha;
-    try {
-        await store.files.remove(rel);
-    }
-    catch (e) {
-        if (!(e instanceof file_store_1.FileStoreError) && !isErrno(e))
-            throw e;
-        tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('failed to remove memory deleted remotely', {
-            path: rel,
-            memory_store_id: store.memoryStoreId,
-            error: String(e),
-        });
-        return expectSha;
-    }
-    return undefined;
-}, _SessionMemoryStores_write = 
-/**
- * Write a memory's content to disk; `false` (and a warning) on failure.
- *
- * A `..` component in the wire path reaches here as {@link FileStoreError} —
- * that is the escape guard.
- */
-async function _SessionMemoryStores_write(store, rel, content) {
-    try {
-        await store.files.put(rel, content);
-    }
-    catch (e) {
-        if (!(e instanceof file_store_1.FileStoreError) && !isErrno(e))
-            throw e;
-        tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('failed to write memory', {
-            path: rel,
-            memory_store_id: store.memoryStoreId,
-            error: String(e),
-        });
-        return false;
-    }
-    return true;
-}, _SessionMemoryStores_pullAll = 
-/**
- * Fetch and write the given memories, {@link FETCH_CONCURRENCY} at a time.
- *
- * The sync's content pass: the listing carried no content, so each memory
- * is fetched individually and written as it arrives. On success the path's
- * baseline advances; on a failed fetch or write the old entry stays and the
- * next sync retries. A 404 means the memory was deleted after the listing —
- * the next sync reconciles it.
- */
-async function _SessionMemoryStores_pullAll(store, pulls) {
-    if (pulls.length === 0)
-        return;
-    const pullOne = async (rel, listed) => {
-        let item;
+        let firstAbsent = store.pendingDeletes.get(rel);
+        if (firstAbsent === undefined) {
+            firstAbsent = Date.now();
+            store.pendingDeletes.set(rel, firstAbsent);
+        }
+        if (!deletes.waiveWindow && Date.now() - firstAbsent < exports.DELETE_CORROBORATION_MS) {
+            return baseSha;
+        }
+        let markerOk;
+        let stillAbsent;
         try {
-            item = await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_client, "f").beta.memoryStores.memories.retrieve(listed.id, {
+            // Re-check: the folder may have been wiped mid-sync.
+            markerOk = (await store.files.hashFile(exports.MARKER_PATH)) === markerSha(store.memoryStoreId);
+            stillAbsent = (await store.files.hashFile(rel)) === null;
+        }
+        catch (e) {
+            if (!(e instanceof file_store_1.FileStoreError) && !isErrno(e))
+                throw e;
+            markerOk = stillAbsent = false;
+        }
+        if (!markerOk)
+            return baseSha;
+        if (!stillAbsent) {
+            store.pendingDeletes.delete(rel);
+            return baseSha;
+        }
+        if (!deletes.takeSlot())
+            return baseSha;
+        if (deletes.mode === 'log_only') {
+            // Repeats each sync — the log is the dry run.
+            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").info('log-only: sync would delete this memory on the server', {
+                path: rel,
                 memory_store_id: store.memoryStoreId,
-                view: 'full',
+            });
+            return baseSha;
+        }
+        const sha = await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_deleteRemote).call(this, store, rel, remote, baseSha);
+        if (sha === undefined) {
+            store.pendingDeletes.delete(rel);
+        }
+        return sha;
+    }, _SessionMemoryStores_deleteRemote = async function _SessionMemoryStores_deleteRemote(store, rel, remote, baseSha) {
+        try {
+            await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_client, "f").beta.memoryStores.memories.delete(remote.id, {
+                memory_store_id: store.memoryStoreId,
+                expected_content_sha256: baseSha,
             });
         }
         catch (e) {
             if ((0, backoff_1.isStatus)(e, 404))
-                return;
-            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('failed to fetch memory content', {
-                path: rel,
-                memory_store_id: store.memoryStoreId,
-                error: String(e),
-            });
-            return;
+                return undefined; // already gone remotely too
+            if ((0, backoff_1.isStatus)(e, 409) || (0, backoff_1.isStatus)(e, 412)) {
+                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('memory deleted locally but changed remotely; keeping the remote version', {
+                    path: rel,
+                    memory_store_id: store.memoryStoreId,
+                });
+            }
+            else {
+                tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('failed to delete memory', {
+                    path: rel,
+                    memory_store_id: store.memoryStoreId,
+                    error: String(e),
+                });
+            }
+            return baseSha;
         }
-        if (await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_write).call(this, store, rel, item.content ?? '')) {
-            store.baseline.set(rel, item.content_sha256);
-        }
-    };
-    // A fixed pool of workers drains the queue; the write stays inside the
-    // worker so a slow disk cannot let fetched bodies pile up beyond the bound.
-    const queue = pulls[Symbol.iterator]();
-    const worker = async () => {
-        for (const [rel, listed] of queue)
-            await pullOne(rel, listed);
-    };
-    await Promise.all(Array.from({ length: Math.min(FETCH_CONCURRENCY, pulls.length) }, worker));
-}, _SessionMemoryStores_uploadAll = 
-/**
- * Upload the given files, {@link UPLOAD_CONCURRENCY} at a time, taking each
- * path off `unsent` as its upload returns. No upload starts once `signal`
- * aborts; the ones already in flight run to completion.
- */
-async function _SessionMemoryStores_uploadAll(store, uploads, unsent, signal) {
-    const queue = uploads[Symbol.iterator]();
-    const worker = async () => {
-        for (const [rel, localSha, existing] of queue) {
-            if (signal?.aborted)
-                return;
-            const sha = await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_upload).call(this, store, rel, localSha, existing);
-            unsent.delete(rel);
-            if (sha !== undefined)
-                store.baseline.set(rel, sha);
-        }
-    };
-    await Promise.all(Array.from({ length: Math.min(exports.UPLOAD_CONCURRENCY, uploads.length) }, worker));
-}, _SessionMemoryStores_listMemories = 
-/**
- * The store's memories keyed by relative path (the wire path's leading `/`
- * stripped — `#upload` re-prefixes it) — `basic` view (shas, no content) at
- * {@link LIST_PAGE_SIZE} per page unless the caller needs `full` pages.
- * `memory_prefix` rollups and the reserved marker path are skipped.
- */
-async function* _SessionMemoryStores_listMemories(memoryStoreId, view = 'basic') {
-    const limit = view === 'basic' ? LIST_PAGE_SIZE : FULL_LIST_PAGE_SIZE;
-    for await (const item of tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_client, "f").beta.memoryStores.memories.list(memoryStoreId, { view, limit })) {
-        if (item.type !== 'memory')
-            continue;
-        const rel = item.path.replace(/^\/+/, '');
-        if (rel === exports.MARKER_PATH) {
-            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('the server listed the reserved marker path; skipping', {
-                path: item.path,
-                memory_store_id: memoryStoreId,
-            });
-            continue;
-        }
-        yield [rel, item];
-    }
-}, _SessionMemoryStores_upload = 
-/**
- * Push one local file; `undefined` keeps the old baseline so the next pass retries.
- *
- * A refusal the server would repeat (400/413, the utf-8 gate) enters
- * `refusedShas`: warned once, retried only after the file changes.
- */
-async function _SessionMemoryStores_upload(store, rel, localSha, existing) {
-    try {
-        const data = await store.files.get(rel);
-        if (data === null)
-            return undefined;
-        const content = (0, bytes_1.decodeUTF8)(data);
-        const item = existing ?
-            await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_client, "f").beta.memoryStores.memories.update(existing.id, {
-                memory_store_id: store.memoryStoreId,
-                content,
-                precondition: { type: 'content_sha256', content_sha256: existing.content_sha256 },
-            })
-            : await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_client, "f").beta.memoryStores.memories.create(store.memoryStoreId, {
-                path: '/' + rel,
-                content,
-            });
-        store.refusedShas.delete(rel);
-        return item.content_sha256;
-    }
-    catch (e) {
-        if (existing && (0, backoff_1.isStatus)(e, 404)) {
-            // Deleted remotely since the listing, so this file is now the only copy.
-            return await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_upload).call(this, store, rel, localSha, undefined);
-        }
-        const permanent = e instanceof file_store_1.FileStoreError || (0, backoff_1.isStatus)(e, 400) || (0, backoff_1.isStatus)(e, 413);
-        if (existing && (0, backoff_1.isStatus)(e, 409)) {
-            // The precondition lost a race: the remote moved under us, so the push
-            // is dropped. The local file is now stale — the next sync sees
-            // remoteChanged and pulls the winner over it.
-            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('memory changed both locally and remotely; the upload was refused and the local edit loses', {
-                path: rel,
-                memory_store_id: store.memoryStoreId,
-            });
-        }
-        else if (permanent && localSha !== undefined) {
-            store.refusedShas.set(rel, localSha);
-            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('the server rejected this memory file, so it stays un-synced until its content changes', { path: rel, memory_store_id: store.memoryStoreId, rejection: String(e) });
-        }
-        else {
-            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('failed to upload memory', {
-                path: rel,
-                memory_store_id: store.memoryStoreId,
-                error: String(e),
-            });
-        }
+        tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").info('propagated local deletion', { path: rel, memory_store_id: store.memoryStoreId });
         return undefined;
-    }
-}, _SessionMemoryStores_corroboratedDelete = 
-/** Send the server delete only after the wait, the cap, and a fresh re-check all clear. */
-async function _SessionMemoryStores_corroboratedDelete(store, rel, remote, baseSha, deletes) {
-    if (deletes.mode === 'disabled') {
-        deletes.suppressed++;
-        return baseSha;
-    }
-    let firstAbsent = store.pendingDeletes.get(rel);
-    if (firstAbsent === undefined) {
-        firstAbsent = Date.now();
-        store.pendingDeletes.set(rel, firstAbsent);
-    }
-    if (!deletes.waiveWindow && Date.now() - firstAbsent < exports.DELETE_CORROBORATION_MS) {
-        return baseSha;
-    }
-    let markerOk;
-    let stillAbsent;
-    try {
-        // Re-check: the folder may have been wiped mid-sync.
-        markerOk = (await store.files.hashFile(exports.MARKER_PATH)) === markerSha(store.memoryStoreId);
-        stillAbsent = (await store.files.hashFile(rel)) === null;
-    }
-    catch (e) {
-        if (!(e instanceof file_store_1.FileStoreError) && !isErrno(e))
-            throw e;
-        markerOk = stillAbsent = false;
-    }
-    if (!markerOk)
-        return baseSha;
-    if (!stillAbsent) {
-        store.pendingDeletes.delete(rel);
-        return baseSha;
-    }
-    if (!deletes.takeSlot())
-        return baseSha;
-    if (deletes.mode === 'log_only') {
-        // Repeats each sync — the log is the dry run.
-        tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").info('log-only: sync would delete this memory on the server', {
-            path: rel,
-            memory_store_id: store.memoryStoreId,
-        });
-        return baseSha;
-    }
-    const sha = await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_deleteRemote).call(this, store, rel, remote, baseSha);
-    if (sha === undefined) {
-        store.pendingDeletes.delete(rel);
-    }
-    return sha;
-}, _SessionMemoryStores_deleteRemote = async function _SessionMemoryStores_deleteRemote(store, rel, remote, baseSha) {
-    try {
-        await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_client, "f").beta.memoryStores.memories.delete(remote.id, {
-            memory_store_id: store.memoryStoreId,
-            expected_content_sha256: baseSha,
-        });
-    }
-    catch (e) {
-        if ((0, backoff_1.isStatus)(e, 404))
-            return undefined; // already gone remotely too
-        if ((0, backoff_1.isStatus)(e, 409) || (0, backoff_1.isStatus)(e, 412)) {
-            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('memory deleted locally but changed remotely; keeping the remote version', {
-                path: rel,
-                memory_store_id: store.memoryStoreId,
-            });
-        }
-        else {
-            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('failed to delete memory', {
-                path: rel,
-                memory_store_id: store.memoryStoreId,
-                error: String(e),
-            });
-        }
-        return baseSha;
-    }
-    tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").info('propagated local deletion', { path: rel, memory_store_id: store.memoryStoreId });
-    return undefined;
-};
+    };
+    return SessionMemoryStores;
+})();
+exports.SessionMemoryStores = SessionMemoryStores;
 /**
  * True for a thrown value shaped like a Node filesystem error. Shape-checked,
  * not `instanceof Error` — fs errors can come from another realm.
@@ -54237,8 +58533,9 @@ function rejectUnrestrictedPaths(value) {
  *
  * Concurrency note: `client.beta.sessions.events.toolRunner` dispatches a
  * session's tool calls serially (the sessions API delivers one `agent.tool_use`
- * at a time). `client.beta.messages.toolRunner` runs a turn's `tool.run` calls
- * via `Promise.all`. The toolset below is safe under either model —
+ * at a time). `client.beta.messages.toolRunner` starts a turn's `tool.run` calls
+ * without waiting for one another: together once the reply is complete or, when
+ * streaming, each as its call arrives. The toolset below is safe under either model —
  * {@link betaBashTool} serializes its persistent shell internally and the FS
  * tools are independent per call — but {@link betaEditTool}/{@link betaWriteTool}
  * cannot synchronize concurrent writes to the *same* file across processes, so a
@@ -54602,68 +58899,71 @@ async function readRangeStreaming(abs, filePath, startLine, endLine, limit) {
     }
     return lines.text();
 }
-/** Collects the bytes of lines `[startLine, endLine]` from consecutive file chunks, capped at `limit`. */
-class LineRangeCollector {
-    constructor(filePath, startLine, endLine, limit) {
-        _LineRangeCollector_instances.add(this);
-        _LineRangeCollector_filePath.set(this, void 0);
-        _LineRangeCollector_startLine.set(this, void 0);
-        _LineRangeCollector_endLine.set(this, void 0);
-        _LineRangeCollector_start.set(this, void 0);
-        _LineRangeCollector_end.set(this, void 0);
-        _LineRangeCollector_limit.set(this, void 0);
-        _LineRangeCollector_line.set(this, 0);
-        _LineRangeCollector_collected.set(this, []);
-        _LineRangeCollector_collectedBytes.set(this, 0);
-        tslib_1.__classPrivateFieldSet(this, _LineRangeCollector_filePath, filePath, "f");
-        tslib_1.__classPrivateFieldSet(this, _LineRangeCollector_startLine, startLine, "f");
-        tslib_1.__classPrivateFieldSet(this, _LineRangeCollector_endLine, endLine, "f");
-        tslib_1.__classPrivateFieldSet(this, _LineRangeCollector_start, Math.max(0, startLine - 1), "f");
-        tslib_1.__classPrivateFieldSet(this, _LineRangeCollector_end, endLine > 0 ? endLine : Infinity, "f");
-        tslib_1.__classPrivateFieldSet(this, _LineRangeCollector_limit, limit, "f");
-    }
-    rangeIsEmpty() {
-        return tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_end, "f") <= tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_start, "f");
-    }
-    rangeIsCollected() {
-        return tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_line, "f") >= tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_end, "f");
-    }
-    collectFrom(chunk) {
-        var _a;
-        let lineStart = 0;
-        while (lineStart < chunk.length && !this.rangeIsCollected()) {
-            const newline = chunk.indexOf(0x0a, lineStart);
-            const lineEnd = newline < 0 ? chunk.length : newline;
-            if (tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_line, "f") >= tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_start, "f")) {
-                tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_instances, "m", _LineRangeCollector_collect).call(this, chunk.subarray(lineStart, lineEnd), newline >= 0);
+var LineRangeCollector = /* @__PURE__ */ (() => {
+    /** Collects the bytes of lines `[startLine, endLine]` from consecutive file chunks, capped at `limit`. */
+    class LineRangeCollector {
+        constructor(filePath, startLine, endLine, limit) {
+            _LineRangeCollector_instances.add(this);
+            _LineRangeCollector_filePath.set(this, void 0);
+            _LineRangeCollector_startLine.set(this, void 0);
+            _LineRangeCollector_endLine.set(this, void 0);
+            _LineRangeCollector_start.set(this, void 0);
+            _LineRangeCollector_end.set(this, void 0);
+            _LineRangeCollector_limit.set(this, void 0);
+            _LineRangeCollector_line.set(this, 0);
+            _LineRangeCollector_collected.set(this, []);
+            _LineRangeCollector_collectedBytes.set(this, 0);
+            tslib_1.__classPrivateFieldSet(this, _LineRangeCollector_filePath, filePath, "f");
+            tslib_1.__classPrivateFieldSet(this, _LineRangeCollector_startLine, startLine, "f");
+            tslib_1.__classPrivateFieldSet(this, _LineRangeCollector_endLine, endLine, "f");
+            tslib_1.__classPrivateFieldSet(this, _LineRangeCollector_start, Math.max(0, startLine - 1), "f");
+            tslib_1.__classPrivateFieldSet(this, _LineRangeCollector_end, endLine > 0 ? endLine : Infinity, "f");
+            tslib_1.__classPrivateFieldSet(this, _LineRangeCollector_limit, limit, "f");
+        }
+        rangeIsEmpty() {
+            return tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_end, "f") <= tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_start, "f");
+        }
+        rangeIsCollected() {
+            return tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_line, "f") >= tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_end, "f");
+        }
+        collectFrom(chunk) {
+            var _a;
+            let lineStart = 0;
+            while (lineStart < chunk.length && !this.rangeIsCollected()) {
+                const newline = chunk.indexOf(0x0a, lineStart);
+                const lineEnd = newline < 0 ? chunk.length : newline;
+                if (tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_line, "f") >= tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_start, "f")) {
+                    tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_instances, "m", _LineRangeCollector_collect).call(this, chunk.subarray(lineStart, lineEnd), newline >= 0);
+                }
+                if (newline < 0)
+                    break;
+                tslib_1.__classPrivateFieldSet(this, _LineRangeCollector_line, (_a = tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_line, "f"), _a++, _a), "f");
+                lineStart = newline + 1;
             }
-            if (newline < 0)
-                break;
-            tslib_1.__classPrivateFieldSet(this, _LineRangeCollector_line, (_a = tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_line, "f"), _a++, _a), "f");
-            lineStart = newline + 1;
+        }
+        text() {
+            return Buffer.concat(tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_collected, "f"), tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_collectedBytes, "f")).toString('utf8');
         }
     }
-    text() {
-        return Buffer.concat(tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_collected, "f"), tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_collectedBytes, "f")).toString('utf8');
-    }
-}
-_LineRangeCollector_filePath = new WeakMap(), _LineRangeCollector_startLine = new WeakMap(), _LineRangeCollector_endLine = new WeakMap(), _LineRangeCollector_start = new WeakMap(), _LineRangeCollector_end = new WeakMap(), _LineRangeCollector_limit = new WeakMap(), _LineRangeCollector_line = new WeakMap(), _LineRangeCollector_collected = new WeakMap(), _LineRangeCollector_collectedBytes = new WeakMap(), _LineRangeCollector_instances = new WeakSet(), _LineRangeCollector_collect = function _LineRangeCollector_collect(lineBytes, newlineTerminated) {
-    tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_collected, "f").push(lineBytes);
-    tslib_1.__classPrivateFieldSet(this, _LineRangeCollector_collectedBytes, tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_collectedBytes, "f") + lineBytes.length, "f");
-    if (newlineTerminated && tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_line, "f") + 1 < tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_end, "f")) {
-        tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_collected, "f").push(NEWLINE);
-        tslib_1.__classPrivateFieldSet(this, _LineRangeCollector_collectedBytes, tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_collectedBytes, "f") + NEWLINE.length, "f");
-    }
-    if (tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_collectedBytes, "f") > tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_limit, "f"))
-        throw tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_instances, "m", _LineRangeCollector_overLimitError).call(this);
-}, _LineRangeCollector_overLimitError = function _LineRangeCollector_overLimitError() {
-    if (tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_end, "f") - tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_start, "f") === 1) {
-        return new ToolError_1.ToolError(`read: line ${tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_start, "f") + 1} of ${tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_filePath, "f")} alone exceeds ${tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_limit, "f")}-byte limit. ` +
-            'The read tool cannot return part of a line, so view_range cannot narrow this further.');
-    }
-    return new ToolError_1.ToolError(`read: view_range [${tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_startLine, "f")}, ${tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_endLine, "f")}] of ${tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_filePath, "f")} exceeds ${tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_limit, "f")}-byte limit. ` +
-        'Narrow the view_range to read a smaller portion.');
-};
+    _LineRangeCollector_filePath = new WeakMap(), _LineRangeCollector_startLine = new WeakMap(), _LineRangeCollector_endLine = new WeakMap(), _LineRangeCollector_start = new WeakMap(), _LineRangeCollector_end = new WeakMap(), _LineRangeCollector_limit = new WeakMap(), _LineRangeCollector_line = new WeakMap(), _LineRangeCollector_collected = new WeakMap(), _LineRangeCollector_collectedBytes = new WeakMap(), _LineRangeCollector_instances = new WeakSet(), _LineRangeCollector_collect = function _LineRangeCollector_collect(lineBytes, newlineTerminated) {
+        tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_collected, "f").push(lineBytes);
+        tslib_1.__classPrivateFieldSet(this, _LineRangeCollector_collectedBytes, tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_collectedBytes, "f") + lineBytes.length, "f");
+        if (newlineTerminated && tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_line, "f") + 1 < tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_end, "f")) {
+            tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_collected, "f").push(NEWLINE);
+            tslib_1.__classPrivateFieldSet(this, _LineRangeCollector_collectedBytes, tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_collectedBytes, "f") + NEWLINE.length, "f");
+        }
+        if (tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_collectedBytes, "f") > tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_limit, "f"))
+            throw tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_instances, "m", _LineRangeCollector_overLimitError).call(this);
+    }, _LineRangeCollector_overLimitError = function _LineRangeCollector_overLimitError() {
+        if (tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_end, "f") - tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_start, "f") === 1) {
+            return new ToolError_1.ToolError(`read: line ${tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_start, "f") + 1} of ${tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_filePath, "f")} alone exceeds ${tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_limit, "f")}-byte limit. ` +
+                'The read tool cannot return part of a line, so view_range cannot narrow this further.');
+        }
+        return new ToolError_1.ToolError(`read: view_range [${tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_startLine, "f")}, ${tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_endLine, "f")}] of ${tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_filePath, "f")} exceeds ${tslib_1.__classPrivateFieldGet(this, _LineRangeCollector_limit, "f")}-byte limit. ` +
+            'Narrow the view_range to read a smaller portion.');
+    };
+    return LineRangeCollector;
+})();
 function betaWriteTool(ctx) {
     rejectUnrestrictedPaths(ctx.unrestrictedPaths);
     return (0, json_schema_1.betaTool)({
@@ -55410,7 +59710,7 @@ function checkMemorySyncInterval(ms, option) {
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.VERSION = void 0;
-exports.VERSION = '0.128.0'; // x-release-please-version
+exports.VERSION = '0.131.0'; // x-release-please-version
 //# sourceMappingURL=version.js.map
 
 /***/ }),
@@ -56349,6 +60649,7 @@ const vector_stores_1 = __nccwpck_require__(23682);
 const webhooks_1 = __nccwpck_require__(87528);
 const detect_platform_2 = __nccwpck_require__(30752);
 const headers_1 = __nccwpck_require__(4559);
+const ws_1 = __nccwpck_require__(53963);
 const provider_1 = __nccwpck_require__(35844);
 const env_1 = __nccwpck_require__(81172);
 const log_1 = __nccwpck_require__(1213);
@@ -56402,6 +60703,8 @@ class OpenAI {
         // Preserve an explicit global selection without storing a second routing URL.
         _OpenAI_explicitDataResidency.set(this, false);
         _OpenAI_responseAttempts.set(this, new WeakMap());
+        this._apiKeyInvocation = 0;
+        this._lastCachedAPIKeyInvocation = 0;
         /**
          * Given a prompt, the model will return one or more predicted completions, and can also return the probabilities of alternative tokens at each position.
          */
@@ -56634,8 +60937,12 @@ class OpenAI {
         return this._options.defaultQuery;
     }
     /** @internal Client request headers for each new WebSocket handshake. */
-    _buildWebSocketHeaders(authHeaders) {
-        return Object.fromEntries((0, headers_1.buildHeaders)([
+    _buildWebSocketHeaders(authHeaders, removedHeaders) {
+        const context = ws_1.webSocketHeaderRemovals.get(this);
+        if (context?.baseHeaders) {
+            return (0, ws_1.mergeWebSocketAuthHeaders)({ headers: context.baseHeaders }, authHeaders, context.removedHeaders ?? new Set()).headers;
+        }
+        const headers = (0, headers_1.buildHeaders)([
             {
                 'User-Agent': this.getUserAgent(),
                 'OpenAI-Organization': this.organization,
@@ -56643,7 +60950,13 @@ class OpenAI {
             },
             authHeaders,
             this._options.defaultHeaders,
-        ]).values);
+        ]);
+        headers.nulls.forEach((name) => (removedHeaders ?? context?.removedHeaders)?.add(name));
+        const result = Object.fromEntries(headers.values);
+        if (context) {
+            context.baseHeaders = { ...result };
+        }
+        return result;
     }
     validateHeaders({ values, nulls }, schemes = {
         bearerAuth: true,
@@ -56729,11 +61042,8 @@ class OpenAI {
         return typeof this._options.apiKey === 'function';
     }
     /**
-     * Resolves a function-based API key and retains the resolved value on this client.
-     * Returns whether a provider was invoked. Internal callers can capture this
-     * invocation's key before another request updates the shared `apiKey` property.
-     * Overrides should forward `capture` or invoke it with their own resolved key
-     * to preserve invocation-local credentials in concurrent requests and Realtime factories.
+     * Resolves and retains a provider key, returning whether a provider was invoked.
+     * Overrides should forward `capture` (or call it with their resolved key) for local credentials.
      * @internal
      */
     async _callApiKey(capture) {
@@ -56746,6 +61056,8 @@ class OpenAI {
             capture?.(this.apiKey);
             return false;
         }
+        const deferredCache = (0, realtime_credentials_1.getDeferredRealtimeAPIKeyCache)(this);
+        const invocation = ++this._apiKeyInvocation;
         let token;
         try {
             token = await apiKey();
@@ -56760,22 +61072,76 @@ class OpenAI {
         if (typeof token !== 'string' || !token) {
             throw new Errors.OpenAIError(`Expected 'apiKey' function argument to return a string but it returned ${token}`);
         }
-        this.apiKey = token;
-        capture?.(this.apiKey);
+        const resolvedToken = token;
+        const commit = () => {
+            if (capture)
+                (0, realtime_credentials_1.validateCapturedAPIKey)(this, resolvedToken);
+            if (invocation < this._lastCachedAPIKeyInvocation) {
+                return resolvedToken;
+            }
+            this.apiKey = resolvedToken;
+            const cached = capture ? this.apiKey : resolvedToken;
+            this._lastCachedAPIKeyInvocation = invocation;
+            return cached;
+        };
+        if (deferredCache) {
+            deferredCache.providerKey = resolvedToken;
+            deferredCache.commit = commit;
+        }
+        const cached = deferredCache ? (0, realtime_credentials_1.validateCapturedAPIKey)(this, resolvedToken) : commit();
+        capture?.(cached);
         return true;
     }
     buildURL(path, query, defaultBaseURL) {
         const baseURL = (!tslib_1.__classPrivateFieldGet(this, _OpenAI_instances, "m", _OpenAI_baseURLOverridden).call(this) && defaultBaseURL) || this.baseURL;
-        const url = (0, values_1.isAbsoluteURL)(path)
-            ? new URL(path)
-            : new URL(baseURL + (baseURL.endsWith('/') && path.startsWith('/') ? path.slice(1) : path));
+        let url;
+        let baseQuery = {};
+        let baseParams;
+        if ((0, values_1.isAbsoluteURL)(path)) {
+            url = new URL(path);
+        }
+        else if (baseURL.includes('?')) {
+            const base = new URL(baseURL);
+            baseParams = new URLSearchParams(base.search);
+            baseQuery = Object.fromEntries(baseParams);
+            base.search = '';
+            base.hash = '';
+            url = new URL(base.toString() + (base.pathname.endsWith('/') && path.startsWith('/') ? path.slice(1) : path));
+        }
+        else {
+            url = new URL(baseURL + (baseURL.endsWith('/') && path.startsWith('/') ? path.slice(1) : path));
+        }
         const defaultQuery = this.defaultQuery();
         const pathQuery = Object.fromEntries(url.searchParams);
-        if (!(0, values_2.isEmptyObj)(defaultQuery) || !(0, values_2.isEmptyObj)(pathQuery)) {
-            query = { ...pathQuery, ...defaultQuery, ...query };
+        let overridingQuery;
+        if (!(0, values_2.isEmptyObj)(baseQuery) || !(0, values_2.isEmptyObj)(defaultQuery) || !(0, values_2.isEmptyObj)(pathQuery)) {
+            overridingQuery = { ...pathQuery, ...defaultQuery, ...query };
+            query = { ...baseQuery, ...overridingQuery };
         }
         if (typeof query === 'object' && query && !Array.isArray(query)) {
             url.search = this.stringifyQuery(query);
+            if (baseParams && overridingQuery) {
+                const seen = new Set();
+                const repeated = new Set();
+                for (const key of baseParams.keys()) {
+                    if (seen.has(key) && !(0, values_1.hasOwn)(overridingQuery, key)) {
+                        repeated.add(key);
+                    }
+                    seen.add(key);
+                }
+                if (repeated.size) {
+                    const merged = new URLSearchParams();
+                    for (const [key, value] of url.searchParams) {
+                        if (!repeated.has(key))
+                            merged.append(key, value);
+                    }
+                    for (const [key, value] of baseParams) {
+                        if (repeated.has(key))
+                            merged.append(key, value);
+                    }
+                    url.search = merged.toString();
+                }
+            }
         }
         return url.toString();
     }
@@ -58750,6 +63116,12 @@ class Stream {
     /** Starts consuming this stream; attempting to consume it again throws. */
     [(_Stream_client = new WeakMap(), _Stream_isTeeBranch = new WeakMap(), _Stream_instances = new WeakSet(), Symbol.asyncIterator)]() {
         return this.iterator();
+    }
+    /** Beta-only iterator decoration for Agents helpers, preserving custom stream identity.
+     * @internal
+     */
+    __betaTransformIterator(transform) {
+        this.iterator = transform(this.iterator.bind(this));
     }
     /**
      * Splits the stream into two streams which can be
@@ -62688,13 +67060,36 @@ function maybe_map(val, fn) {
 /***/ }),
 
 /***/ 35307:
-/***/ ((__unused_webpack_module, exports) => {
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.setRealtimeAPIKeyCacheContext = setRealtimeAPIKeyCacheContext;
+exports.getDeferredRealtimeAPIKeyCache = getDeferredRealtimeAPIKeyCache;
+exports.validateCapturedAPIKey = validateCapturedAPIKey;
 exports.getRealtimeAPIKey = getRealtimeAPIKey;
 exports.resolveRealtimeAPIKey = resolveRealtimeAPIKey;
+const bedrock_1 = __nccwpck_require__(86943);
+// Only the key crosses module formats: the context belongs to each participating client.
+const realtimeCacheContext = Symbol.for('openai.realtimeAPIKeyCacheContext');
+let cacheContext;
+/** Installs the Node transport's invocation context without loading Node in the base client. @internal */
+function setRealtimeAPIKeyCacheContext(context) {
+    cacheContext = context;
+}
+/** Reserves a deferred commit when the base hook is entered for this invocation. @internal */
+function getDeferredRealtimeAPIKeyCache(client) {
+    const deferred = client[realtimeCacheContext]?.getStore();
+    return deferred?.client === client ? deferred : undefined;
+}
+/** Applies the Bedrock getter's validation when a captured credential does not enter the cache. @internal */
+function validateCapturedAPIKey(client, credential) {
+    if (credential !== null && bedrock_1.brand_privateBedrockClient in client) {
+        (0, bedrock_1.assertValidBedrockBearerCredential)(credential);
+    }
+    return credential;
+}
 /** Selects a captured credential without treating an explicit null as absent. @internal */
 function getRealtimeAPIKey(client, captured) {
     return captured === undefined ? client?.apiKey : captured;
@@ -62706,12 +67101,33 @@ function getRealtimeAPIKey(client, captured) {
  * synchronizing concurrent credential updates.
  * @internal
  */
-async function resolveRealtimeAPIKey(client) {
+async function resolveRealtimeAPIKey(client, deferCache = false) {
     let apiKey;
-    const isProvider = await client._callApiKey((resolved) => {
+    const current = {
+        client,
+        commit: () => (apiKey === undefined ? client.apiKey : apiKey),
+    };
+    const capture = (resolved) => {
         apiKey = resolved;
-    });
-    return { apiKey: apiKey === undefined ? client.apiKey : apiKey, isProvider };
+    };
+    const invoke = () => client._callApiKey(capture);
+    const context = client[realtimeCacheContext] ?? cacheContext;
+    if (deferCache && context && !client[realtimeCacheContext]) {
+        Object.defineProperty(client, realtimeCacheContext, { value: context });
+    }
+    // An HTTP or ordinary Realtime request nested inside a WebSocket hook owns its own cache writes.
+    const isProvider = await (context ? context.run(deferCache ? current : undefined, invoke) : invoke());
+    return {
+        apiKey: apiKey === undefined ? client.apiKey : apiKey,
+        isProvider,
+        commit: () => {
+            const hookKey = current.providerKey !== undefined && apiKey !== undefined && apiKey !== current.providerKey
+                ? validateCapturedAPIKey(client, apiKey)
+                : undefined;
+            const cached = current.commit();
+            return hookKey === undefined ? validateCapturedAPIKey(client, cached) : hookKey;
+        },
+    };
 }
 //# sourceMappingURL=realtime-credentials.js.map
 
@@ -62813,6 +67229,10 @@ function getOutputText(context, output) {
     return text;
 }
 function ensureCanonicalOutputText(context, snapshot) {
+    if (context.deferOutputText) {
+        context.canonicalSnapshot = undefined;
+        return;
+    }
     if (context.canonicalSnapshot === snapshot) {
         return;
     }
@@ -62845,6 +67265,9 @@ function cloneResponse(context, response) {
     return snapshot;
 }
 function updateCachedOutputTextLength(context, output, outputIndex, previousText, nextText) {
+    if (context.deferOutputText) {
+        return;
+    }
     const length = context.outputTextLengths.get(output);
     if (length !== undefined) {
         const nextLength = length - previousText.length + nextText.length;
@@ -62886,6 +67309,10 @@ function getPrecedingContentTextLength(context, output, contentIndex, nextText) 
 }
 function updateOutputText(context, snapshot, outputIndex, previousText, nextText, contentIndex) {
     if (previousText === nextText) {
+        return;
+    }
+    if (context.deferOutputText) {
+        context.outputTextDirty = true;
         return;
     }
     const output = snapshot.output[outputIndex];
@@ -62999,10 +67426,14 @@ exports.OutputTextIndex = OutputTextIndex;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.cloneValidatedResponse = cloneValidatedResponse;
 exports.createResponseContext = createResponseContext;
+exports.isResponseOutputEvent = isResponseOutputEvent;
+exports.accumulateWebSocketOutput = accumulateWebSocketOutput;
 exports.accumulateResponseWithContext = accumulateResponseWithContext;
 const error_1 = __nccwpck_require__(22209);
 const utils_1 = __nccwpck_require__(76628);
+const values_1 = __nccwpck_require__(23049);
 const canonical_output_text_1 = __nccwpck_require__(61366);
 const responseOutputIdentityIndexes = new WeakMap();
 function validateArrayIndex(collection, index, kind, allowAppend = false) {
@@ -63384,7 +67815,12 @@ function accumulateOutputItemEvent(event, snapshot, context) {
                 context.outputTextIndex.append(text.length);
             }
             if (text) {
-                snapshot.output_text += text;
+                if (context.deferOutputText) {
+                    context.outputTextDirty = true;
+                }
+                else {
+                    snapshot.output_text += text;
+                }
             }
             return true;
         }
@@ -63473,6 +67909,42 @@ function accumulateContentPartDoneEvent(event, snapshot, context) {
         }
     }
 }
+// Streamed logprobs have a looser type than final output: bytes and even the
+// top token fields may be missing. Do not fabricate them in typed SSE snapshots.
+function isLogprobWithBytes(value) {
+    return ((0, values_1.isObj)(value) &&
+        typeof value['token'] === 'string' &&
+        typeof value['logprob'] === 'number' &&
+        Array.isArray(value['bytes']) &&
+        // oxlint-disable-next-line anti-slop/no-runtime-typeof -- This boundary checks each byte against the generated final-output contract before exposing a typed SSE snapshot.
+        value['bytes'].every((byte) => typeof byte === 'number'));
+}
+function isOutputLogprobs(value) {
+    return (Array.isArray(value) &&
+        value.every((entry) => isLogprobWithBytes(entry) &&
+            'top_logprobs' in entry &&
+            Array.isArray(entry.top_logprobs) &&
+            entry.top_logprobs.every(isLogprobWithBytes)));
+}
+function accumulateOutputLogprobs(content, event) {
+    const logprobs = structuredClone(event.logprobs);
+    if (!isOutputLogprobs(logprobs)) {
+        return;
+    }
+    if (event.type === 'response.output_text.done') {
+        if (logprobs.length > 0 || (Array.isArray(content.logprobs) && content.logprobs.length > 0)) {
+            content.logprobs = logprobs;
+        }
+    }
+    else if (logprobs.length > 0) {
+        if (!Array.isArray(content.logprobs)) {
+            content.logprobs = [];
+        }
+        for (const logprob of logprobs) {
+            content.logprobs.push(logprob);
+        }
+    }
+}
 function accumulateOutputTextEvent(event, snapshot, context) {
     switch (event.type) {
         case 'response.output_text.delta': {
@@ -63482,13 +67954,21 @@ function accumulateOutputTextEvent(event, snapshot, context) {
                 if (content.type !== 'output_text') {
                     throw new error_1.OpenAIError(`expected content to be 'output_text', got ${content.type}`);
                 }
+                accumulateOutputLogprobs(content, event);
                 const previousText = content.text;
                 (0, canonical_output_text_1.ensureCanonicalOutputText)(context, snapshot);
                 content.text = previousText + event.delta;
                 (0, canonical_output_text_1.updateCachedOutputTextLength)(context, output, event.output_index, previousText, content.text);
                 if (event.output_index === snapshot.output.length - 1 &&
                     event.content_index === output.content.length - 1) {
-                    snapshot.output_text += event.delta;
+                    if (context.deferOutputText) {
+                        if (event.delta !== '') {
+                            context.outputTextDirty = true;
+                        }
+                    }
+                    else {
+                        snapshot.output_text += event.delta;
+                    }
                 }
                 else {
                     (0, canonical_output_text_1.updateOutputText)(context, snapshot, event.output_index, previousText, content.text, event.content_index);
@@ -63503,6 +67983,7 @@ function accumulateOutputTextEvent(event, snapshot, context) {
                 if (content.type !== 'output_text') {
                     throw new error_1.OpenAIError(`expected content to be 'output_text', got ${content.type}`);
                 }
+                accumulateOutputLogprobs(content, event);
                 const previousText = content.text;
                 (0, canonical_output_text_1.ensureCanonicalOutputText)(context, snapshot);
                 content.text = event.text;
@@ -63888,6 +68369,57 @@ function isIgnoredResponseEvent(event) {
 function createResponseContext() {
     return (0, canonical_output_text_1.createCanonicalResponseContext)();
 }
+function accumulateResponseOutput(dispatchEvent, snapshot, context, rejectInvalidShellTargets) {
+    validateOutputItemIdentity(dispatchEvent, snapshot, rejectInvalidShellTargets);
+    if (accumulateOutputItemEvent(dispatchEvent, snapshot, context)) {
+        return true;
+    }
+    if (accumulateContentPartAddedEvent(dispatchEvent, snapshot, context)) {
+        return true;
+    }
+    if (accumulateContentPartDoneEvent(dispatchEvent, snapshot, context)) {
+        return true;
+    }
+    if (accumulateOutputTextEvent(dispatchEvent, snapshot, context)) {
+        return true;
+    }
+    if (accumulateRefusalAndArgumentsEvent(dispatchEvent, snapshot)) {
+        return true;
+    }
+    if (accumulateShellEvent(dispatchEvent, snapshot)) {
+        return true;
+    }
+    if (accumulateReasoningEvent(dispatchEvent, snapshot)) {
+        return true;
+    }
+    if (accumulateCodeInterpreterEvent(dispatchEvent, snapshot)) {
+        return true;
+    }
+    if (accumulateSearchStatusEvent(dispatchEvent, snapshot)) {
+        return true;
+    }
+    if (accumulateImageAndMcpStatusEvent(dispatchEvent, snapshot)) {
+        return true;
+    }
+    if (isIgnoredResponseEvent(dispatchEvent)) {
+        return true;
+    }
+    return false;
+}
+/** Matches shared events that can change output. Validation still occurs before mutation. */
+function isResponseOutputEvent(event) {
+    // SAFETY: Membership of the existing SSE tag set is checked before using shared output validators.
+    return (supportedResponseEventTypes.has(event.type) &&
+        !isResponseLifecycleEvent(event) &&
+        !isIgnoredResponseEvent(event));
+}
+/** Applies the same strict output validation and mutations without requiring response metadata. */
+function accumulateWebSocketOutput(event, snapshot, context) {
+    const dispatchEvent = sanitizeResponseEvent(event);
+    if (!accumulateResponseOutput(dispatchEvent, snapshot, context, true)) {
+        throw new error_1.OpenAIError('Unsupported WebSocket output event');
+    }
+}
 function accumulateResponseWithContext(event, snapshot, context, rejectInvalidShellTargets = false, onSanitizedEvent) {
     const dispatchEvent = sanitizeResponseEvent(event);
     if (onSanitizedEvent && dispatchEvent.type !== 'keepalive') {
@@ -63899,42 +68431,11 @@ function accumulateResponseWithContext(event, snapshot, context, rejectInvalidSh
         }
         return cloneValidatedResponse(context, dispatchEvent.response);
     }
-    validateOutputItemIdentity(dispatchEvent, snapshot, rejectInvalidShellTargets);
-    if (accumulateOutputItemEvent(dispatchEvent, snapshot, context)) {
-        return snapshot;
-    }
-    if (accumulateContentPartAddedEvent(dispatchEvent, snapshot, context)) {
-        return snapshot;
-    }
-    if (accumulateContentPartDoneEvent(dispatchEvent, snapshot, context)) {
-        return snapshot;
-    }
-    if (accumulateOutputTextEvent(dispatchEvent, snapshot, context)) {
-        return snapshot;
-    }
-    if (accumulateRefusalAndArgumentsEvent(dispatchEvent, snapshot)) {
-        return snapshot;
-    }
-    if (accumulateShellEvent(dispatchEvent, snapshot)) {
-        return snapshot;
-    }
-    if (accumulateReasoningEvent(dispatchEvent, snapshot)) {
-        return snapshot;
-    }
-    if (accumulateCodeInterpreterEvent(dispatchEvent, snapshot)) {
-        return snapshot;
-    }
-    if (accumulateSearchStatusEvent(dispatchEvent, snapshot)) {
-        return snapshot;
-    }
-    if (accumulateImageAndMcpStatusEvent(dispatchEvent, snapshot)) {
+    if (accumulateResponseOutput(dispatchEvent, snapshot, context, rejectInvalidShellTargets)) {
         return snapshot;
     }
     if (isResponseLifecycleEvent(dispatchEvent)) {
         return cloneValidatedResponse(context, dispatchEvent.response);
-    }
-    if (isIgnoredResponseEvent(dispatchEvent)) {
-        return snapshot;
     }
     return assertNever(dispatchEvent);
 }
@@ -64179,6 +68680,7 @@ exports.__classPrivateFieldGet = __classPrivateFieldGet;
 exports.__exportStar = __exportStar;
 exports.__importStar = __importStar;
 exports.__classPrivateFieldIn = __classPrivateFieldIn;
+exports.__importDefault = __importDefault;
 function __classPrivateFieldSet(receiver, state, value, kind, f) {
     if (kind === "m")
         throw new TypeError("Private method is not writable");
@@ -64257,6 +68759,9 @@ function __classPrivateFieldIn(state, receiver) {
     if (receiver === null || (typeof receiver !== "object" && typeof receiver !== "function"))
         throw new TypeError("Cannot use 'in' operator on non-object");
     return typeof state === "function" ? receiver === state : state.has(receiver);
+}
+function __importDefault(mod) {
+    return mod && mod.__esModule ? mod : { default: mod };
 }
 
 
@@ -65490,6 +69995,413 @@ const safeJSON = (text) => {
 };
 exports.safeJSON = safeJSON;
 //# sourceMappingURL=values.js.map
+
+/***/ }),
+
+/***/ 53963:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.SendQueue = exports.webSocketHeaderRemovals = exports.WEBSOCKET_METADATA_HEADERS = void 0;
+exports.recordWebSocketError = recordWebSocketError;
+exports.getWebSocketError = getWebSocketError;
+exports.getMaxBufferedEvents = getMaxBufferedEvents;
+exports.snapshotWebSocketCredentials = snapshotWebSocketCredentials;
+exports.mergeWebSocketAuthHeaders = mergeWebSocketAuthHeaders;
+exports.buildWebSocketOptions = buildWebSocketOptions;
+exports.protectWebSocketOptionsFromCredentialRedirects = protectWebSocketOptionsFromCredentialRedirects;
+exports.flattenRawData = flattenRawData;
+exports.rawByteLength = rawByteLength;
+exports.isRecoverableClose = isRecoverableClose;
+const bytes_1 = __nccwpck_require__(51136);
+const error_1 = __nccwpck_require__(59889);
+const webSocketErrors = new WeakMap();
+/** Records physical failure before transport callbacks notify public observers. @internal */
+function recordWebSocketError(socket, error) {
+    webSocketErrors.set(socket, error);
+}
+/** Returns physical failure for this socket instance, never for a replacement. @internal */
+function getWebSocketError(socket) {
+    return webSocketErrors.get(socket);
+}
+/** Snapshots and validates the iterator's limit before listeners are attached. */
+function getMaxBufferedEvents(options) {
+    const limit = options?.maxBufferedEvents;
+    if (limit !== undefined && (!Number.isSafeInteger(limit) || limit <= 0)) {
+        throw new error_1.OpenAIError('maxBufferedEvents must be a positive safe integer');
+    }
+    return limit;
+}
+const REDIRECT_SAFE_WEBSOCKET_HEADERS = new Set([
+    'connection',
+    'host',
+    'openai-beta',
+    'origin',
+    'sec-websocket-extensions',
+    'sec-websocket-key',
+    'sec-websocket-version',
+    'upgrade',
+    'user-agent',
+    'x-access-level',
+    'x-auth-metadata',
+    'x-auth-tokenization',
+    'x-authentication-metadata',
+    'x-authentication-tokenization',
+    'x-security-policy',
+    'x-token-budget',
+    'x-trace-id',
+]);
+const WEBSOCKET_METADATA_HEADER_NAMES = new Set([
+    'accept',
+    'accept-encoding',
+    'accept-language',
+    'content-type',
+    'x-request-id',
+    'x-client-request-id',
+    'x-correlation-id',
+    'traceparent',
+    'tracestate',
+    'sentry-trace',
+    'x-amzn-trace-id',
+    'x-cloud-trace-context',
+    'x-datadog-trace-id',
+    'x-datadog-parent-id',
+    'x-datadog-sampling-priority',
+    'x-datadog-origin',
+    'x-datadog-tags',
+    'baggage',
+    'b3',
+]);
+// Request and tracing metadata do not authenticate a Responses socket, but remain protected on redirects.
+exports.WEBSOCKET_METADATA_HEADERS = {
+    has: (name, values) => WEBSOCKET_METADATA_HEADER_NAMES.has(name) ||
+        name.startsWith('x-b3-') ||
+        (name === 'sec-websocket-protocol' &&
+            !values.some((value) => typeof value === 'string' &&
+                value.split(',').some((protocol) => protocol.trim().startsWith('openai-insecure-api-key.')))),
+};
+function isWebSocketCredentialHeader(name) {
+    return !REDIRECT_SAFE_WEBSOCKET_HEADERS.has(name.toLowerCase().split('_').join('-'));
+}
+/**
+ * Snapshots credential values in final socket options before validation and dispatch.
+ * Reports potential caller authentication, excluding additional metadata when requested.
+ * The server remains responsible for validating credentials. Noncredential headers are left intact.
+ */
+function snapshotWebSocketCredentials(options, metadataHeaders) {
+    if (options.auth !== null && options.auth !== undefined) {
+        options.auth = String(options.auth);
+    }
+    const credentials = new Map();
+    const headers = options.headers ?? {};
+    for (const [name, value] of Object.entries(headers)) {
+        const normalizedName = name.toLowerCase().split('_').join('-');
+        // Routing metadata is still protected on redirects, but cannot authenticate a socket.
+        if (!isWebSocketCredentialHeader(name) ||
+            normalizedName === 'openai-organization' ||
+            normalizedName === 'openai-project') {
+            continue;
+        }
+        let snapshot = value;
+        if (Array.isArray(value)) {
+            snapshot = value.map(String);
+        }
+        else if (value !== null && value !== undefined) {
+            snapshot = String(value);
+        }
+        headers[name] = snapshot;
+        const values = Array.isArray(snapshot) ? snapshot : [snapshot];
+        if (!metadataHeaders?.has(normalizedName, values)) {
+            credentials.set(name.toLowerCase(), values.some((item) => typeof item === 'string' && item.trim().length > 0));
+        }
+    }
+    // Node applies header names case-insensitively, and Authorization overrides Basic auth.
+    return ([...credentials.values()].some(Boolean) ||
+        (!credentials.has('authorization') && typeof options.auth === 'string' && options.auth.trim().length > 0));
+}
+/** Merge transport authentication before explicit caller overrides and header removals. */
+function mergeWebSocketAuthHeaders(options, authHeaders, removedHeaders) {
+    const headers = new Map(Object.entries(authHeaders).map(([name, value]) => [name.toLowerCase(), value]));
+    for (const name of removedHeaders) {
+        headers.delete(name);
+    }
+    for (const [name, value] of Object.entries(options.headers ?? {})) {
+        headers.set(name, value);
+    }
+    return { ...options, headers: Object.fromEntries(headers) };
+}
+/** Removal sink for one synchronous header-hook call, including legacy one-argument overrides. */
+exports.webSocketHeaderRemovals = new WeakMap();
+const preparedWebSocketHeaders = new WeakMap();
+/** Build a WebSocket handshake with explicit caller headers applied after the client defaults. */
+function buildWebSocketOptions(client, authHeaders, options, removedHeaders, usePreparedHeaders = false) {
+    // Capture the base result even through older overrides that forward only one argument.
+    const previous = exports.webSocketHeaderRemovals.get(client);
+    const prepared = usePreparedHeaders && options ? preparedWebSocketHeaders.get(options) : undefined;
+    const context = {
+        removedHeaders,
+        baseHeaders: prepared?.baseHeaders,
+    };
+    exports.webSocketHeaderRemovals.set(client, context);
+    let headers;
+    try {
+        headers = new Map(Object.entries(client._buildWebSocketHeaders(authHeaders, removedHeaders)).map(([name, value]) => [
+            name.toLowerCase(),
+            value,
+        ]));
+    }
+    finally {
+        if (previous) {
+            exports.webSocketHeaderRemovals.set(client, previous);
+        }
+        else {
+            exports.webSocketHeaderRemovals.delete(client);
+        }
+    }
+    // The first hook output is not a caller override of the final, credentialed hook.
+    // Save transport names and explicit nulls separately, then reuse their validated values.
+    const transportHeaders = new Map();
+    const currentHeaders = new Map(Object.entries(options?.headers ?? {}));
+    const overrides = prepared
+        ? [...prepared.transportHeaders].map(([name, removed]) => [name, removed ? null : currentHeaders.get(name)])
+        : currentHeaders;
+    for (const [name, value] of overrides) {
+        const normalizedName = name.toLowerCase();
+        if (value === null) {
+            headers.delete(normalizedName);
+            removedHeaders?.add(normalizedName);
+            transportHeaders.set(normalizedName, true);
+        }
+        else if (value !== undefined) {
+            headers.set(normalizedName, value);
+            removedHeaders?.delete(normalizedName);
+            transportHeaders.set(normalizedName, false);
+        }
+    }
+    const result = {
+        ...options,
+        headers: Object.fromEntries(headers),
+        followRedirects: false,
+    };
+    preparedWebSocketHeaders.set(result, { baseHeaders: context.baseHeaders, transportHeaders });
+    return result;
+}
+/** Prevents WebSocket redirects from forwarding caller or SDK credentials to another origin. */
+function protectWebSocketOptionsFromCredentialRedirects(options) {
+    const hasSensitiveHeader = Object.keys(options.headers ?? {}).some(isWebSocketCredentialHeader);
+    if (!options.auth && !hasSensitiveHeader) {
+        return options;
+    }
+    return { ...options, followRedirects: false };
+}
+function toUint8Array(view) {
+    if (view instanceof Uint8Array) {
+        return view;
+    }
+    return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+}
+/**
+ * Flatten `ArrayBufferView[]` fragments into a single `Uint8Array` so that
+ * `ws.send()` transmits the correct bytes.
+ */
+function flattenRawData(data) {
+    if (Array.isArray(data)) {
+        return (0, bytes_1.concatBytes)(data.map(toUint8Array));
+    }
+    return data;
+}
+function snapshotRawData(data) {
+    if (typeof data === 'string') {
+        return data;
+    }
+    if (Array.isArray(data)) {
+        return (0, bytes_1.concatBytes)(data.map(toUint8Array));
+    }
+    if (ArrayBuffer.isView(data)) {
+        const copy = new Uint8Array(data.byteLength);
+        copy.set(toUint8Array(data));
+        return copy;
+    }
+    // oxlint-disable-next-line unicorn/prefer-spread -- ArrayBufferLike.slice copies bytes while spread changes the return type.
+    return data.slice(0);
+}
+/** Counts wire bytes without allocating another payload-sized buffer. */
+function rawByteLength(data) {
+    if (typeof data === 'string') {
+        let bytes = 0;
+        for (let index = 0; index < data.length; index += 1) {
+            const code = data.codePointAt(index);
+            if (code < 128) {
+                bytes += 1;
+            }
+            else if (code < 2048) {
+                bytes += 2;
+            }
+            else if (code <= 65535) {
+                bytes += 3;
+            }
+            else {
+                bytes += 4;
+                index += 1;
+            }
+        }
+        return bytes;
+    }
+    if (Array.isArray(data)) {
+        return data.reduce((sum, buf) => sum + buf.byteLength, 0);
+    }
+    if ('byteLength' in data) {
+        return data.byteLength;
+    }
+    return 0;
+}
+/**
+ * Buffers outgoing WebSocket messages while a connection is unavailable.
+ *
+ * JSON values are serialized immediately, and raw binary payloads are copied,
+ * so later caller mutations cannot change queued messages. A single oversized
+ * message is accepted when the queue is empty; further messages are rejected
+ * whenever they would exceed the configured byte budget.
+ */
+class SendQueue {
+    /** Creates a queue with a one-mebibyte default byte budget. */
+    constructor(maxBytes = 1048576) {
+        this._queue = [];
+        this._bytes = 0;
+        this._maxBytes = maxBytes;
+    }
+    /**
+     * Serializes and snapshots a JSON message before queueing it.
+     *
+     * @returns `true` when accepted, including an oversized first message; `false`
+     * when adding it to a nonempty queue would exceed the byte budget.
+     */
+    enqueue(event) {
+        const data = JSON.stringify(event);
+        const byteLength = (0, bytes_1.encodeUTF8)(data).byteLength;
+        if (this._bytes + byteLength > this._maxBytes && this._queue.length > 0) {
+            return false;
+        }
+        this._queue.push({ kind: 'json', data, byteLength });
+        this._bytes += byteLength;
+        return true;
+    }
+    /**
+     * Queues a raw string or a defensive copy of a binary WebSocket payload.
+     * Fragmented typed-array payloads are flattened before storage.
+     *
+     * @returns `true` when accepted, including an oversized first frame; `false`
+     * when adding it to a nonempty queue would exceed the byte budget.
+     */
+    enqueueRaw(data) {
+        const snapshot = snapshotRawData(data);
+        const byteLength = rawByteLength(snapshot);
+        if (this._bytes + byteLength > this._maxBytes && this._queue.length > 0) {
+            return false;
+        }
+        this._queue.push({ kind: 'raw', data: snapshot, byteLength });
+        this._bytes += byteLength;
+        return true;
+    }
+    /**
+     * Send every queued message via `send`. If `send` throws, the failing
+     * message and all subsequent messages are re-queued and the error is
+     * re-thrown so the caller can report it. Endpoints that cannot safely replay
+     * an attempted write use `requeueFailed: false`. Never-attempted messages
+     * remain queued, including messages enqueued during the failed send.
+     */
+    flush(send, options) {
+        const pending = this._queue.splice(0);
+        this._bytes = 0;
+        for (let i = 0; i < pending.length; i++) {
+            try {
+                send(pending[i].data);
+            }
+            catch (err) {
+                const remaining = pending.slice(options?.requeueFailed === false ? i + 1 : i);
+                this._queue = [...remaining, ...this._queue];
+                this._bytes = this._queue.reduce((sum, item) => sum + item.byteLength, 0);
+                throw err;
+            }
+        }
+    }
+    /**
+     * Drain the queue and return the unsent messages. JSON messages are
+     * deserialized back to their original form. Resets byte tracking to zero.
+     */
+    drain() {
+        const unsent = this._queue.map((entry) => {
+            if (entry.kind === 'raw') {
+                return { type: 'raw', data: entry.data };
+            }
+            // SAFETY: T is the transport caller's event contract; JSON syntax is parsed here without imposing a runtime schema on forward-compatible events.
+            return { type: 'message', message: JSON.parse(entry.data) };
+        });
+        this._queue = [];
+        this._bytes = 0;
+        return unsent;
+    }
+}
+exports.SendQueue = SendQueue;
+/**
+ * Reports whether an RFC 6455 close code represents a recoverable interruption.
+ *
+ * Network failures, service restarts, temporary server errors, and TLS
+ * handshake failures can be retried; normal closure, protocol violations,
+ * invalid payloads, and unrecognized codes cannot.
+ */
+function isRecoverableClose(code) {
+    switch (code) {
+        case 1000: {
+            return false;
+        } // Normal closure
+        case 1001: {
+            return true;
+        } // Going away (server shutting down)
+        case 1002: {
+            return false;
+        } // Protocol error
+        case 1003: {
+            return false;
+        } // Unsupported data
+        case 1005: {
+            return true;
+        } // No status code (abnormal)
+        case 1006: {
+            return true;
+        } // Abnormal closure (network drop)
+        case 1007: {
+            return false;
+        } // Invalid payload
+        case 1008: {
+            return false;
+        } // Policy violation
+        case 1009: {
+            return false;
+        } // Message too big
+        case 1010: {
+            return false;
+        } // Missing extension
+        case 1011: {
+            return true;
+        } // Internal server error
+        case 1012: {
+            return true;
+        } // Service restart
+        case 1013: {
+            return true;
+        } // Try again later
+        case 1015: {
+            return true;
+        } // TLS handshake failure
+        default: {
+            return false;
+        }
+    }
+}
+//# sourceMappingURL=ws.js.map
 
 /***/ }),
 
@@ -70513,37 +75425,23 @@ exports.allSettledWithThrow = allSettledWithThrow;
 
 "use strict";
 
-var _AgentSessionStream_instances, _AgentSessionStream_consumed, _AgentSessionStream_stream, _AgentSessionStream_response, _AgentSessionStream_reading, _AgentSessionStream_sessions, _AgentSessionStream_sessionID, _AgentSessionStream_input, _AgentSessionStream_handlers, _AgentSessionStream_inputKey, _AgentSessionStream_options, _AgentSessionStream_iterate, _AgentSessionStream_result, _AgentSessionStream_checkAbort, _AgentSessionStream_abortError, _AgentSessionStream_wait, _AgentSessionStream_submit;
+var _AgentSessionStream_instances, _AgentSessionStream_consumed, _AgentSessionStream_format, _AgentSessionStream_parsedResult, _AgentSessionStream_collection, _AgentSessionStream_stream, _AgentSessionStream_response, _AgentSessionStream_reading, _AgentSessionStream_sessions, _AgentSessionStream_sessionID, _AgentSessionStream_input, _AgentSessionStream_handlers, _AgentSessionStream_inputKey, _AgentSessionStream_options, _AgentSessionStream_iterate, _AgentSessionStream_result, _AgentSessionStream_checkAbort, _AgentSessionStream_abortError, _AgentSessionStream_wait, _AgentSessionStream_submit;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.AgentSessionStream = void 0;
 const tslib_1 = __nccwpck_require__(97533);
 const turn_state_1 = __nccwpck_require__(23575);
+const parse_result_1 = __nccwpck_require__(26110);
+const result_collection_1 = __nccwpck_require__(86057);
 const error_1 = __nccwpck_require__(59889);
 const headers_1 = __nccwpck_require__(4559);
 const uuid_1 = __nccwpck_require__(99688);
 const values_1 = __nccwpck_require__(23049);
-function isInputContent(value) {
-    if (!(0, values_1.isObj)(value)) {
-        return false;
-    }
-    const content = value;
-    let field;
-    if (content['type'] === 'input_text') {
-        field = 'text';
-    }
-    else if (content['type'] === 'input_image') {
-        field = 'image_url';
-    }
-    else {
-        return false;
-    }
-    return (0, values_1.hasOwn)(content, 'type') && (0, values_1.hasOwn)(content, field) && typeof content[field] === 'string';
-}
+const tool_output_1 = __nccwpck_require__(41917);
 function normalizedOutput(value) {
     if (value === null) {
         return null;
     }
-    if (typeof value === 'string' || (Array.isArray(value) && value.every(isInputContent))) {
+    if (typeof value === 'string' || (Array.isArray(value) && value.every(tool_output_1.isInputContent))) {
         return value;
     }
     throw new error_1.OpenAIError('Tool output must be text, content, a JSON object, or null');
@@ -70592,6 +75490,9 @@ class AgentSessionStream {
         /** Aborts local requests and iteration without cancelling the backend turn. */
         this.controller = new AbortController();
         _AgentSessionStream_consumed.set(this, false);
+        _AgentSessionStream_format.set(this, void 0);
+        _AgentSessionStream_parsedResult.set(this, void 0);
+        _AgentSessionStream_collection.set(this, void 0);
         _AgentSessionStream_stream.set(this, void 0);
         _AgentSessionStream_response.set(this, void 0);
         _AgentSessionStream_reading.set(this, false);
@@ -70606,6 +75507,10 @@ class AgentSessionStream {
             : params.input;
         if (params.input.length === 0) {
             throw new error_1.OpenAIError('input must not be empty');
+        }
+        tslib_1.__classPrivateFieldSet(this, _AgentSessionStream_format, (0, parse_result_1.agentFormatParser)(params.outputFormat), "f");
+        if (params.outputFormat && !tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_format, "f")) {
+            throw new error_1.OpenAIError('outputFormat must have its own parser function');
         }
         tslib_1.__classPrivateFieldSet(this, _AgentSessionStream_sessions, sessions, "f");
         tslib_1.__classPrivateFieldSet(this, _AgentSessionStream_sessionID, sessionID, "f");
@@ -70622,6 +75527,7 @@ class AgentSessionStream {
         headers.nulls.delete('idempotency-key');
         const { idempotencyKey: _key, ...rest } = options ?? {};
         tslib_1.__classPrivateFieldSet(this, _AgentSessionStream_options, { ...rest, headers }, "f");
+        tslib_1.__classPrivateFieldSet(this, _AgentSessionStream_collection, new result_collection_1.ResultCollection(() => tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_instances, "m", _AgentSessionStream_iterate).call(this), (name) => tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_handlers, "f").has(name), sessionID), "f");
     }
     /** Closes local requests without cancelling the turn; an optional reason becomes the abort error's cause. */
     abort(reason) {
@@ -70632,12 +75538,21 @@ class AgentSessionStream {
         }
     }
     /** Starts iteration once; use for await to ensure early exits close the connection. */
-    [(_AgentSessionStream_consumed = new WeakMap(), _AgentSessionStream_stream = new WeakMap(), _AgentSessionStream_response = new WeakMap(), _AgentSessionStream_reading = new WeakMap(), _AgentSessionStream_sessions = new WeakMap(), _AgentSessionStream_sessionID = new WeakMap(), _AgentSessionStream_input = new WeakMap(), _AgentSessionStream_handlers = new WeakMap(), _AgentSessionStream_inputKey = new WeakMap(), _AgentSessionStream_options = new WeakMap(), _AgentSessionStream_instances = new WeakSet(), Symbol.asyncIterator)]() {
+    [(_AgentSessionStream_consumed = new WeakMap(), _AgentSessionStream_format = new WeakMap(), _AgentSessionStream_parsedResult = new WeakMap(), _AgentSessionStream_collection = new WeakMap(), _AgentSessionStream_stream = new WeakMap(), _AgentSessionStream_response = new WeakMap(), _AgentSessionStream_reading = new WeakMap(), _AgentSessionStream_sessions = new WeakMap(), _AgentSessionStream_sessionID = new WeakMap(), _AgentSessionStream_input = new WeakMap(), _AgentSessionStream_handlers = new WeakMap(), _AgentSessionStream_inputKey = new WeakMap(), _AgentSessionStream_options = new WeakMap(), _AgentSessionStream_instances = new WeakSet(), Symbol.asyncIterator)]() {
         if (tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_consumed, "f")) {
             throw new error_1.OpenAIError('An AgentSessionStream can only be consumed once');
         }
         tslib_1.__classPrivateFieldSet(this, _AgentSessionStream_consumed, true, "f");
-        return tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_instances, "m", _AgentSessionStream_iterate).call(this);
+        return tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_collection, "f").iterate();
+    }
+    /** Beta: opt into retaining completed final messages before iterating progress events. */
+    withResultCollection() {
+        tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_collection, "f").enable();
+        return this;
+    }
+    /** Beta: drain this turn, dispatch registered tools, and collect its final assistant messages. */
+    finalResult() {
+        return (tslib_1.__classPrivateFieldSet(this, _AgentSessionStream_parsedResult, tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_parsedResult, "f") ?? (0, parse_result_1.parseAgentResultPromise)(tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_collection, "f").finalResult(), tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_format, "f")), "f"));
     }
 }
 exports.AgentSessionStream = AgentSessionStream;
@@ -70789,6 +75704,21 @@ _AgentSessionStream_iterate = async function* _AgentSessionStream_iterate() {
 
 /***/ }),
 
+/***/ 1981:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.outputText = outputText;
+/** Joins output_text blocks in content order, without filtering phase, fetching, or mutating the message. */
+function outputText(message) {
+    return message.content.map((block) => (block.type === 'output_text' ? block.text : '')).join('');
+}
+//# sourceMappingURL=output-text.js.map
+
+/***/ }),
+
 /***/ 23575:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -70879,6 +75809,738 @@ function pollAssistantRun(resource, runID, params, options) {
     }), ['queued', 'in_progress', 'cancelling'], ['requires_action', 'incomplete', 'cancelled', 'completed', 'failed', 'expired'], options);
 }
 //# sourceMappingURL=assistant-run-polling.js.map
+
+/***/ }),
+
+/***/ 1339:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.withAgentTurnResult = withAgentTurnResult;
+const parse_result_1 = __nccwpck_require__(26110);
+const result_collection_1 = __nccwpck_require__(86057);
+/** Add beta result collection without replacing custom stream instances.
+ * @internal
+ */
+function withAgentTurnResult(stream, format) {
+    let collection;
+    stream.__betaTransformIterator((source) => {
+        collection = new result_collection_1.ResultCollection(source, undefined, undefined, stream.controller.signal);
+        return () => collection.iterate();
+    });
+    let parsed;
+    const result = Object.assign(stream, {
+        finalResult: () => (parsed ?? (parsed = (0, parse_result_1.parseAgentResultPromise)(collection.finalResult(), format))),
+        withResultCollection: () => {
+            collection.enable();
+            return result;
+        },
+    });
+    return result;
+}
+//# sourceMappingURL=agent-session-create-stream.js.map
+
+/***/ }),
+
+/***/ 47876:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+var _AgentTurnResultCollector_instances, _AgentTurnResultCollector_sessionID, _AgentTurnResultCollector_turn, _AgentTurnResultCollector_messages, _AgentTurnResultCollector_requiredActions, _AgentTurnResultCollector_sessionFailed, _AgentTurnResultCollector_terminal, _AgentTurnResultCollector_idle, _AgentTurnResultCollector_acceptTurn, _AgentTurnResultCollector_acceptOutput, _AgentTurnResultCollector_finalMessages;
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.AgentTurnResultCollector = void 0;
+const tslib_1 = __nccwpck_require__(97533);
+const agent_turn_result_1 = __nccwpck_require__(57150);
+const agent_turn_result_error_1 = __nccwpck_require__(22777);
+/** Accumulates completed items independently of transport and tool execution.
+ * @internal
+ */
+class AgentTurnResultCollector {
+    constructor(sessionID) {
+        _AgentTurnResultCollector_instances.add(this);
+        _AgentTurnResultCollector_sessionID.set(this, void 0);
+        _AgentTurnResultCollector_turn.set(this, void 0);
+        _AgentTurnResultCollector_messages.set(this, new Map());
+        _AgentTurnResultCollector_requiredActions.set(this, []);
+        _AgentTurnResultCollector_sessionFailed.set(this, false);
+        _AgentTurnResultCollector_terminal.set(this, false);
+        _AgentTurnResultCollector_idle.set(this, false);
+        tslib_1.__classPrivateFieldSet(this, _AgentTurnResultCollector_sessionID, sessionID, "f");
+    }
+    accept(event) {
+        if (this.ready) {
+            return;
+        }
+        if ('session' in event) {
+            tslib_1.__classPrivateFieldSet(this, _AgentTurnResultCollector_sessionID, tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_sessionID, "f") ?? event.session.id, "f");
+            tslib_1.__classPrivateFieldSet(this, _AgentTurnResultCollector_requiredActions, structuredClone(event.session.required_actions ?? []), "f");
+            tslib_1.__classPrivateFieldSet(this, _AgentTurnResultCollector_sessionFailed, tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_sessionFailed, "f") || event.type === 'agent.session.failed', "f");
+            tslib_1.__classPrivateFieldSet(this, _AgentTurnResultCollector_idle, tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_idle, "f") || event.type === 'agent.session.idle' && tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_terminal, "f"), "f");
+        }
+        if (event.type === 'agent.session.turn.created' && event.turn.subagent_id === null && !tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_turn, "f")) {
+            tslib_1.__classPrivateFieldSet(this, _AgentTurnResultCollector_turn, structuredClone(event.turn), "f");
+            tslib_1.__classPrivateFieldSet(this, _AgentTurnResultCollector_sessionID, event.turn.session_id, "f");
+        }
+        let turnID = 'turn_id' in event ? event.turn_id : undefined;
+        if ('item' in event) {
+            turnID = event.item.turn_id;
+        }
+        if (!tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_turn, "f") || turnID !== tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_turn, "f").id) {
+            return;
+        }
+        tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_instances, "m", _AgentTurnResultCollector_acceptTurn).call(this, event);
+    }
+    error(reason, cause) {
+        return new agent_turn_result_error_1.AgentTurnResultError(reason, tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_sessionID, "f"), tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_turn, "f"), tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_instances, "m", _AgentTurnResultCollector_finalMessages).call(this), tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_requiredActions, "f"), cause);
+    }
+    checkAction(canHandle) {
+        if (tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_sessionFailed, "f") || tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_turn, "f")?.status === 'failed') {
+            throw this.error('failed');
+        }
+        if (tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_turn, "f")?.status === 'cancelled') {
+            throw this.error('cancelled');
+        }
+        if (tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_requiredActions, "f").some((action) => action.type !== 'function_call' || !canHandle(action.name))) {
+            throw this.error('requires_action');
+        }
+    }
+    get ready() {
+        return tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_terminal, "f") && tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_idle, "f");
+    }
+    release() {
+        tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_messages, "f").clear();
+        tslib_1.__classPrivateFieldSet(this, _AgentTurnResultCollector_requiredActions, [], "f");
+    }
+    finish() {
+        this.checkAction(() => this.ready);
+        if (!tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_terminal, "f") || tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_turn, "f")?.status !== 'completed' || !tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_idle, "f")) {
+            throw this.error('observation');
+        }
+        return new agent_turn_result_1.AgentTurnResult(tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_turn, "f"), tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_instances, "m", _AgentTurnResultCollector_finalMessages).call(this));
+    }
+}
+exports.AgentTurnResultCollector = AgentTurnResultCollector;
+_AgentTurnResultCollector_sessionID = new WeakMap(), _AgentTurnResultCollector_turn = new WeakMap(), _AgentTurnResultCollector_messages = new WeakMap(), _AgentTurnResultCollector_requiredActions = new WeakMap(), _AgentTurnResultCollector_sessionFailed = new WeakMap(), _AgentTurnResultCollector_terminal = new WeakMap(), _AgentTurnResultCollector_idle = new WeakMap(), _AgentTurnResultCollector_instances = new WeakSet(), _AgentTurnResultCollector_acceptTurn = function _AgentTurnResultCollector_acceptTurn(event) {
+    if ('turn' in event) {
+        tslib_1.__classPrivateFieldSet(this, _AgentTurnResultCollector_turn, structuredClone(event.turn), "f");
+        tslib_1.__classPrivateFieldSet(this, _AgentTurnResultCollector_terminal, tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_terminal, "f") || (event.type === 'agent.session.turn.completed' ||
+            event.type === 'agent.session.turn.failed' ||
+            event.type === 'agent.session.turn.cancelled'), "f");
+    }
+    tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_instances, "m", _AgentTurnResultCollector_acceptOutput).call(this, event);
+}, _AgentTurnResultCollector_acceptOutput = function _AgentTurnResultCollector_acceptOutput(event) {
+    if (event.type !== 'agent.session.turn.item.done' ||
+        event.item.type !== 'message' ||
+        event.item.status !== 'completed' ||
+        event.item.phase === 'commentary' ||
+        tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_messages, "f").has(event.item.id)) {
+        return;
+    }
+    tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_messages, "f").set(event.item.id, { index: event.output_index, message: structuredClone(event.item) });
+}, _AgentTurnResultCollector_finalMessages = function _AgentTurnResultCollector_finalMessages() {
+    return ([...tslib_1.__classPrivateFieldGet(this, _AgentTurnResultCollector_messages, "f").values()]
+        // oxlint-disable-next-line unicorn/no-array-sort -- Sort a fresh array; ES2020 declarations do not include toSorted.
+        .sort((a, b) => a.index - b.index)
+        .map(({ message }) => message));
+};
+//# sourceMappingURL=agent-turn-result-collector.js.map
+
+/***/ }),
+
+/***/ 22777:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.AgentTurnResultError = void 0;
+const error_1 = __nccwpck_require__(59889);
+/** Beta: final collection failed; partial state is evidence, not a successful result. */
+class AgentTurnResultError extends error_1.OpenAIError {
+    constructor(reason, session_id, turn, messages, required_actions = [], cause) {
+        super(`Could not collect the agent turn result: ${reason}`);
+        this.name = 'AgentTurnResultError';
+        this.reason = reason;
+        this.session_id = session_id;
+        this.turn = turn;
+        this.messages = messages;
+        this.required_actions = required_actions;
+        this.cause = cause;
+    }
+    get turn_id() {
+        return this.turn?.id;
+    }
+}
+exports.AgentTurnResultError = AgentTurnResultError;
+//# sourceMappingURL=agent-turn-result-error.js.map
+
+/***/ }),
+
+/***/ 57150:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.AgentTurnResult = void 0;
+const output_text_1 = __nccwpck_require__(1981);
+/** Beta: the completed final assistant messages from one hosted root turn. */
+class AgentTurnResult {
+    constructor(turn, messages) {
+        this.turn = turn;
+        this.messages = messages;
+    }
+    get session_id() {
+        return this.turn.session_id;
+    }
+    get turn_id() {
+        return this.turn.id;
+    }
+    get output_text() {
+        return this.messages.map(output_text_1.outputText).join('');
+    }
+}
+exports.AgentTurnResult = AgentTurnResult;
+//# sourceMappingURL=agent-turn-result.js.map
+
+/***/ }),
+
+/***/ 1130:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.AgentFileUploadError = void 0;
+exports.validateAgentFilePath = validateAgentFilePath;
+exports.prepareAgentFiles = prepareAgentFiles;
+exports.uploadAgentFile = uploadAgentFile;
+const error_1 = __nccwpck_require__(59889);
+const headers_1 = __nccwpck_require__(4559);
+/** Beta: uploaded file IDs remain available after partial preparation or staging failure. */
+class AgentFileUploadError extends error_1.OpenAIError {
+    constructor(uploadedFiles, cause) {
+        super('Agent file preparation or staging failed; uploaded files remain caller-owned.');
+        this.name = 'AgentFileUploadError';
+        this.uploadedFiles = uploadedFiles;
+        Object.defineProperty(this, 'cause', { value: cause, configurable: true });
+    }
+}
+exports.AgentFileUploadError = AgentFileUploadError;
+/** @internal */
+function validateAgentFilePath(path) {
+    const parts = path.split('/');
+    const root = parts[2] ?? '';
+    if (!path.startsWith('/workspace/') ||
+        path.includes('\\') ||
+        path.includes('\0') ||
+        parts.slice(1).some((part) => part === '' || part === '.' || part === '..') ||
+        root === '.codex' ||
+        root === '.managed-agents' ||
+        root.startsWith('.managed-agents-') ||
+        path === '/workspace/outputs') {
+        throw new error_1.OpenAIError('Agent files require a non-reserved absolute file path inside /workspace');
+    }
+}
+function preflight(files, options) {
+    const entries = Object.entries(files);
+    const headers = (0, headers_1.buildHeaders)([options.headers]);
+    if (entries.length > 1 &&
+        (headers.values.has('idempotency-key') ||
+            (!headers.nulls.has('idempotency-key') && options?.idempotencyKey !== undefined))) {
+        throw new error_1.OpenAIError('Do not reuse an Idempotency-Key across multiple file uploads');
+    }
+    const paths = new Set(entries.map(([path]) => path));
+    for (const [path] of entries) {
+        validateAgentFilePath(path);
+        for (let slash = path.lastIndexOf('/'); slash > 0; slash = path.lastIndexOf('/', slash - 1)) {
+            if (paths.has(path.slice(0, slash))) {
+                throw new error_1.OpenAIError('Agent file destinations conflict');
+            }
+        }
+    }
+    return entries;
+}
+/** @internal */
+async function prepareAgentFiles(client, files, options) {
+    const requestOptions = { ...options };
+    // Internal SDK read: capture effective headers once, including defaults and explicit omissions.
+    const headers = (0, headers_1.buildHeaders)([client['_options'].defaultHeaders, requestOptions.headers]);
+    requestOptions.headers = headers;
+    const entries = preflight(files, requestOptions);
+    if (entries.length > 1) {
+        // Keep a later mutation of client defaults from adding one key to this entire batch.
+        headers.nulls.add('idempotency-key');
+    }
+    const prepared = { files: [], uploadedFiles: [] };
+    try {
+        for (const [path, file] of entries) {
+            // oxlint-disable-next-line no-await-in-loop -- Stop on the first failure and expose precisely the uploads already created.
+            const uploaded = await client.files.create({ file, purpose: 'user_data' }, requestOptions);
+            prepared.uploadedFiles.push(uploaded);
+            prepared.files.push({ type: 'file_id', file_id: uploaded.id, path });
+        }
+        return prepared;
+    }
+    catch (error) {
+        throw new AgentFileUploadError(prepared.uploadedFiles, error);
+    }
+}
+/** @internal */
+async function uploadAgentFile(client, resource, environmentID, params, options) {
+    const prepared = await prepareAgentFiles(client, { [params.path]: params.file }, options);
+    const [reference] = prepared.files;
+    const [uploadedFile] = prepared.uploadedFiles;
+    if (!reference || !uploadedFile) {
+        throw new error_1.OpenAIError('Missing prepared agent file');
+    }
+    try {
+        return { uploadedFile, environmentFile: await resource.create(environmentID, reference, options) };
+    }
+    catch (error) {
+        throw new AgentFileUploadError(prepared.uploadedFiles, error);
+    }
+}
+//# sourceMappingURL=files.js.map
+
+/***/ }),
+
+/***/ 78981:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+var _AgentOutputParseError_rawResult;
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.AgentOutputParseError = void 0;
+const tslib_1 = __nccwpck_require__(97533);
+const error_1 = __nccwpck_require__(59889);
+/** Beta: hosted execution completed, but local output parsing failed. */
+class AgentOutputParseError extends error_1.OpenAIError {
+    constructor(result) {
+        super('The completed agent output could not be parsed');
+        this.name = 'AgentOutputParseError';
+        _AgentOutputParseError_rawResult.set(this, void 0);
+        tslib_1.__classPrivateFieldSet(this, _AgentOutputParseError_rawResult, result, "f");
+    }
+    /** Inspect the completed output explicitly; ordinary error logging omits it. */
+    get raw_result() {
+        return tslib_1.__classPrivateFieldGet(this, _AgentOutputParseError_rawResult, "f");
+    }
+}
+exports.AgentOutputParseError = AgentOutputParseError;
+_AgentOutputParseError_rawResult = new WeakMap();
+//# sourceMappingURL=output-parse-error.js.map
+
+/***/ }),
+
+/***/ 32589:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.agentItems = agentItems;
+const error_1 = __nccwpck_require__(59889);
+const values_1 = __nccwpck_require__(23049);
+/** Retain server cursor metadata for legacy Agents items with nullable IDs.
+ * @internal
+ * @yields {T} Each item in server order, failing if pagination cannot advance.
+ */
+async function* agentItems(load) {
+    let after;
+    while (true) {
+        // oxlint-disable-next-line no-await-in-loop -- Each page determines the next cursor.
+        const page = await load(after);
+        yield* page.data;
+        if (!page.has_more) {
+            return;
+        }
+        // Internal SDK read: CursorPage keeps raw metadata but does not expose last_id.
+        // oxlint-disable-next-line prefer-destructuring -- Bracket access intentionally reads a protected internal field.
+        const body = page['body'];
+        // oxlint-disable-next-line unicorn/prefer-at -- Keep published source compatible with ES2020 declarations.
+        const last = page.data[page.data.length - 1];
+        // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Validate only the opaque cursor from response metadata.
+        const cursor = (0, values_1.isObj)(body) && typeof body['last_id'] === 'string' ? body['last_id'] : last?.id;
+        if (!cursor || cursor === after) {
+            throw new error_1.OpenAIError('Agent pagination cannot advance to the next page');
+        }
+        after = cursor;
+    }
+}
+//# sourceMappingURL=pages.js.map
+
+/***/ }),
+
+/***/ 26110:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.parseAgentResult = parseAgentResult;
+exports.agentFormatParser = agentFormatParser;
+exports.captureAgentOutput = captureAgentOutput;
+exports.parseAgentResultPromise = parseAgentResultPromise;
+const error_1 = __nccwpck_require__(59889);
+const parsed_agent_turn_result_1 = __nccwpck_require__(14102);
+const output_parse_error_1 = __nccwpck_require__(78981);
+/** @internal */
+function parseAgentResult(result, format) {
+    try {
+        if (!format) {
+            // SAFETY: Absent formats use the default never/raw overload.
+            return result;
+        }
+        let first;
+        for (const message of result.messages) {
+            for (const content of message.content) {
+                if (content.type === 'output_text') {
+                    const value = format.$parseRaw(content.text);
+                    first ?? (first = { value });
+                }
+            }
+        }
+        if (!first) {
+            throw new output_parse_error_1.AgentOutputParseError(result);
+        }
+        // SAFETY: Callers preserve the format's inferred T.
+        return new parsed_agent_turn_result_1.ParsedAgentTurnResult(result, first.value);
+    }
+    catch {
+        throw new output_parse_error_1.AgentOutputParseError(result);
+    }
+}
+// Inspect only JSON-visible data fields; leave getters and inherited values to normal serialization.
+function ownJSONValue(object, key) {
+    const descriptor = object && Object.getOwnPropertyDescriptor(object, key);
+    // SAFETY: The own data descriptor corresponds to the requested property in T.
+    return descriptor?.enumerable && 'value' in descriptor ? descriptor.value : undefined;
+}
+/** @internal */
+function agentFormatParser(format) {
+    if (!format) {
+        return undefined;
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(format, '$parseRaw');
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- An own parser data property is the explicit opt-in marker.
+    if (!descriptor || !('value' in descriptor) || typeof descriptor.value !== 'function') {
+        return undefined;
+    }
+    // SAFETY: Inspect the schema data descriptor without evaluating a caller getter; validate its discriminator below.
+    const schema = ownJSONValue(format, 'schema');
+    if (ownJSONValue(format, 'type') !== 'json_schema' || !schema) {
+        throw new error_1.OpenAIError('Typed agent formats require own enumerable type and schema data properties');
+    }
+    // SAFETY: The own descriptor was checked for a callable parser; retain its receiver and never reread the property.
+    const parse = descriptor.value;
+    return { type: 'json_schema', schema, $parseRaw: (text) => parse.call(format, text) };
+}
+// Materialize JSON-visible envelope getters once without evaluating unrelated properties.
+function snapshotJSONProperty(object, key, capture = (value) => value) {
+    const descriptor = Object.getOwnPropertyDescriptor(object, key);
+    if (!descriptor?.enumerable) {
+        return object;
+    }
+    const value = capture(object[key]);
+    if ('value' in descriptor && value === descriptor.value) {
+        return object;
+    }
+    // SAFETY: Preserve the original properties/prototype, replacing only this captured property's value.
+    return Object.create(Object.getPrototypeOf(object), {
+        ...Object.getOwnPropertyDescriptors(object),
+        [key]: { value, enumerable: true, configurable: descriptor.configurable, writable: true },
+    });
+}
+/** @internal */
+function captureAgentOutput(input, options) {
+    const body = snapshotJSONProperty(input, 'agent', (agent) => agent
+        ? snapshotJSONProperty(agent, 'text', (text) => (text ? snapshotJSONProperty(text, 'format') : text))
+        : agent);
+    const agent = ownJSONValue(body, 'agent');
+    const text = ownJSONValue(agent, 'text');
+    const format = agentFormatParser(ownJSONValue(text, 'format'));
+    if (!format) {
+        return { body, options };
+    }
+    const schema = structuredClone(format.schema);
+    for (const envelope of [body, agent, text]) {
+        if (envelope && 'toJSON' in envelope) {
+            throw new error_1.OpenAIError('Typed agent requests cannot customize body, agent, or text serialization');
+        }
+    }
+    // Snapshot options once, matching the own enumerable fields native request spreading uses.
+    const capturedOptions = { ...options };
+    if (ownJSONValue(capturedOptions, 'body') !== undefined) {
+        throw new error_1.OpenAIError('Typed agent requests cannot override the body in request options');
+    }
+    delete capturedOptions.body;
+    return {
+        options: capturedOptions,
+        body: {
+            ...body,
+            agent: {
+                ...agent,
+                text: { ...text, format: { type: 'json_schema', schema } },
+            },
+        },
+        format,
+    };
+}
+/** @internal */
+async function parseAgentResultPromise(result, format) {
+    return parseAgentResult(await result, format);
+}
+//# sourceMappingURL=parse-result.js.map
+
+/***/ }),
+
+/***/ 14102:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ParsedAgentTurnResult = void 0;
+const agent_turn_result_1 = __nccwpck_require__(57150);
+/** Beta: a completed hosted turn whose output passed the local parser. */
+class ParsedAgentTurnResult extends agent_turn_result_1.AgentTurnResult {
+    constructor(result, parsed) {
+        super(result.turn, result.messages);
+        this.raw_result = result;
+        this.output_parsed = parsed;
+    }
+}
+exports.ParsedAgentTurnResult = ParsedAgentTurnResult;
+//# sourceMappingURL=parsed-agent-turn-result.js.map
+
+/***/ }),
+
+/***/ 73886:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+var _AgentResultArtifacts_resource, _AgentResultArtifacts_sessionID, _AgentResultArtifacts_turnID;
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.AgentResultArtifacts = void 0;
+const tslib_1 = __nccwpck_require__(97533);
+const pages_1 = __nccwpck_require__(32589);
+const error_1 = __nccwpck_require__(59889);
+/** Beta: artifacts from the exact session and turn represented by a result. */
+class AgentResultArtifacts {
+    constructor(resource, result) {
+        _AgentResultArtifacts_resource.set(this, void 0);
+        _AgentResultArtifacts_sessionID.set(this, void 0);
+        _AgentResultArtifacts_turnID.set(this, void 0);
+        tslib_1.__classPrivateFieldSet(this, _AgentResultArtifacts_resource, resource, "f");
+        tslib_1.__classPrivateFieldSet(this, _AgentResultArtifacts_sessionID, result.session_id, "f");
+        tslib_1.__classPrivateFieldSet(this, _AgentResultArtifacts_turnID, result.turn_id, "f");
+    }
+    /** Find one immutable artifact by its exact hosted path, across all pages. */
+    async retrieve(path, options) {
+        let selected;
+        for await (const artifact of (0, pages_1.agentItems)((after) => tslib_1.__classPrivateFieldGet(this, _AgentResultArtifacts_resource, "f").list(tslib_1.__classPrivateFieldGet(this, _AgentResultArtifacts_sessionID, "f"), {}, { ...options, query: { ...options?.query, after, environment_id: undefined } }))) {
+            if (artifact.session_id === tslib_1.__classPrivateFieldGet(this, _AgentResultArtifacts_sessionID, "f") &&
+                artifact.turn_id === tslib_1.__classPrivateFieldGet(this, _AgentResultArtifacts_turnID, "f") &&
+                artifact.path === path) {
+                if (selected) {
+                    throw new error_1.OpenAIError('Multiple artifacts match this result and path');
+                }
+                selected = artifact;
+            }
+        }
+        if (!selected) {
+            throw new error_1.OpenAIError('No artifact matches this result and path');
+        }
+        return selected;
+    }
+    /** Return the native binary response for this result's exact artifact path. */
+    async content(path, options) {
+        const artifact = await this.retrieve(path, options);
+        return tslib_1.__classPrivateFieldGet(this, _AgentResultArtifacts_resource, "f").content(artifact.id, { session_id: tslib_1.__classPrivateFieldGet(this, _AgentResultArtifacts_sessionID, "f") }, options);
+    }
+    /** Stream bytes to a caller-chosen destination; the hosted path never selects a local path. */
+    async download(params, options) {
+        const { path, to } = params;
+        const artifact = await this.retrieve(path, options);
+        const response = await tslib_1.__classPrivateFieldGet(this, _AgentResultArtifacts_resource, "f").content(artifact.id, { session_id: tslib_1.__classPrivateFieldGet(this, _AgentResultArtifacts_sessionID, "f") }, options);
+        if (!response.body) {
+            throw new error_1.OpenAIError('Artifact response has no content stream');
+        }
+        try {
+            await response.body.pipeTo(to, options?.signal ? { signal: options.signal } : {});
+        }
+        catch (error) {
+            // pipeTo can reject before acquiring a reader, for example when the destination is locked.
+            try {
+                await response.body.cancel();
+            }
+            catch {
+                /* already cancelled or owned by pipeTo */
+            }
+            throw error;
+        }
+        return artifact;
+    }
+}
+exports.AgentResultArtifacts = AgentResultArtifacts;
+_AgentResultArtifacts_resource = new WeakMap(), _AgentResultArtifacts_sessionID = new WeakMap(), _AgentResultArtifacts_turnID = new WeakMap();
+//# sourceMappingURL=result-artifacts.js.map
+
+/***/ }),
+
+/***/ 86057:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+var _ResultCollection_instances, _ResultCollection_iterator, _ResultCollection_ended, _ResultCollection_enabled, _ResultCollection_uncollectedEvents, _ResultCollection_error, _ResultCollection_result, _ResultCollection_source, _ResultCollection_signal, _ResultCollection_canHandle, _ResultCollection_observe, _ResultCollection_collect;
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ResultCollection = void 0;
+const tslib_1 = __nccwpck_require__(97533);
+const error_1 = __nccwpck_require__(59889);
+const agent_turn_result_collector_1 = __nccwpck_require__(47876);
+const agent_turn_result_error_1 = __nccwpck_require__(22777);
+/** Shares collection between a raw creation stream and the follow-up helper.
+ * @internal
+ */
+class ResultCollection {
+    constructor(source, canHandle = () => false, sessionID, signal) {
+        _ResultCollection_instances.add(this);
+        _ResultCollection_iterator.set(this, void 0);
+        _ResultCollection_ended.set(this, false);
+        _ResultCollection_enabled.set(this, false);
+        _ResultCollection_uncollectedEvents.set(this, false);
+        _ResultCollection_error.set(this, void 0);
+        _ResultCollection_result.set(this, void 0);
+        _ResultCollection_source.set(this, void 0);
+        _ResultCollection_signal.set(this, void 0);
+        _ResultCollection_canHandle.set(this, void 0);
+        tslib_1.__classPrivateFieldSet(this, _ResultCollection_source, source, "f");
+        tslib_1.__classPrivateFieldSet(this, _ResultCollection_signal, signal, "f");
+        tslib_1.__classPrivateFieldSet(this, _ResultCollection_canHandle, canHandle, "f");
+        this.collector = new agent_turn_result_collector_1.AgentTurnResultCollector(sessionID);
+    }
+    enable() {
+        if (!tslib_1.__classPrivateFieldGet(this, _ResultCollection_enabled, "f") && tslib_1.__classPrivateFieldGet(this, _ResultCollection_uncollectedEvents, "f")) {
+            throw new error_1.OpenAIError('Call withResultCollection() before consuming events, or call finalResult() on a fresh stream.');
+        }
+        tslib_1.__classPrivateFieldSet(this, _ResultCollection_enabled, true, "f");
+    }
+    iterate() {
+        if (tslib_1.__classPrivateFieldGet(this, _ResultCollection_iterator, "f")) {
+            throw new error_1.OpenAIError('An agent result stream can only be consumed once');
+        }
+        return (tslib_1.__classPrivateFieldSet(this, _ResultCollection_iterator, tslib_1.__classPrivateFieldGet(this, _ResultCollection_instances, "m", _ResultCollection_observe).call(this), "f"));
+    }
+    finalResult() {
+        return (tslib_1.__classPrivateFieldSet(this, _ResultCollection_result, tslib_1.__classPrivateFieldGet(this, _ResultCollection_result, "f") ?? tslib_1.__classPrivateFieldGet(this, _ResultCollection_instances, "m", _ResultCollection_collect).call(this), "f"));
+    }
+}
+exports.ResultCollection = ResultCollection;
+_ResultCollection_iterator = new WeakMap(), _ResultCollection_ended = new WeakMap(), _ResultCollection_enabled = new WeakMap(), _ResultCollection_uncollectedEvents = new WeakMap(), _ResultCollection_error = new WeakMap(), _ResultCollection_result = new WeakMap(), _ResultCollection_source = new WeakMap(), _ResultCollection_signal = new WeakMap(), _ResultCollection_canHandle = new WeakMap(), _ResultCollection_instances = new WeakSet(), _ResultCollection_observe = async function* _ResultCollection_observe() {
+    const iterator = tslib_1.__classPrivateFieldGet(this, _ResultCollection_source, "f").call(this);
+    let done = false;
+    try {
+        while (true) {
+            // oxlint-disable-next-line no-await-in-loop -- Pull the single-use stream sequentially.
+            const next = await iterator.next();
+            if (next.done) {
+                done = true;
+                return;
+            }
+            if (tslib_1.__classPrivateFieldGet(this, _ResultCollection_enabled, "f")) {
+                this.collector.accept(next.value);
+            }
+            else {
+                tslib_1.__classPrivateFieldSet(this, _ResultCollection_uncollectedEvents, true, "f");
+            }
+            yield next.value;
+        }
+    }
+    catch (error) {
+        if (tslib_1.__classPrivateFieldGet(this, _ResultCollection_enabled, "f")) {
+            tslib_1.__classPrivateFieldSet(this, _ResultCollection_error, error, "f");
+        }
+        throw error;
+    }
+    finally {
+        tslib_1.__classPrivateFieldSet(this, _ResultCollection_ended, true, "f");
+        if (!done) {
+            await iterator.return?.();
+        }
+    }
+}, _ResultCollection_collect = async function _ResultCollection_collect() {
+    this.enable();
+    try {
+        const iterator = tslib_1.__classPrivateFieldGet(this, _ResultCollection_iterator, "f") ?? this.iterate();
+        while (!tslib_1.__classPrivateFieldGet(this, _ResultCollection_ended, "f") && !this.collector.ready) {
+            this.collector.checkAction(tslib_1.__classPrivateFieldGet(this, _ResultCollection_canHandle, "f"));
+            // oxlint-disable-next-line no-await-in-loop -- Each event can dispatch tools before the next pull.
+            const next = await iterator.next();
+            if (next.done) {
+                break;
+            }
+        }
+        if (tslib_1.__classPrivateFieldGet(this, _ResultCollection_error, "f") !== undefined && !this.collector.ready) {
+            throw tslib_1.__classPrivateFieldGet(this, _ResultCollection_error, "f");
+        }
+        if (!this.collector.ready && tslib_1.__classPrivateFieldGet(this, _ResultCollection_signal, "f")?.aborted) {
+            throw this.collector.error('observation', tslib_1.__classPrivateFieldGet(this, _ResultCollection_signal, "f").reason);
+        }
+        return this.collector.finish();
+    }
+    catch (error) {
+        throw error instanceof agent_turn_result_error_1.AgentTurnResultError ? error : this.collector.error('observation', error);
+    }
+    finally {
+        try {
+            await tslib_1.__classPrivateFieldGet(this, _ResultCollection_iterator, "f")?.return();
+        }
+        finally {
+            this.collector.release();
+        }
+    }
+};
+//# sourceMappingURL=result-collection.js.map
+
+/***/ }),
+
+/***/ 41917:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.isInputContent = isInputContent;
+const values_1 = __nccwpck_require__(23049);
+/**
+ * Recognizes supported content blocks without confusing JSON business data with content.
+ * @internal
+ */
+function isInputContent(value) {
+    if (!(0, values_1.isObj)(value)) {
+        return false;
+    }
+    const content = value;
+    let field;
+    if (content['type'] === 'input_text') {
+        field = 'text';
+    }
+    else if (content['type'] === 'input_image') {
+        field = 'image_url';
+    }
+    else {
+        return false;
+    }
+    return (0, values_1.hasOwn)(content, 'type') && (0, values_1.hasOwn)(content, field) && typeof content[field] === 'string';
+}
+//# sourceMappingURL=tool-output.js.map
 
 /***/ }),
 
@@ -76057,7 +81719,7 @@ class Speech extends resource_1.APIResource {
      * const speech = await client.audio.speech.create({
      *   input: 'input',
      *   model: 'tts-1',
-     *   voice: 'alloy',
+     *   voice: 'ash',
      * });
      *
      * const content = await speech.blob();
@@ -76485,6 +82147,7 @@ Environments.Templates = templates_1.Templates;
 // File generated from our OpenAPI spec by Castiron. See CONTRIBUTING.md for details.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Files = void 0;
+const files_1 = __nccwpck_require__(1130);
 const resource_1 = __nccwpck_require__(3587);
 const pagination_1 = __nccwpck_require__(59847);
 const headers_1 = __nccwpck_require__(4559);
@@ -76493,6 +82156,14 @@ function resolveResourceRequestOptions(options, buildOptions) {
     return Promise.resolve(options).then(buildOptions);
 }
 class Files extends resource_1.APIResource {
+    /** Beta: prepare initial hosted file references; uploaded Files API objects remain caller-owned. */
+    prepare(files, options) {
+        return (0, files_1.prepareAgentFiles)(this._client, files, options);
+    }
+    /** Beta: upload one local file and stage its reference in a live environment. */
+    upload(environmentID, params, options) {
+        return (0, files_1.uploadAgentFile)(this._client, this, environmentID, params, options);
+    }
     /**
      * Copies inline bytes or a Files API file into a connected execution environment.
      * See
@@ -76724,6 +82395,7 @@ exports.Templates = Templates;
 // File generated from our OpenAPI spec by Castiron. See CONTRIBUTING.md for details.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Artifacts = void 0;
+const result_artifacts_1 = __nccwpck_require__(73886);
 const resource_1 = __nccwpck_require__(3587);
 const pagination_1 = __nccwpck_require__(59847);
 const headers_1 = __nccwpck_require__(4559);
@@ -76784,6 +82456,10 @@ function normalizeRequestOptionsForQuery(value, queryKeys, options) {
     }));
 }
 class Artifacts extends resource_1.APIResource {
+    /** Beta: bind artifact lookup and downloads to a completed result's exact session and turn. */
+    forResult(result) {
+        return new result_artifacts_1.AgentResultArtifacts(this, result);
+    }
     /**
      * Retrieves immutable metadata for one durable session artifact. See
      * [session artifacts](https://developers.openai.com/api/docs/guides/agents-api/environments/files#openai-hosted-artifacts).
@@ -76892,11 +82568,12 @@ function resolveResourceRequestOptions(options, buildOptions) {
 }
 class Events extends resource_1.APIResource {
     /**
-     * Submits message, cancellation, or tool-result events to a managed agent session.
-     * Cancellation can recover a still-open turn whose backend execution has ended by
-     * marking it cancelled and abandoning unpublished outputs. Saved results,
-     * published files, and existing terminal outcomes are preserved. HTTP 202 confirms
-     * acceptance, not durable completion. See
+     * Submits message, cancellation, tool-result, or computer-use approval-response
+     * events to a managed agent session. Cancellation can recover a still-open turn
+     * whose backend execution has ended by marking it cancelled and abandoning
+     * unpublished outputs. Saved results, published files, and existing terminal
+     * outcomes are preserved. HTTP 202 confirms acceptance, not durable completion.
+     * See
      * [session events](https://developers.openai.com/api/docs/guides/agents-api/sessions/events).
      *
      * @example
@@ -76906,13 +82583,16 @@ class Events extends resource_1.APIResource {
      *   {
      *     events: [
      *       {
-     *         input: [
-     *           {
-     *             content: [{ text: 'text', type: 'input_text' }],
-     *             role: 'user',
-     *           },
-     *         ],
-     *         type: 'agent.session.input.message',
+     *         request_id: 'request_id',
+     *         response: {
+     *           action: 'submit',
+     *           fields: [
+     *             { field_id: 'field_id', value: 'value' },
+     *           ],
+     *           type: 'browser_authentication',
+     *         },
+     *         type:
+     *           'agent.session.input.computer_use_approval_request_result',
      *       },
      *     ],
      *   },
@@ -77062,6 +82742,8 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Sessions = void 0;
 const tslib_1 = __nccwpck_require__(97533);
 const agent_session_stream_1 = __nccwpck_require__(86019);
+const agent_session_create_stream_1 = __nccwpck_require__(1339);
+const parse_result_1 = __nccwpck_require__(26110);
 const resource_1 = __nccwpck_require__(3587);
 const ArtifactsAPI = tslib_1.__importStar(__nccwpck_require__(66962));
 const artifacts_1 = __nccwpck_require__(66962);
@@ -77069,6 +82751,8 @@ const EventsAPI = tslib_1.__importStar(__nccwpck_require__(50292));
 const events_1 = __nccwpck_require__(50292);
 const ItemsAPI = tslib_1.__importStar(__nccwpck_require__(11569));
 const items_1 = __nccwpck_require__(11569);
+const TracesAPI = tslib_1.__importStar(__nccwpck_require__(89171));
+const traces_1 = __nccwpck_require__(89171);
 const TurnsAPI = tslib_1.__importStar(__nccwpck_require__(13097));
 const turns_1 = __nccwpck_require__(13097);
 const SubagentsAPI = tslib_1.__importStar(__nccwpck_require__(2446));
@@ -77138,6 +82822,7 @@ class Sessions extends resource_1.APIResource {
         this.artifacts = new ArtifactsAPI.Artifacts(this._client);
         this.items = new ItemsAPI.Items(this._client);
         this.events = new EventsAPI.Events(this._client);
+        this.traces = new TracesAPI.Traces(this._client);
         this.turns = new TurnsAPI.Turns(this._client);
     }
     /** Stream one turn on an idle session with a single input writer. See AgentSessionStream for lifecycle and tool handling. */
@@ -77145,13 +82830,20 @@ class Sessions extends resource_1.APIResource {
         return new agent_session_stream_1.AgentSessionStream(this, sessionID, params, options);
     }
     create(body, options) {
-        return this._client.post('/agents/sessions', resolveResourceRequestOptions(options, (options) => ({
-            body,
+        const output = (0, parse_result_1.captureAgentOutput)(body, options);
+        return this._client
+            .post('/agents/sessions', resolveResourceRequestOptions(output.options, (options) => ({
+            body: output.body,
             ...options,
             headers: (0, headers_1.buildHeaders)([{ 'OpenAI-Beta': 'agents=v1' }, options?.headers]),
-            stream: body.stream ?? false,
+            stream: output.body.stream ?? false,
             __security: { bearerAuth: true },
-        })));
+        })))
+            ._thenUnwrap((data, { options }) => 
+        // SAFETY: defaultParseResponse uses this same resolved flag to return the configured stream instance.
+        options.stream
+            ? (0, agent_session_create_stream_1.withAgentTurnResult)(data, output.format)
+            : data);
     }
     /**
      * Retrieves the current state of a managed agent session. See
@@ -77229,6 +82921,7 @@ Sessions.Subagents = subagents_1.Subagents;
 Sessions.Artifacts = artifacts_1.Artifacts;
 Sessions.Items = items_1.Items;
 Sessions.Events = events_1.Events;
+Sessions.Traces = traces_1.Traces;
 Sessions.Turns = turns_1.Turns;
 //# sourceMappingURL=sessions.js.map
 
@@ -77525,6 +83218,94 @@ Turns.Items = items_1.Items;
 
 /***/ }),
 
+/***/ 89171:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+// File generated from our OpenAPI spec by Castiron. See CONTRIBUTING.md for details.
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Traces = void 0;
+const resource_1 = __nccwpck_require__(3587);
+const pagination_1 = __nccwpck_require__(59847);
+const headers_1 = __nccwpck_require__(4559);
+const path_1 = __nccwpck_require__(39716);
+function resolveResourceRequestOptions(options, buildOptions) {
+    return Promise.resolve(options).then(buildOptions);
+}
+// Recognizable options across SDK runtime versions. Keep this independent of
+// private RequestOptions fields so older handwritten runtimes still compile.
+const normalizeRequestOptionsForQueryKeys = new Set([
+    'method',
+    'path',
+    'query',
+    'body',
+    'headers',
+    'maxRetries',
+    'stream',
+    'timeout',
+    'httpAgent',
+    'fetchOptions',
+    'signal',
+    'idempotencyKey',
+    'defaultBaseURL',
+    '__metadata',
+    '__binaryRequest',
+    '__binaryResponse',
+    '__streamClass',
+    '__security',
+    '__synthesizeEventData',
+]);
+function normalizeRequestOptionsForQuery(value, queryKeys, options) {
+    if (typeof value !== 'object' || value === null)
+        return undefined;
+    // Optional never fields can still be explicitly undefined unless consumers
+    // enable exactOptionalPropertyTypes. Snapshot data without invoking getters.
+    const entries = Object.entries(Object.getOwnPropertyDescriptors(value)).filter(([, descriptor]) => descriptor.enumerable && (!('value' in descriptor) || descriptor.value !== undefined));
+    const keys = entries.map(([key]) => key);
+    const requestOnly = keys.some((key) => normalizeRequestOptionsForQueryKeys.has(key) && !queryKeys.includes(key));
+    if (!requestOnly)
+        return undefined;
+    // Declared query fields, including stream, must use the query argument.
+    // Mixing them with request-only options is ambiguous and could change the return type.
+    if (options !== undefined ||
+        keys.some((key) => !normalizeRequestOptionsForQueryKeys.has(key) || queryKeys.includes(key))) {
+        throw new TypeError('Query parameters and request options must be passed as separate arguments.');
+    }
+    // The query position must not gain authority to change the request destination
+    // or transport. Those overrides require the explicit request options argument.
+    if (keys.some((key) => !['headers', 'maxRetries', 'timeout', 'signal', 'idempotencyKey', 'query'].includes(key))) {
+        throw new TypeError('Pass transport overrides in the explicit request options argument.');
+    }
+    // Copy only the validated fields. Spreading value would reintroduce undefined
+    // transport overrides, and deleting them would mutate the caller's object.
+    return Object.fromEntries(entries.map(([key, descriptor]) => {
+        if ('value' in descriptor)
+            return [key, descriptor.value];
+        return [key, descriptor.get ? Reflect.apply(descriptor.get, value, []) : undefined];
+    }));
+}
+class Traces extends resource_1.APIResource {
+    list(sessionID, query = {}, options) {
+        const normalizeRequestOptionsForQueryOptions = normalizeRequestOptionsForQuery(query, ['after', 'limit', 'order'], options);
+        if (normalizeRequestOptionsForQueryOptions !== undefined) {
+            options = normalizeRequestOptionsForQueryOptions;
+            query = {};
+        }
+        query = query;
+        return this._client.getAPIList((0, path_1.path) `/agents/sessions/${sessionID}/traces`, (pagination_1.CursorPage), resolveResourceRequestOptions(options, (options) => ({
+            query,
+            ...options,
+            headers: (0, headers_1.buildHeaders)([{ 'OpenAI-Beta': 'agents=v1' }, options?.headers]),
+            __security: { bearerAuth: true },
+        })));
+    }
+}
+exports.Traces = Traces;
+//# sourceMappingURL=traces.js.map
+
+/***/ }),
+
 /***/ 13097:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -77754,8 +83535,7 @@ class Credentials extends resource_1.APIResource {
         })));
     }
     /**
-     * Rotates a vault credential's write-only secret and returns only credential
-     * metadata. See
+     * Updates credential metadata or rotates its write-only secret. See
      * [vaults](https://developers.openai.com/api/docs/guides/agents-api/tools/vaults).
      *
      * @example
@@ -77763,10 +83543,7 @@ class Credentials extends resource_1.APIResource {
      * const credential =
      *   await client.beta.agents.vaults.credentials.update(
      *     'credential_id',
-     *     {
-     *       vault_id: 'vault_id',
-     *       auth: { type: 'mcp_oauth' },
-     *     },
+     *     { vault_id: 'vault_id', metadata: {} },
      *   );
      * ```
      */
@@ -80524,7 +86301,7 @@ class Runs extends resource_1.APIResource {
      */
     cancel(runID, params, options) {
         const { eval_id } = params;
-        return this._client.post((0, path_1.path) `/evals/${eval_id}/runs/${runID}`, resolveResourceRequestOptions(options, (options) => ({ ...options, __security: { bearerAuth: true } })));
+        return this._client.post((0, path_1.path) `/evals/${eval_id}/runs/${runID}/cancel`, resolveResourceRequestOptions(options, (options) => ({ ...options, __security: { bearerAuth: true } })));
     }
 }
 exports.Runs = Runs;
@@ -81920,17 +87697,91 @@ const CallsAPI = tslib_1.__importStar(__nccwpck_require__(70314));
 const calls_1 = __nccwpck_require__(70314);
 const ClientSecretsAPI = tslib_1.__importStar(__nccwpck_require__(79444));
 const client_secrets_1 = __nccwpck_require__(79444);
+const TranslationsAPI = tslib_1.__importStar(__nccwpck_require__(39238));
+const translations_1 = __nccwpck_require__(39238);
 class Realtime extends resource_1.APIResource {
     constructor() {
         super(...arguments);
         this.clientSecrets = new ClientSecretsAPI.ClientSecrets(this._client);
         this.calls = new CallsAPI.Calls(this._client);
+        this.translations = new TranslationsAPI.Translations(this._client);
     }
 }
 exports.Realtime = Realtime;
 Realtime.ClientSecrets = client_secrets_1.ClientSecrets;
 Realtime.Calls = calls_1.Calls;
+Realtime.Translations = translations_1.Translations;
 //# sourceMappingURL=realtime.js.map
+
+/***/ }),
+
+/***/ 99941:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+// File generated from our OpenAPI spec by Castiron. See CONTRIBUTING.md for details.
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ClientSecrets = void 0;
+const resource_1 = __nccwpck_require__(3587);
+function resolveResourceRequestOptions(options, buildOptions) {
+    return Promise.resolve(options).then(buildOptions);
+}
+class ClientSecrets extends resource_1.APIResource {
+    /**
+     * Create a Realtime translation client secret with an associated translation
+     * session configuration.
+     *
+     * Client secrets are short-lived tokens that can be passed to a client app, such
+     * as a web frontend or mobile client, which grants access to the Realtime
+     * Translation API without leaking your main API key. You can configure a custom
+     * TTL for each client secret.
+     *
+     * Returns the created client secret and the effective translation session object.
+     * The client secret is a string that looks like `ek_1234`.
+     *
+     * @example
+     * ```ts
+     * const realtimeTranslationClientSecretCreateResponse =
+     *   await client.realtime.translations.clientSecrets.create(
+     *     { session: { model: 'model' } },
+     *   );
+     * ```
+     */
+    create(body, options) {
+        return this._client.post('/realtime/translations/client_secrets', resolveResourceRequestOptions(options, (options) => ({
+            body,
+            ...options,
+            __security: { bearerAuth: true },
+        })));
+    }
+}
+exports.ClientSecrets = ClientSecrets;
+//# sourceMappingURL=client-secrets.js.map
+
+/***/ }),
+
+/***/ 39238:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+// File generated from our OpenAPI spec by Castiron. See CONTRIBUTING.md for details.
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Translations = void 0;
+const tslib_1 = __nccwpck_require__(97533);
+const resource_1 = __nccwpck_require__(3587);
+const ClientSecretsAPI = tslib_1.__importStar(__nccwpck_require__(99941));
+const client_secrets_1 = __nccwpck_require__(99941);
+class Translations extends resource_1.APIResource {
+    constructor() {
+        super(...arguments);
+        this.clientSecrets = new ClientSecretsAPI.ClientSecrets(this._client);
+    }
+}
+exports.Translations = Translations;
+Translations.ClientSecrets = client_secrets_1.ClientSecrets;
+//# sourceMappingURL=translations.js.map
 
 /***/ }),
 
@@ -83681,7 +89532,7 @@ tslib_1.__exportStar(__nccwpck_require__(31743), exports);
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.VERSION = void 0;
 /** Version of the installed OpenAI SDK package. */
-exports.VERSION = '7.23.0'; // x-release-please-version
+exports.VERSION = '7.27.0'; // x-release-please-version
 //# sourceMappingURL=version.js.map
 
 /***/ }),
@@ -84358,7 +90209,7 @@ Object.defineProperty(exports, "withParser", ({ enumerable: true, get: function 
 Object.defineProperty(exports, "ZodCompileAsyncError", ({ enumerable: true, get: function () { return index_js_1.ZodCompileAsyncError; } }));
 Object.defineProperty(exports, "ZodCompileUnsupportedError", ({ enumerable: true, get: function () { return index_js_1.ZodCompileUnsupportedError; } }));
 Object.defineProperty(exports, "getDiscriminatedOption", ({ enumerable: true, get: function () { return index_js_1.getDiscriminatedOption; } }));
-var json_schema_processors_js_1 = __nccwpck_require__(58929);
+var json_schema_processors_js_1 = __nccwpck_require__(81310);
 Object.defineProperty(exports, "toJSONSchema", ({ enumerable: true, get: function () { return json_schema_processors_js_1.toJSONSchema; } }));
 var from_json_schema_js_1 = __nccwpck_require__(4245);
 Object.defineProperty(exports, "fromJSONSchema", ({ enumerable: true, get: function () { return from_json_schema_js_1.fromJSONSchema; } }));
@@ -85705,7 +91556,7 @@ exports.json = json;
 exports.preprocess = preprocess;
 const core = __importStar(__nccwpck_require__(58163));
 const index_js_1 = __nccwpck_require__(58163);
-const processors = __importStar(__nccwpck_require__(58929));
+const processors = __importStar(__nccwpck_require__(81310));
 const regexes = __importStar(__nccwpck_require__(10302));
 const to_json_schema_js_1 = __nccwpck_require__(43635);
 const en_js_1 = __importDefault(__nccwpck_require__(25978));
@@ -91636,7 +97487,7 @@ __exportStar(__nccwpck_require__(76765), exports);
 __exportStar(__nccwpck_require__(20560), exports);
 __exportStar(__nccwpck_require__(97947), exports);
 __exportStar(__nccwpck_require__(43635), exports);
-var json_schema_processors_js_1 = __nccwpck_require__(58929);
+var json_schema_processors_js_1 = __nccwpck_require__(81310);
 Object.defineProperty(exports, "toJSONSchema", ({ enumerable: true, get: function () { return json_schema_processors_js_1.toJSONSchema; } }));
 var json_schema_generator_js_1 = __nccwpck_require__(27537);
 Object.defineProperty(exports, "JSONSchemaGenerator", ({ enumerable: true, get: function () { return json_schema_generator_js_1.JSONSchemaGenerator; } }));
@@ -91671,7 +97522,7 @@ exports.JSONSchema = __importStar(__nccwpck_require__(71349));
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.JSONSchemaGenerator = void 0;
-const json_schema_processors_js_1 = __nccwpck_require__(58929);
+const json_schema_processors_js_1 = __nccwpck_require__(81310);
 const to_json_schema_js_1 = __nccwpck_require__(43635);
 /**
  * Legacy class-based interface for JSON Schema generation.
@@ -91794,7 +97645,7 @@ exports.JSONSchemaGenerator = JSONSchemaGenerator;
 
 /***/ }),
 
-/***/ 58929:
+/***/ 81310:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
