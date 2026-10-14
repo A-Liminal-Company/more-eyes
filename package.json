@@ -15,14 +15,14 @@
     "watch:models": "tsx scripts/model-watch.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.131.0",
+    "@anthropic-ai/sdk": "^0.133.0",
     "@prisma/client": "^6.19.3",
-    "next": "16.3.8",
-    "openai": "^7.27.0",
+    "next": "16.4.0",
+    "openai": "^7.32.0",
     "prisma": "^6.19.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
