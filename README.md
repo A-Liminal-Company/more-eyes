@@ -66,7 +66,7 @@ itself, so a captured cookie is not a captured master credential. Rotating
 
 ## Reviewers
 
-Seven models across seven labs, all verified to support tool calling:
+Six models across six labs, all verified to support tool calling:
 
 | Model | Lab | Served by |
 |---|---|---|
@@ -76,7 +76,6 @@ Seven models across seven labs, all verified to support tool calling:
 | Grok 4.5 | xAI | xAI |
 | Mistral Large 3 | Mistral | Mistral |
 | Nova 2 Lite | Amazon | Bedrock |
-| Inkling | Thinking Machines | DeepInfra |
 
 ### Who is allowed to receive your code
 
@@ -94,11 +93,16 @@ actually reach.
 
 **One exception, admitted deliberately:** DeepInfra, an intermediary rather than
 a first party. Thinking Machines serves no endpoint for Inkling, so reaching it
-at all meant accepting a reseller. Of the three that serve it, DeepInfra is the
+at all meant accepting a reseller. Of the three that served it, DeepInfra is the
 only one whose privacy policy unconditionally commits not to store, sell, or
 train on API inputs and outputs. Together's equivalent is opt-in through an
 account setting that belongs to OpenRouter rather than to us; Baseten's policy
 says nothing about model inputs at all.
+
+Inkling was removed from the roster on 2026-10-23 when DeepInfra stopped serving
+it, leaving Together as its only provider. Together was not admitted to keep it:
+that would be widening the allowlist to make a red build go green. DeepInfra
+stays allowlisted so Inkling can return unchanged if DeepInfra serves it again.
 
 Requests also set **`data_collection: "deny"`**, which is a separate question
 from the allowlist: `only` decides *who* receives the code, `data_collection`
