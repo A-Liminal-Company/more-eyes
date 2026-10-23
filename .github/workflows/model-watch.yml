@@ -1,0 +1,63 @@
+name: Model Watch
+
+# Weekly: health-check every rostered reviewer with a small and a large review,
+# and list newer models from the same labs. Opens or updates ONE issue (label
+# `model-watch`) only when a model failed or a new candidate appeared. Roughly
+# $1/week of OpenRouter spend. See README "Model watch".
+on:
+  schedule:
+    - cron: "41 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # Failures are data, so the script exits 0 unless it crashed or OpenRouter
+      # was unreachable. Markdown goes to a file; stderr (per-model logs) stays
+      # in the job log.
+      - name: Run model watch
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: npm run --silent watch:models -- --json model-watch.json > model-watch.md
+
+      - name: Publish summary
+        run: cat model-watch.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: model-watch
+          path: model-watch.json
+          retention-days: 30
+
+      # Report text comes from model and catalogue output, so it only ever
+      # travels as a file (--body-file), never inside a shell command line.
+      - name: Open or update issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The script's verdict line is the one place that decides what counts:
+          # failed models, and candidates added in the last RECENT_DAYS days.
+          verdict=$(grep '^MODEL_WATCH:' model-watch.md | tail -1)
+          if [ "$verdict" = "MODEL_WATCH: failures=0 new=0" ]; then
+            echo "Quiet week: nothing to report."
+            exit 0
+          fi
+          gh label create model-watch --description "Weekly model watch report" --color 5319e7 2>/dev/null || true
+          existing=$(gh issue list --label model-watch --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file model-watch.md
+          else
+            gh issue create --title "Model watch: $(date -u +%F)" --label model-watch --body-file model-watch.md
+          fi

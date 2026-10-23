@@ -27,7 +27,7 @@ jobs:
           # so it is also where a model that cannot honour the forced
           # tool_choice contract, or that provider.only leaves unroutable,
           # shows up as a recorded failure instead of a surprise in the app.
-          models: claude-sonnet-5,gpt-5.5,gemini-3.5-flash,grok-4.5,mistral-large-3,nova-2-lite,inkling
+          models: claude-sonnet-5,gpt-5.5,gemini-3.5-flash,grok-4.5,mistral-large-3,nova-2-lite
           # A 500-line changelog reviewed by seven models is spend with no
           # finding at the end of it. README and CONTRIBUTING stay in — they
           # carry claims about the code that a reviewer can catch contradicting.

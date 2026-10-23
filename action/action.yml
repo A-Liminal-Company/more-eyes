@@ -103,6 +103,14 @@ inputs:
     description: "true = fail the run when max_batches left part of the diff unreviewed."
     required: false
     default: "false"
+  report_path:
+    description: >-
+      Optional file path. When set, the findings are also written there as JSON
+      (version 1: models, per-model ok/failed batch counts, gate verdict, and every
+      grouped finding with its agreement and per-model details), even when the gate
+      fails. Model-written text in it is untrusted; escape it before display.
+    required: false
+    default: ""
 
 outputs:
   findings_count:
@@ -111,6 +119,8 @@ outputs:
     description: "true when the review was skipped (no key available, or the triggering event is not a pull request and no diff_path was given)."
   truncated:
     description: "true when max_batches left part of the diff unreviewed."
+  report_path:
+    description: "The path the JSON report was written to, when report_path was set and the write succeeded."
 
 runs:
   # node20 is deprecated on GitHub runners (they already force node24); the
