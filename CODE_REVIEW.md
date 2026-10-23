@@ -1323,3 +1323,19 @@ even opened.
   seven reviewers still return nothing. Dogfooding is not a nicety here — it is
   the only instrument that measures the thing the product actually sells.
 - **Cost:** the PR review run plus roughly $0.05 of diagnostic probes.
+
+### Inkling removed — 2026-10-23
+
+`check:models` went red on every PR from 2026-10-21: OpenRouter's catalogue now
+lists Together as the only provider for `thinkingmachines/inkling`, and
+DeepInfra, the one admitted intermediary, no longer serves it.
+
+- **Decision (owner):** drop Inkling rather than admit Together. Together's
+  no-retention commitment is opt-in through OpenRouter's account settings, which
+  is the reason it was passed over at admission; losing a provider does not
+  change that.
+- **Roster:** six models across six labs. Removed from `models.ts`, the
+  `consensus-review.yml` model list, and the README roster.
+- **Left as is:** DeepInfra stays in `ALLOWED_PROVIDERS`, so re-adding Inkling is
+  a one-entry revert if DeepInfra serves it again. It currently serves no
+  rostered model, so the admission routes nothing today.
