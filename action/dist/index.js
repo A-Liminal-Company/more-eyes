@@ -29922,6 +29922,2303 @@ function wrappy (fn, cb) {
 
 /***/ }),
 
+/***/ 31964:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ContextAPI = void 0;
+const NoopContextManager_1 = __nccwpck_require__(19752);
+const global_utils_1 = __nccwpck_require__(45257);
+const diag_1 = __nccwpck_require__(360);
+const API_NAME = 'context';
+const NOOP_CONTEXT_MANAGER = new NoopContextManager_1.NoopContextManager();
+/**
+ * Singleton object which represents the entry point to the OpenTelemetry Context API
+ *
+ * @since 1.0.0
+ */
+class ContextAPI {
+    /** Empty private constructor prevents end users from constructing a new instance of the API */
+    constructor() { }
+    /** Get the singleton instance of the Context API */
+    static getInstance() {
+        if (!this._instance) {
+            this._instance = new ContextAPI();
+        }
+        return this._instance;
+    }
+    /**
+     * Set the current context manager.
+     *
+     * @returns true if the context manager was successfully registered, else false
+     */
+    setGlobalContextManager(contextManager) {
+        return (0, global_utils_1.registerGlobal)(API_NAME, contextManager, diag_1.DiagAPI.instance());
+    }
+    /**
+     * Get the currently active context
+     */
+    active() {
+        return this._getContextManager().active();
+    }
+    /**
+     * Execute a function with an active context
+     *
+     * @param context context to be active during function execution
+     * @param fn function to execute in a context
+     * @param thisArg optional receiver to be used for calling fn
+     * @param args optional arguments forwarded to fn
+     */
+    with(context, fn, thisArg, ...args) {
+        return this._getContextManager().with(context, fn, thisArg, ...args);
+    }
+    /**
+     * Bind a context to a target function or event emitter
+     *
+     * @param context context to bind to the event emitter or function. Defaults to the currently active context
+     * @param target function or event emitter to bind
+     */
+    bind(context, target) {
+        return this._getContextManager().bind(context, target);
+    }
+    _getContextManager() {
+        return (0, global_utils_1.getGlobal)(API_NAME) || NOOP_CONTEXT_MANAGER;
+    }
+    /** Disable and remove the global context manager */
+    disable() {
+        this._getContextManager().disable();
+        (0, global_utils_1.unregisterGlobal)(API_NAME, diag_1.DiagAPI.instance());
+    }
+}
+exports.ContextAPI = ContextAPI;
+//# sourceMappingURL=context.js.map
+
+/***/ }),
+
+/***/ 360:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.DiagAPI = void 0;
+const ComponentLogger_1 = __nccwpck_require__(22609);
+const logLevelLogger_1 = __nccwpck_require__(98352);
+const types_1 = __nccwpck_require__(92563);
+const global_utils_1 = __nccwpck_require__(45257);
+const API_NAME = 'diag';
+/**
+ * Singleton object which represents the entry point to the OpenTelemetry internal
+ * diagnostic API
+ *
+ * @since 1.0.0
+ */
+class DiagAPI {
+    /** Get the singleton instance of the DiagAPI API */
+    static instance() {
+        if (!this._instance) {
+            this._instance = new DiagAPI();
+        }
+        return this._instance;
+    }
+    /**
+     * Private internal constructor
+     * @private
+     */
+    constructor() {
+        function _logProxy(funcName) {
+            return function (...args) {
+                const logger = (0, global_utils_1.getGlobal)('diag');
+                // shortcut if logger not set
+                if (!logger)
+                    return;
+                return logger[funcName](...args);
+            };
+        }
+        // Using self local variable for minification purposes as 'this' cannot be minified
+        const self = this;
+        // DiagAPI specific functions
+        const setLogger = (logger, optionsOrLogLevel = { logLevel: types_1.DiagLogLevel.INFO }) => {
+            var _a, _b, _c;
+            if (logger === self) {
+                // There isn't much we can do here.
+                // Logging to the console might break the user application.
+                // Try to log to self. If a logger was previously registered it will receive the log.
+                const err = new Error('Cannot use diag as the logger for itself. Please use a DiagLogger implementation like ConsoleDiagLogger or a custom implementation');
+                self.error((_a = err.stack) !== null && _a !== void 0 ? _a : err.message);
+                return false;
+            }
+            if (typeof optionsOrLogLevel === 'number') {
+                optionsOrLogLevel = {
+                    logLevel: optionsOrLogLevel,
+                };
+            }
+            const oldLogger = (0, global_utils_1.getGlobal)('diag');
+            const newLogger = (0, logLevelLogger_1.createLogLevelDiagLogger)((_b = optionsOrLogLevel.logLevel) !== null && _b !== void 0 ? _b : types_1.DiagLogLevel.INFO, logger);
+            // There already is an logger registered. We'll let it know before overwriting it.
+            if (oldLogger && !optionsOrLogLevel.suppressOverrideMessage) {
+                const stack = (_c = new Error().stack) !== null && _c !== void 0 ? _c : '<failed to generate stacktrace>';
+                oldLogger.warn(`Current logger will be overwritten from ${stack}`);
+                newLogger.warn(`Current logger will overwrite one already registered from ${stack}`);
+            }
+            return (0, global_utils_1.registerGlobal)('diag', newLogger, self, true);
+        };
+        self.setLogger = setLogger;
+        self.disable = () => {
+            (0, global_utils_1.unregisterGlobal)(API_NAME, self);
+        };
+        self.createComponentLogger = (options) => {
+            return new ComponentLogger_1.DiagComponentLogger(options);
+        };
+        self.verbose = _logProxy('verbose');
+        self.debug = _logProxy('debug');
+        self.info = _logProxy('info');
+        self.warn = _logProxy('warn');
+        self.error = _logProxy('error');
+    }
+}
+exports.DiagAPI = DiagAPI;
+//# sourceMappingURL=diag.js.map
+
+/***/ }),
+
+/***/ 74266:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.MetricsAPI = void 0;
+const NoopMeterProvider_1 = __nccwpck_require__(68022);
+const global_utils_1 = __nccwpck_require__(45257);
+const diag_1 = __nccwpck_require__(360);
+const API_NAME = 'metrics';
+/**
+ * Singleton object which represents the entry point to the OpenTelemetry Metrics API
+ */
+class MetricsAPI {
+    /** Empty private constructor prevents end users from constructing a new instance of the API */
+    constructor() { }
+    /** Get the singleton instance of the Metrics API */
+    static getInstance() {
+        if (!this._instance) {
+            this._instance = new MetricsAPI();
+        }
+        return this._instance;
+    }
+    /**
+     * Set the current global meter provider.
+     * Returns true if the meter provider was successfully registered, else false.
+     */
+    setGlobalMeterProvider(provider) {
+        return (0, global_utils_1.registerGlobal)(API_NAME, provider, diag_1.DiagAPI.instance());
+    }
+    /**
+     * Returns the global meter provider.
+     */
+    getMeterProvider() {
+        return (0, global_utils_1.getGlobal)(API_NAME) || NoopMeterProvider_1.NOOP_METER_PROVIDER;
+    }
+    /**
+     * Returns a meter from the global meter provider.
+     */
+    getMeter(name, version, options) {
+        return this.getMeterProvider().getMeter(name, version, options);
+    }
+    /** Remove the global meter provider */
+    disable() {
+        (0, global_utils_1.unregisterGlobal)(API_NAME, diag_1.DiagAPI.instance());
+    }
+}
+exports.MetricsAPI = MetricsAPI;
+//# sourceMappingURL=metrics.js.map
+
+/***/ }),
+
+/***/ 26109:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.PropagationAPI = void 0;
+const global_utils_1 = __nccwpck_require__(45257);
+const NoopTextMapPropagator_1 = __nccwpck_require__(13367);
+const TextMapPropagator_1 = __nccwpck_require__(92875);
+const context_helpers_1 = __nccwpck_require__(14218);
+const utils_1 = __nccwpck_require__(77956);
+const diag_1 = __nccwpck_require__(360);
+const API_NAME = 'propagation';
+const NOOP_TEXT_MAP_PROPAGATOR = new NoopTextMapPropagator_1.NoopTextMapPropagator();
+/**
+ * Singleton object which represents the entry point to the OpenTelemetry Propagation API
+ *
+ * @since 1.0.0
+ */
+class PropagationAPI {
+    /** Empty private constructor prevents end users from constructing a new instance of the API */
+    constructor() {
+        this.createBaggage = utils_1.createBaggage;
+        this.getBaggage = context_helpers_1.getBaggage;
+        this.getActiveBaggage = context_helpers_1.getActiveBaggage;
+        this.setBaggage = context_helpers_1.setBaggage;
+        this.deleteBaggage = context_helpers_1.deleteBaggage;
+    }
+    /** Get the singleton instance of the Propagator API */
+    static getInstance() {
+        if (!this._instance) {
+            this._instance = new PropagationAPI();
+        }
+        return this._instance;
+    }
+    /**
+     * Set the current propagator.
+     *
+     * @returns true if the propagator was successfully registered, else false
+     */
+    setGlobalPropagator(propagator) {
+        return (0, global_utils_1.registerGlobal)(API_NAME, propagator, diag_1.DiagAPI.instance());
+    }
+    /**
+     * Inject context into a carrier to be propagated inter-process
+     *
+     * @param context Context carrying tracing data to inject
+     * @param carrier carrier to inject context into
+     * @param setter Function used to set values on the carrier
+     */
+    inject(context, carrier, setter = TextMapPropagator_1.defaultTextMapSetter) {
+        return this._getGlobalPropagator().inject(context, carrier, setter);
+    }
+    /**
+     * Extract context from a carrier
+     *
+     * @param context Context which the newly created context will inherit from
+     * @param carrier Carrier to extract context from
+     * @param getter Function used to extract keys from a carrier
+     */
+    extract(context, carrier, getter = TextMapPropagator_1.defaultTextMapGetter) {
+        return this._getGlobalPropagator().extract(context, carrier, getter);
+    }
+    /**
+     * Return a list of all fields which may be used by the propagator.
+     */
+    fields() {
+        return this._getGlobalPropagator().fields();
+    }
+    /** Remove the global propagator */
+    disable() {
+        (0, global_utils_1.unregisterGlobal)(API_NAME, diag_1.DiagAPI.instance());
+    }
+    _getGlobalPropagator() {
+        return (0, global_utils_1.getGlobal)(API_NAME) || NOOP_TEXT_MAP_PROPAGATOR;
+    }
+}
+exports.PropagationAPI = PropagationAPI;
+//# sourceMappingURL=propagation.js.map
+
+/***/ }),
+
+/***/ 43238:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.TraceAPI = void 0;
+const global_utils_1 = __nccwpck_require__(45257);
+const ProxyTracerProvider_1 = __nccwpck_require__(39774);
+const spancontext_utils_1 = __nccwpck_require__(88097);
+const context_utils_1 = __nccwpck_require__(98181);
+const diag_1 = __nccwpck_require__(360);
+const API_NAME = 'trace';
+/**
+ * Singleton object which represents the entry point to the OpenTelemetry Tracing API
+ *
+ * @since 1.0.0
+ */
+class TraceAPI {
+    /** Empty private constructor prevents end users from constructing a new instance of the API */
+    constructor() {
+        this._proxyTracerProvider = new ProxyTracerProvider_1.ProxyTracerProvider();
+        this.wrapSpanContext = spancontext_utils_1.wrapSpanContext;
+        this.isSpanContextValid = spancontext_utils_1.isSpanContextValid;
+        this.deleteSpan = context_utils_1.deleteSpan;
+        this.getSpan = context_utils_1.getSpan;
+        this.getActiveSpan = context_utils_1.getActiveSpan;
+        this.getSpanContext = context_utils_1.getSpanContext;
+        this.setSpan = context_utils_1.setSpan;
+        this.setSpanContext = context_utils_1.setSpanContext;
+    }
+    /** Get the singleton instance of the Trace API */
+    static getInstance() {
+        if (!this._instance) {
+            this._instance = new TraceAPI();
+        }
+        return this._instance;
+    }
+    /**
+     * Set the current global tracer.
+     *
+     * @returns true if the tracer provider was successfully registered, else false
+     */
+    setGlobalTracerProvider(provider) {
+        const success = (0, global_utils_1.registerGlobal)(API_NAME, this._proxyTracerProvider, diag_1.DiagAPI.instance());
+        if (success) {
+            this._proxyTracerProvider.setDelegate(provider);
+        }
+        return success;
+    }
+    /**
+     * Returns the global tracer provider.
+     */
+    getTracerProvider() {
+        return (0, global_utils_1.getGlobal)(API_NAME) || this._proxyTracerProvider;
+    }
+    /**
+     * Returns a tracer from the global tracer provider.
+     */
+    getTracer(name, version) {
+        return this.getTracerProvider().getTracer(name, version);
+    }
+    /** Remove the global tracer provider */
+    disable() {
+        (0, global_utils_1.unregisterGlobal)(API_NAME, diag_1.DiagAPI.instance());
+        this._proxyTracerProvider = new ProxyTracerProvider_1.ProxyTracerProvider();
+    }
+}
+exports.TraceAPI = TraceAPI;
+//# sourceMappingURL=trace.js.map
+
+/***/ }),
+
+/***/ 14218:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.deleteBaggage = exports.setBaggage = exports.getActiveBaggage = exports.getBaggage = void 0;
+const context_1 = __nccwpck_require__(31964);
+const context_2 = __nccwpck_require__(60859);
+/**
+ * Baggage key
+ */
+const BAGGAGE_KEY = (0, context_2.createContextKey)('OpenTelemetry Baggage Key');
+/**
+ * Retrieve the current baggage from the given context
+ *
+ * @param {Context} Context that manage all context values
+ * @returns {Baggage} Extracted baggage from the context
+ */
+function getBaggage(context) {
+    return context.getValue(BAGGAGE_KEY) || undefined;
+}
+exports.getBaggage = getBaggage;
+/**
+ * Retrieve the current baggage from the active/current context
+ *
+ * @returns {Baggage} Extracted baggage from the context
+ */
+function getActiveBaggage() {
+    return getBaggage(context_1.ContextAPI.getInstance().active());
+}
+exports.getActiveBaggage = getActiveBaggage;
+/**
+ * Store a baggage in the given context
+ *
+ * @param {Context} Context that manage all context values
+ * @param {Baggage} baggage that will be set in the actual context
+ */
+function setBaggage(context, baggage) {
+    return context.setValue(BAGGAGE_KEY, baggage);
+}
+exports.setBaggage = setBaggage;
+/**
+ * Delete the baggage stored in the given context
+ *
+ * @param {Context} Context that manage all context values
+ */
+function deleteBaggage(context) {
+    return context.deleteValue(BAGGAGE_KEY);
+}
+exports.deleteBaggage = deleteBaggage;
+//# sourceMappingURL=context-helpers.js.map
+
+/***/ }),
+
+/***/ 63332:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.BaggageImpl = void 0;
+class BaggageImpl {
+    constructor(entries) {
+        this._entries = entries ? new Map(entries) : new Map();
+    }
+    getEntry(key) {
+        const entry = this._entries.get(key);
+        if (!entry) {
+            return undefined;
+        }
+        return Object.assign({}, entry);
+    }
+    getAllEntries() {
+        return Array.from(this._entries.entries());
+    }
+    setEntry(key, entry) {
+        const newBaggage = new BaggageImpl(this._entries);
+        newBaggage._entries.set(key, entry);
+        return newBaggage;
+    }
+    removeEntry(key) {
+        const newBaggage = new BaggageImpl(this._entries);
+        newBaggage._entries.delete(key);
+        return newBaggage;
+    }
+    removeEntries(...keys) {
+        const newBaggage = new BaggageImpl(this._entries);
+        for (const key of keys) {
+            newBaggage._entries.delete(key);
+        }
+        return newBaggage;
+    }
+    clear() {
+        return new BaggageImpl();
+    }
+}
+exports.BaggageImpl = BaggageImpl;
+//# sourceMappingURL=baggage-impl.js.map
+
+/***/ }),
+
+/***/ 91043:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.baggageEntryMetadataSymbol = void 0;
+/**
+ * Symbol used to make BaggageEntryMetadata an opaque type
+ */
+exports.baggageEntryMetadataSymbol = Symbol('BaggageEntryMetadata');
+//# sourceMappingURL=symbol.js.map
+
+/***/ }),
+
+/***/ 77956:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.baggageEntryMetadataFromString = exports.createBaggage = void 0;
+const diag_1 = __nccwpck_require__(360);
+const baggage_impl_1 = __nccwpck_require__(63332);
+const symbol_1 = __nccwpck_require__(91043);
+const diag = diag_1.DiagAPI.instance();
+/**
+ * Create a new Baggage with optional entries
+ *
+ * @param entries An array of baggage entries the new baggage should contain
+ */
+function createBaggage(entries = {}) {
+    return new baggage_impl_1.BaggageImpl(new Map(Object.entries(entries)));
+}
+exports.createBaggage = createBaggage;
+/**
+ * Create a serializable BaggageEntryMetadata object from a string.
+ *
+ * @param str string metadata. Format is currently not defined by the spec and has no special meaning.
+ *
+ * @since 1.0.0
+ */
+function baggageEntryMetadataFromString(str) {
+    if (typeof str !== 'string') {
+        diag.error(`Cannot create baggage metadata from unknown type: ${typeof str}`);
+        str = '';
+    }
+    return {
+        __TYPE__: symbol_1.baggageEntryMetadataSymbol,
+        toString() {
+            return str;
+        },
+    };
+}
+exports.baggageEntryMetadataFromString = baggageEntryMetadataFromString;
+//# sourceMappingURL=utils.js.map
+
+/***/ }),
+
+/***/ 26822:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.context = void 0;
+// Split module-level variable definition into separate files to allow
+// tree-shaking on each api instance.
+const context_1 = __nccwpck_require__(31964);
+/**
+ * Entrypoint for context API
+ * @since 1.0.0
+ */
+exports.context = context_1.ContextAPI.getInstance();
+//# sourceMappingURL=context-api.js.map
+
+/***/ }),
+
+/***/ 19752:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.NoopContextManager = void 0;
+const context_1 = __nccwpck_require__(60859);
+class NoopContextManager {
+    active() {
+        return context_1.ROOT_CONTEXT;
+    }
+    with(_context, fn, thisArg, ...args) {
+        return fn.call(thisArg, ...args);
+    }
+    bind(_context, target) {
+        return target;
+    }
+    enable() {
+        return this;
+    }
+    disable() {
+        return this;
+    }
+}
+exports.NoopContextManager = NoopContextManager;
+//# sourceMappingURL=NoopContextManager.js.map
+
+/***/ }),
+
+/***/ 60859:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ROOT_CONTEXT = exports.createContextKey = void 0;
+/**
+ * Get a key to uniquely identify a context value
+ *
+ * @since 1.0.0
+ */
+function createContextKey(description) {
+    // The specification states that for the same input, multiple calls should
+    // return different keys. Due to the nature of the JS dependency management
+    // system, this creates problems where multiple versions of some package
+    // could hold different keys for the same property.
+    //
+    // Therefore, we use Symbol.for which returns the same key for the same input.
+    return Symbol.for(description);
+}
+exports.createContextKey = createContextKey;
+class BaseContext {
+    /**
+     * Construct a new context which inherits values from an optional parent context.
+     *
+     * @param parentContext a context from which to inherit values
+     */
+    constructor(parentContext) {
+        // for minification
+        const self = this;
+        self._currentContext = parentContext ? new Map(parentContext) : new Map();
+        self.getValue = (key) => self._currentContext.get(key);
+        self.setValue = (key, value) => {
+            const context = new BaseContext(self._currentContext);
+            context._currentContext.set(key, value);
+            return context;
+        };
+        self.deleteValue = (key) => {
+            const context = new BaseContext(self._currentContext);
+            context._currentContext.delete(key);
+            return context;
+        };
+    }
+}
+/**
+ * The root context is used as the default parent context when there is no active context
+ *
+ * @since 1.0.0
+ */
+exports.ROOT_CONTEXT = new BaseContext();
+//# sourceMappingURL=context.js.map
+
+/***/ }),
+
+/***/ 6628:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.diag = void 0;
+// Split module-level variable definition into separate files to allow
+// tree-shaking on each api instance.
+const diag_1 = __nccwpck_require__(360);
+/**
+ * Entrypoint for Diag API.
+ * Defines Diagnostic handler used for internal diagnostic logging operations.
+ * The default provides a Noop DiagLogger implementation which may be changed via the
+ * diag.setLogger(logger: DiagLogger) function.
+ *
+ * @since 1.0.0
+ */
+exports.diag = diag_1.DiagAPI.instance();
+//# sourceMappingURL=diag-api.js.map
+
+/***/ }),
+
+/***/ 22609:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.DiagComponentLogger = void 0;
+const global_utils_1 = __nccwpck_require__(45257);
+/**
+ * Component Logger which is meant to be used as part of any component which
+ * will add automatically additional namespace in front of the log message.
+ * It will then forward all message to global diag logger
+ * @example
+ * const cLogger = diag.createComponentLogger({ namespace: '@opentelemetry/instrumentation-http' });
+ * cLogger.debug('test');
+ * // @opentelemetry/instrumentation-http test
+ */
+class DiagComponentLogger {
+    constructor(props) {
+        this._namespace = props.namespace || 'DiagComponentLogger';
+    }
+    debug(...args) {
+        return logProxy('debug', this._namespace, args);
+    }
+    error(...args) {
+        return logProxy('error', this._namespace, args);
+    }
+    info(...args) {
+        return logProxy('info', this._namespace, args);
+    }
+    warn(...args) {
+        return logProxy('warn', this._namespace, args);
+    }
+    verbose(...args) {
+        return logProxy('verbose', this._namespace, args);
+    }
+}
+exports.DiagComponentLogger = DiagComponentLogger;
+function logProxy(funcName, namespace, args) {
+    const logger = (0, global_utils_1.getGlobal)('diag');
+    // shortcut if logger not set
+    if (!logger) {
+        return;
+    }
+    return logger[funcName](namespace, ...args);
+}
+//# sourceMappingURL=ComponentLogger.js.map
+
+/***/ }),
+
+/***/ 73695:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.DiagConsoleLogger = exports._originalConsoleMethods = void 0;
+const consoleMap = [
+    { n: 'error', c: 'error' },
+    { n: 'warn', c: 'warn' },
+    { n: 'info', c: 'info' },
+    { n: 'debug', c: 'debug' },
+    { n: 'verbose', c: 'trace' },
+];
+// Save original console methods at module load time, before any instrumentation
+// can wrap them. This ensures DiagConsoleLogger calls the unwrapped originals.
+// Exported for testing only — not part of the public API.
+exports._originalConsoleMethods = {};
+if (typeof console !== 'undefined') {
+    const keys = [
+        'error',
+        'warn',
+        'info',
+        'debug',
+        'trace',
+        'log',
+    ];
+    for (const key of keys) {
+        // eslint-disable-next-line no-console
+        if (typeof console[key] === 'function') {
+            // eslint-disable-next-line no-console
+            exports._originalConsoleMethods[key] = console[key];
+        }
+    }
+}
+/**
+ * A simple Immutable Console based diagnostic logger which will output any messages to the Console.
+ * If you want to limit the amount of logging to a specific level or lower use the
+ * {@link createLogLevelDiagLogger}
+ *
+ * @since 1.0.0
+ */
+class DiagConsoleLogger {
+    constructor() {
+        function _consoleFunc(funcName) {
+            return function (...args) {
+                // Prefer original (pre-instrumentation) methods saved at module load time.
+                let theFunc = exports._originalConsoleMethods[funcName];
+                // Some environments only expose the console when the F12 developer console is open
+                if (typeof theFunc !== 'function') {
+                    theFunc = exports._originalConsoleMethods['log'];
+                }
+                // Fall back in case console was not available at module load time but became available later.
+                if (typeof theFunc !== 'function' && console) {
+                    // eslint-disable-next-line no-console
+                    theFunc = console[funcName];
+                    if (typeof theFunc !== 'function') {
+                        // eslint-disable-next-line no-console
+                        theFunc = console.log;
+                    }
+                }
+                if (typeof theFunc === 'function') {
+                    return theFunc.apply(console, args);
+                }
+            };
+        }
+        for (let i = 0; i < consoleMap.length; i++) {
+            this[consoleMap[i].n] = _consoleFunc(consoleMap[i].c);
+        }
+    }
+}
+exports.DiagConsoleLogger = DiagConsoleLogger;
+//# sourceMappingURL=consoleLogger.js.map
+
+/***/ }),
+
+/***/ 98352:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.createLogLevelDiagLogger = void 0;
+const types_1 = __nccwpck_require__(92563);
+function createLogLevelDiagLogger(maxLevel, logger) {
+    if (maxLevel < types_1.DiagLogLevel.NONE) {
+        maxLevel = types_1.DiagLogLevel.NONE;
+    }
+    else if (maxLevel > types_1.DiagLogLevel.ALL) {
+        maxLevel = types_1.DiagLogLevel.ALL;
+    }
+    // In case the logger is null or undefined
+    logger = logger || {};
+    function _filterFunc(funcName, theLevel) {
+        const theFunc = logger[funcName];
+        if (typeof theFunc === 'function' && maxLevel >= theLevel) {
+            return theFunc.bind(logger);
+        }
+        return function () { };
+    }
+    return {
+        error: _filterFunc('error', types_1.DiagLogLevel.ERROR),
+        warn: _filterFunc('warn', types_1.DiagLogLevel.WARN),
+        info: _filterFunc('info', types_1.DiagLogLevel.INFO),
+        debug: _filterFunc('debug', types_1.DiagLogLevel.DEBUG),
+        verbose: _filterFunc('verbose', types_1.DiagLogLevel.VERBOSE),
+    };
+}
+exports.createLogLevelDiagLogger = createLogLevelDiagLogger;
+//# sourceMappingURL=logLevelLogger.js.map
+
+/***/ }),
+
+/***/ 92563:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.DiagLogLevel = void 0;
+/**
+ * Defines the available internal logging levels for the diagnostic logger, the numeric values
+ * of the levels are defined to match the original values from the initial LogLevel to avoid
+ * compatibility/migration issues for any implementation that assume the numeric ordering.
+ */
+var DiagLogLevel;
+(function (DiagLogLevel) {
+    /** Diagnostic Logging level setting to disable all logging (except and forced logs) */
+    DiagLogLevel[DiagLogLevel["NONE"] = 0] = "NONE";
+    /** Identifies an error scenario */
+    DiagLogLevel[DiagLogLevel["ERROR"] = 30] = "ERROR";
+    /** Identifies a warning scenario */
+    DiagLogLevel[DiagLogLevel["WARN"] = 50] = "WARN";
+    /** General informational log message */
+    DiagLogLevel[DiagLogLevel["INFO"] = 60] = "INFO";
+    /** General debug log message */
+    DiagLogLevel[DiagLogLevel["DEBUG"] = 70] = "DEBUG";
+    /**
+     * Detailed trace level logging should only be used for development, should only be set
+     * in a development environment.
+     */
+    DiagLogLevel[DiagLogLevel["VERBOSE"] = 80] = "VERBOSE";
+    /** Used to set the logging level to include all logging */
+    DiagLogLevel[DiagLogLevel["ALL"] = 9999] = "ALL";
+})(DiagLogLevel = exports.DiagLogLevel || (exports.DiagLogLevel = {}));
+//# sourceMappingURL=types.js.map
+
+/***/ }),
+
+/***/ 84028:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.trace = exports.propagation = exports.metrics = exports.diag = exports.context = exports.INVALID_SPAN_CONTEXT = exports.INVALID_TRACEID = exports.INVALID_SPANID = exports.isValidSpanId = exports.isValidTraceId = exports.isSpanContextValid = exports.createTraceState = exports.TraceFlags = exports.SpanStatusCode = exports.SpanKind = exports.SamplingDecision = exports.ProxyTracerProvider = exports.ProxyTracer = exports.defaultTextMapSetter = exports.defaultTextMapGetter = exports.ValueType = exports.createNoopMeter = exports.DiagLogLevel = exports.DiagConsoleLogger = exports.ROOT_CONTEXT = exports.createContextKey = exports.baggageEntryMetadataFromString = void 0;
+var utils_1 = __nccwpck_require__(77956);
+Object.defineProperty(exports, "baggageEntryMetadataFromString", ({ enumerable: true, get: function () { return utils_1.baggageEntryMetadataFromString; } }));
+// Context APIs
+var context_1 = __nccwpck_require__(60859);
+Object.defineProperty(exports, "createContextKey", ({ enumerable: true, get: function () { return context_1.createContextKey; } }));
+Object.defineProperty(exports, "ROOT_CONTEXT", ({ enumerable: true, get: function () { return context_1.ROOT_CONTEXT; } }));
+// Diag APIs
+var consoleLogger_1 = __nccwpck_require__(73695);
+Object.defineProperty(exports, "DiagConsoleLogger", ({ enumerable: true, get: function () { return consoleLogger_1.DiagConsoleLogger; } }));
+var types_1 = __nccwpck_require__(92563);
+Object.defineProperty(exports, "DiagLogLevel", ({ enumerable: true, get: function () { return types_1.DiagLogLevel; } }));
+// Metrics APIs
+var NoopMeter_1 = __nccwpck_require__(59095);
+Object.defineProperty(exports, "createNoopMeter", ({ enumerable: true, get: function () { return NoopMeter_1.createNoopMeter; } }));
+var Metric_1 = __nccwpck_require__(15200);
+Object.defineProperty(exports, "ValueType", ({ enumerable: true, get: function () { return Metric_1.ValueType; } }));
+// Propagation APIs
+var TextMapPropagator_1 = __nccwpck_require__(92875);
+Object.defineProperty(exports, "defaultTextMapGetter", ({ enumerable: true, get: function () { return TextMapPropagator_1.defaultTextMapGetter; } }));
+Object.defineProperty(exports, "defaultTextMapSetter", ({ enumerable: true, get: function () { return TextMapPropagator_1.defaultTextMapSetter; } }));
+var ProxyTracer_1 = __nccwpck_require__(53759);
+Object.defineProperty(exports, "ProxyTracer", ({ enumerable: true, get: function () { return ProxyTracer_1.ProxyTracer; } }));
+// TODO: Remove ProxyTracerProvider export in the next major version.
+var ProxyTracerProvider_1 = __nccwpck_require__(39774);
+Object.defineProperty(exports, "ProxyTracerProvider", ({ enumerable: true, get: function () { return ProxyTracerProvider_1.ProxyTracerProvider; } }));
+var SamplingResult_1 = __nccwpck_require__(76980);
+Object.defineProperty(exports, "SamplingDecision", ({ enumerable: true, get: function () { return SamplingResult_1.SamplingDecision; } }));
+var span_kind_1 = __nccwpck_require__(16009);
+Object.defineProperty(exports, "SpanKind", ({ enumerable: true, get: function () { return span_kind_1.SpanKind; } }));
+var status_1 = __nccwpck_require__(84770);
+Object.defineProperty(exports, "SpanStatusCode", ({ enumerable: true, get: function () { return status_1.SpanStatusCode; } }));
+var trace_flags_1 = __nccwpck_require__(61263);
+Object.defineProperty(exports, "TraceFlags", ({ enumerable: true, get: function () { return trace_flags_1.TraceFlags; } }));
+var utils_2 = __nccwpck_require__(23467);
+Object.defineProperty(exports, "createTraceState", ({ enumerable: true, get: function () { return utils_2.createTraceState; } }));
+var spancontext_utils_1 = __nccwpck_require__(88097);
+Object.defineProperty(exports, "isSpanContextValid", ({ enumerable: true, get: function () { return spancontext_utils_1.isSpanContextValid; } }));
+Object.defineProperty(exports, "isValidTraceId", ({ enumerable: true, get: function () { return spancontext_utils_1.isValidTraceId; } }));
+Object.defineProperty(exports, "isValidSpanId", ({ enumerable: true, get: function () { return spancontext_utils_1.isValidSpanId; } }));
+var invalid_span_constants_1 = __nccwpck_require__(38038);
+Object.defineProperty(exports, "INVALID_SPANID", ({ enumerable: true, get: function () { return invalid_span_constants_1.INVALID_SPANID; } }));
+Object.defineProperty(exports, "INVALID_TRACEID", ({ enumerable: true, get: function () { return invalid_span_constants_1.INVALID_TRACEID; } }));
+Object.defineProperty(exports, "INVALID_SPAN_CONTEXT", ({ enumerable: true, get: function () { return invalid_span_constants_1.INVALID_SPAN_CONTEXT; } }));
+// Split module-level variable definition into separate files to allow
+// tree-shaking on each api instance.
+const context_api_1 = __nccwpck_require__(26822);
+Object.defineProperty(exports, "context", ({ enumerable: true, get: function () { return context_api_1.context; } }));
+const diag_api_1 = __nccwpck_require__(6628);
+Object.defineProperty(exports, "diag", ({ enumerable: true, get: function () { return diag_api_1.diag; } }));
+const metrics_api_1 = __nccwpck_require__(71020);
+Object.defineProperty(exports, "metrics", ({ enumerable: true, get: function () { return metrics_api_1.metrics; } }));
+const propagation_api_1 = __nccwpck_require__(82271);
+Object.defineProperty(exports, "propagation", ({ enumerable: true, get: function () { return propagation_api_1.propagation; } }));
+const trace_api_1 = __nccwpck_require__(39652);
+Object.defineProperty(exports, "trace", ({ enumerable: true, get: function () { return trace_api_1.trace; } }));
+// Default export.
+exports["default"] = {
+    context: context_api_1.context,
+    diag: diag_api_1.diag,
+    metrics: metrics_api_1.metrics,
+    propagation: propagation_api_1.propagation,
+    trace: trace_api_1.trace,
+};
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
+/***/ 45257:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.unregisterGlobal = exports.getGlobal = exports.registerGlobal = void 0;
+const version_1 = __nccwpck_require__(74736);
+const semver_1 = __nccwpck_require__(35970);
+const major = version_1.VERSION.split('.')[0];
+const GLOBAL_OPENTELEMETRY_API_KEY = Symbol.for(`opentelemetry.js.api.${major}`);
+const _global = (typeof globalThis === 'object'
+    ? globalThis
+    : typeof self === 'object'
+        ? self
+        : typeof window === 'object'
+            ? window
+            : typeof global === 'object'
+                ? global
+                : {});
+function registerGlobal(type, instance, diag, allowOverride = false) {
+    var _a;
+    const api = (_global[GLOBAL_OPENTELEMETRY_API_KEY] = (_a = _global[GLOBAL_OPENTELEMETRY_API_KEY]) !== null && _a !== void 0 ? _a : {
+        version: version_1.VERSION,
+    });
+    if (!allowOverride && api[type]) {
+        // already registered an API of this type
+        const err = new Error(`@opentelemetry/api: Attempted duplicate registration of API: ${type}`);
+        diag.error(err.stack || err.message);
+        return false;
+    }
+    if (api.version !== version_1.VERSION) {
+        // All registered APIs must be of the same version exactly
+        const err = new Error(`@opentelemetry/api: Registration of version v${api.version} for ${type} does not match previously registered API v${version_1.VERSION}`);
+        diag.error(err.stack || err.message);
+        return false;
+    }
+    api[type] = instance;
+    diag.debug(`@opentelemetry/api: Registered a global for ${type} v${version_1.VERSION}.`);
+    return true;
+}
+exports.registerGlobal = registerGlobal;
+function getGlobal(type) {
+    var _a, _b;
+    const globalVersion = (_a = _global[GLOBAL_OPENTELEMETRY_API_KEY]) === null || _a === void 0 ? void 0 : _a.version;
+    if (!globalVersion || !(0, semver_1.isCompatible)(globalVersion)) {
+        return;
+    }
+    return (_b = _global[GLOBAL_OPENTELEMETRY_API_KEY]) === null || _b === void 0 ? void 0 : _b[type];
+}
+exports.getGlobal = getGlobal;
+function unregisterGlobal(type, diag) {
+    diag.debug(`@opentelemetry/api: Unregistering a global for ${type} v${version_1.VERSION}.`);
+    const api = _global[GLOBAL_OPENTELEMETRY_API_KEY];
+    if (api) {
+        delete api[type];
+    }
+}
+exports.unregisterGlobal = unregisterGlobal;
+//# sourceMappingURL=global-utils.js.map
+
+/***/ }),
+
+/***/ 35970:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.isCompatible = exports._makeCompatibilityCheck = void 0;
+const version_1 = __nccwpck_require__(74736);
+const re = /^(\d+)\.(\d+)\.(\d+)(-(.+))?$/;
+/**
+ * Create a function to test an API version to see if it is compatible with the provided ownVersion.
+ *
+ * The returned function has the following semantics:
+ * - Exact match is always compatible
+ * - Major versions must match exactly
+ *    - 1.x package cannot use global 2.x package
+ *    - 2.x package cannot use global 1.x package
+ * - The minor version of the API module requesting access to the global API must be less than or equal to the minor version of this API
+ *    - 1.3 package may use 1.4 global because the later global contains all functions 1.3 expects
+ *    - 1.4 package may NOT use 1.3 global because it may try to call functions which don't exist on 1.3
+ * - If the major version is 0, the minor version is treated as the major and the patch is treated as the minor
+ * - Patch and build tag differences are not considered at this time
+ *
+ * @param ownVersion version which should be checked against
+ */
+function _makeCompatibilityCheck(ownVersion) {
+    const acceptedVersions = new Set([ownVersion]);
+    const rejectedVersions = new Set();
+    const myVersionMatch = ownVersion.match(re);
+    if (!myVersionMatch) {
+        // we cannot guarantee compatibility so we always return noop
+        return () => false;
+    }
+    const ownVersionParsed = {
+        major: +myVersionMatch[1],
+        minor: +myVersionMatch[2],
+        patch: +myVersionMatch[3],
+        prerelease: myVersionMatch[4],
+    };
+    // if ownVersion has a prerelease tag, versions must match exactly
+    if (ownVersionParsed.prerelease != null) {
+        return function isExactmatch(globalVersion) {
+            return globalVersion === ownVersion;
+        };
+    }
+    function _reject(v) {
+        rejectedVersions.add(v);
+        return false;
+    }
+    function _accept(v) {
+        acceptedVersions.add(v);
+        return true;
+    }
+    return function isCompatible(globalVersion) {
+        if (acceptedVersions.has(globalVersion)) {
+            return true;
+        }
+        if (rejectedVersions.has(globalVersion)) {
+            return false;
+        }
+        const globalVersionMatch = globalVersion.match(re);
+        if (!globalVersionMatch) {
+            // cannot parse other version
+            // we cannot guarantee compatibility so we always noop
+            return _reject(globalVersion);
+        }
+        const globalVersionParsed = {
+            major: +globalVersionMatch[1],
+            minor: +globalVersionMatch[2],
+            patch: +globalVersionMatch[3],
+            prerelease: globalVersionMatch[4],
+        };
+        // if globalVersion has a prerelease tag, versions must match exactly
+        if (globalVersionParsed.prerelease != null) {
+            return _reject(globalVersion);
+        }
+        // major versions must match
+        if (ownVersionParsed.major !== globalVersionParsed.major) {
+            return _reject(globalVersion);
+        }
+        if (ownVersionParsed.major === 0) {
+            if (ownVersionParsed.minor === globalVersionParsed.minor &&
+                ownVersionParsed.patch <= globalVersionParsed.patch) {
+                return _accept(globalVersion);
+            }
+            return _reject(globalVersion);
+        }
+        if (ownVersionParsed.minor <= globalVersionParsed.minor) {
+            return _accept(globalVersion);
+        }
+        return _reject(globalVersion);
+    };
+}
+exports._makeCompatibilityCheck = _makeCompatibilityCheck;
+/**
+ * Test an API version to see if it is compatible with this API.
+ *
+ * - Exact match is always compatible
+ * - Major versions must match exactly
+ *    - 1.x package cannot use global 2.x package
+ *    - 2.x package cannot use global 1.x package
+ * - The minor version of the API module requesting access to the global API must be less than or equal to the minor version of this API
+ *    - 1.3 package may use 1.4 global because the later global contains all functions 1.3 expects
+ *    - 1.4 package may NOT use 1.3 global because it may try to call functions which don't exist on 1.3
+ * - If the major version is 0, the minor version is treated as the major and the patch is treated as the minor
+ * - Patch and build tag differences are not considered at this time
+ *
+ * @param version version of the API requesting an instance of the global API
+ */
+exports.isCompatible = _makeCompatibilityCheck(version_1.VERSION);
+//# sourceMappingURL=semver.js.map
+
+/***/ }),
+
+/***/ 71020:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.metrics = void 0;
+// Split module-level variable definition into separate files to allow
+// tree-shaking on each api instance.
+const metrics_1 = __nccwpck_require__(74266);
+/**
+ * Entrypoint for metrics API
+ *
+ * @since 1.3.0
+ */
+exports.metrics = metrics_1.MetricsAPI.getInstance();
+//# sourceMappingURL=metrics-api.js.map
+
+/***/ }),
+
+/***/ 15200:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ValueType = void 0;
+/**
+ * The Type of value. It describes how the data is reported.
+ *
+ * @since 1.3.0
+ */
+var ValueType;
+(function (ValueType) {
+    ValueType[ValueType["INT"] = 0] = "INT";
+    ValueType[ValueType["DOUBLE"] = 1] = "DOUBLE";
+})(ValueType = exports.ValueType || (exports.ValueType = {}));
+//# sourceMappingURL=Metric.js.map
+
+/***/ }),
+
+/***/ 59095:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.createNoopMeter = exports.NOOP_OBSERVABLE_UP_DOWN_COUNTER_METRIC = exports.NOOP_OBSERVABLE_GAUGE_METRIC = exports.NOOP_OBSERVABLE_COUNTER_METRIC = exports.NOOP_UP_DOWN_COUNTER_METRIC = exports.NOOP_HISTOGRAM_METRIC = exports.NOOP_GAUGE_METRIC = exports.NOOP_COUNTER_METRIC = exports.NOOP_METER = exports.NoopObservableUpDownCounterMetric = exports.NoopObservableGaugeMetric = exports.NoopObservableCounterMetric = exports.NoopObservableMetric = exports.NoopHistogramMetric = exports.NoopGaugeMetric = exports.NoopUpDownCounterMetric = exports.NoopCounterMetric = exports.NoopMetric = exports.NoopMeter = void 0;
+/**
+ * NoopMeter is a noop implementation of the {@link Meter} interface. It reuses
+ * constant NoopMetrics for all of its methods.
+ */
+class NoopMeter {
+    constructor() { }
+    /**
+     * @see {@link Meter.createGauge}
+     */
+    createGauge(_name, _options) {
+        return exports.NOOP_GAUGE_METRIC;
+    }
+    /**
+     * @see {@link Meter.createHistogram}
+     */
+    createHistogram(_name, _options) {
+        return exports.NOOP_HISTOGRAM_METRIC;
+    }
+    /**
+     * @see {@link Meter.createCounter}
+     */
+    createCounter(_name, _options) {
+        return exports.NOOP_COUNTER_METRIC;
+    }
+    /**
+     * @see {@link Meter.createUpDownCounter}
+     */
+    createUpDownCounter(_name, _options) {
+        return exports.NOOP_UP_DOWN_COUNTER_METRIC;
+    }
+    /**
+     * @see {@link Meter.createObservableGauge}
+     */
+    createObservableGauge(_name, _options) {
+        return exports.NOOP_OBSERVABLE_GAUGE_METRIC;
+    }
+    /**
+     * @see {@link Meter.createObservableCounter}
+     */
+    createObservableCounter(_name, _options) {
+        return exports.NOOP_OBSERVABLE_COUNTER_METRIC;
+    }
+    /**
+     * @see {@link Meter.createObservableUpDownCounter}
+     */
+    createObservableUpDownCounter(_name, _options) {
+        return exports.NOOP_OBSERVABLE_UP_DOWN_COUNTER_METRIC;
+    }
+    /**
+     * @see {@link Meter.addBatchObservableCallback}
+     */
+    addBatchObservableCallback(_callback, _observables) { }
+    /**
+     * @see {@link Meter.removeBatchObservableCallback}
+     */
+    removeBatchObservableCallback(_callback) { }
+}
+exports.NoopMeter = NoopMeter;
+class NoopMetric {
+}
+exports.NoopMetric = NoopMetric;
+class NoopCounterMetric extends NoopMetric {
+    add(_value, _attributes) { }
+}
+exports.NoopCounterMetric = NoopCounterMetric;
+class NoopUpDownCounterMetric extends NoopMetric {
+    add(_value, _attributes) { }
+}
+exports.NoopUpDownCounterMetric = NoopUpDownCounterMetric;
+class NoopGaugeMetric extends NoopMetric {
+    record(_value, _attributes) { }
+}
+exports.NoopGaugeMetric = NoopGaugeMetric;
+class NoopHistogramMetric extends NoopMetric {
+    record(_value, _attributes) { }
+}
+exports.NoopHistogramMetric = NoopHistogramMetric;
+class NoopObservableMetric {
+    addCallback(_callback) { }
+    removeCallback(_callback) { }
+}
+exports.NoopObservableMetric = NoopObservableMetric;
+class NoopObservableCounterMetric extends NoopObservableMetric {
+}
+exports.NoopObservableCounterMetric = NoopObservableCounterMetric;
+class NoopObservableGaugeMetric extends NoopObservableMetric {
+}
+exports.NoopObservableGaugeMetric = NoopObservableGaugeMetric;
+class NoopObservableUpDownCounterMetric extends NoopObservableMetric {
+}
+exports.NoopObservableUpDownCounterMetric = NoopObservableUpDownCounterMetric;
+exports.NOOP_METER = new NoopMeter();
+// Synchronous instruments
+exports.NOOP_COUNTER_METRIC = new NoopCounterMetric();
+exports.NOOP_GAUGE_METRIC = new NoopGaugeMetric();
+exports.NOOP_HISTOGRAM_METRIC = new NoopHistogramMetric();
+exports.NOOP_UP_DOWN_COUNTER_METRIC = new NoopUpDownCounterMetric();
+// Asynchronous instruments
+exports.NOOP_OBSERVABLE_COUNTER_METRIC = new NoopObservableCounterMetric();
+exports.NOOP_OBSERVABLE_GAUGE_METRIC = new NoopObservableGaugeMetric();
+exports.NOOP_OBSERVABLE_UP_DOWN_COUNTER_METRIC = new NoopObservableUpDownCounterMetric();
+/**
+ * Create a no-op Meter
+ *
+ * @since 1.3.0
+ */
+function createNoopMeter() {
+    return exports.NOOP_METER;
+}
+exports.createNoopMeter = createNoopMeter;
+//# sourceMappingURL=NoopMeter.js.map
+
+/***/ }),
+
+/***/ 68022:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.NOOP_METER_PROVIDER = exports.NoopMeterProvider = void 0;
+const NoopMeter_1 = __nccwpck_require__(59095);
+/**
+ * An implementation of the {@link MeterProvider} which returns an impotent Meter
+ * for all calls to `getMeter`
+ */
+class NoopMeterProvider {
+    getMeter(_name, _version, _options) {
+        return NoopMeter_1.NOOP_METER;
+    }
+}
+exports.NoopMeterProvider = NoopMeterProvider;
+exports.NOOP_METER_PROVIDER = new NoopMeterProvider();
+//# sourceMappingURL=NoopMeterProvider.js.map
+
+/***/ }),
+
+/***/ 82271:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.propagation = void 0;
+// Split module-level variable definition into separate files to allow
+// tree-shaking on each api instance.
+const propagation_1 = __nccwpck_require__(26109);
+/**
+ * Entrypoint for propagation API
+ *
+ * @since 1.0.0
+ */
+exports.propagation = propagation_1.PropagationAPI.getInstance();
+//# sourceMappingURL=propagation-api.js.map
+
+/***/ }),
+
+/***/ 13367:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.NoopTextMapPropagator = void 0;
+/**
+ * No-op implementations of {@link TextMapPropagator}.
+ */
+class NoopTextMapPropagator {
+    /** Noop inject function does nothing */
+    inject(_context, _carrier) { }
+    /** Noop extract function does nothing and returns the input context */
+    extract(context, _carrier) {
+        return context;
+    }
+    fields() {
+        return [];
+    }
+}
+exports.NoopTextMapPropagator = NoopTextMapPropagator;
+//# sourceMappingURL=NoopTextMapPropagator.js.map
+
+/***/ }),
+
+/***/ 92875:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.defaultTextMapSetter = exports.defaultTextMapGetter = void 0;
+/**
+ * @since 1.0.0
+ */
+exports.defaultTextMapGetter = {
+    get(carrier, key) {
+        if (carrier == null) {
+            return undefined;
+        }
+        return carrier[key];
+    },
+    keys(carrier) {
+        if (carrier == null) {
+            return [];
+        }
+        return Object.keys(carrier);
+    },
+};
+/**
+ * @since 1.0.0
+ */
+exports.defaultTextMapSetter = {
+    set(carrier, key, value) {
+        if (carrier == null) {
+            return;
+        }
+        carrier[key] = value;
+    },
+};
+//# sourceMappingURL=TextMapPropagator.js.map
+
+/***/ }),
+
+/***/ 39652:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.trace = void 0;
+// Split module-level variable definition into separate files to allow
+// tree-shaking on each api instance.
+const trace_1 = __nccwpck_require__(43238);
+/**
+ * Entrypoint for trace API
+ *
+ * @since 1.0.0
+ */
+exports.trace = trace_1.TraceAPI.getInstance();
+//# sourceMappingURL=trace-api.js.map
+
+/***/ }),
+
+/***/ 33426:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.NonRecordingSpan = void 0;
+const invalid_span_constants_1 = __nccwpck_require__(38038);
+/**
+ * The NonRecordingSpan is the default {@link Span} that is used when no Span
+ * implementation is available. All operations are no-op including context
+ * propagation.
+ */
+class NonRecordingSpan {
+    constructor(spanContext = invalid_span_constants_1.INVALID_SPAN_CONTEXT) {
+        this._spanContext = spanContext;
+    }
+    // Returns a SpanContext.
+    spanContext() {
+        return this._spanContext;
+    }
+    // By default does nothing
+    setAttribute(_key, _value) {
+        return this;
+    }
+    // By default does nothing
+    setAttributes(_attributes) {
+        return this;
+    }
+    // By default does nothing
+    addEvent(_name, _attributes) {
+        return this;
+    }
+    addLink(_link) {
+        return this;
+    }
+    addLinks(_links) {
+        return this;
+    }
+    // By default does nothing
+    setStatus(_status) {
+        return this;
+    }
+    // By default does nothing
+    updateName(_name) {
+        return this;
+    }
+    // By default does nothing
+    end(_endTime) { }
+    // isRecording always returns false for NonRecordingSpan.
+    isRecording() {
+        return false;
+    }
+    // By default does nothing
+    recordException(_exception, _time) { }
+}
+exports.NonRecordingSpan = NonRecordingSpan;
+//# sourceMappingURL=NonRecordingSpan.js.map
+
+/***/ }),
+
+/***/ 36841:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.NoopTracer = void 0;
+const context_1 = __nccwpck_require__(31964);
+const context_utils_1 = __nccwpck_require__(98181);
+const NonRecordingSpan_1 = __nccwpck_require__(33426);
+const spancontext_utils_1 = __nccwpck_require__(88097);
+const contextApi = context_1.ContextAPI.getInstance();
+/**
+ * No-op implementations of {@link Tracer}.
+ */
+class NoopTracer {
+    // startSpan starts a noop span.
+    startSpan(name, options, context = contextApi.active()) {
+        const root = Boolean(options === null || options === void 0 ? void 0 : options.root);
+        if (root) {
+            return new NonRecordingSpan_1.NonRecordingSpan();
+        }
+        const parentFromContext = context && (0, context_utils_1.getSpanContext)(context);
+        if (isSpanContext(parentFromContext) &&
+            (0, spancontext_utils_1.isSpanContextValid)(parentFromContext)) {
+            return new NonRecordingSpan_1.NonRecordingSpan(parentFromContext);
+        }
+        else {
+            return new NonRecordingSpan_1.NonRecordingSpan();
+        }
+    }
+    startActiveSpan(name, arg2, arg3, arg4) {
+        let opts;
+        let ctx;
+        let fn;
+        if (arguments.length < 2) {
+            return;
+        }
+        else if (arguments.length === 2) {
+            fn = arg2;
+        }
+        else if (arguments.length === 3) {
+            opts = arg2;
+            fn = arg3;
+        }
+        else {
+            opts = arg2;
+            ctx = arg3;
+            fn = arg4;
+        }
+        const parentContext = ctx !== null && ctx !== void 0 ? ctx : contextApi.active();
+        const span = this.startSpan(name, opts, parentContext);
+        const contextWithSpanSet = (0, context_utils_1.setSpan)(parentContext, span);
+        return contextApi.with(contextWithSpanSet, fn, undefined, span);
+    }
+}
+exports.NoopTracer = NoopTracer;
+function isSpanContext(spanContext) {
+    return (spanContext !== null &&
+        typeof spanContext === 'object' &&
+        'spanId' in spanContext &&
+        typeof spanContext['spanId'] === 'string' &&
+        'traceId' in spanContext &&
+        typeof spanContext['traceId'] === 'string' &&
+        'traceFlags' in spanContext &&
+        typeof spanContext['traceFlags'] === 'number');
+}
+//# sourceMappingURL=NoopTracer.js.map
+
+/***/ }),
+
+/***/ 12448:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.NoopTracerProvider = void 0;
+const NoopTracer_1 = __nccwpck_require__(36841);
+/**
+ * An implementation of the {@link TracerProvider} which returns an impotent
+ * Tracer for all calls to `getTracer`.
+ *
+ * All operations are no-op.
+ */
+class NoopTracerProvider {
+    getTracer(_name, _version, _options) {
+        return new NoopTracer_1.NoopTracer();
+    }
+}
+exports.NoopTracerProvider = NoopTracerProvider;
+//# sourceMappingURL=NoopTracerProvider.js.map
+
+/***/ }),
+
+/***/ 53759:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ProxyTracer = void 0;
+const NoopTracer_1 = __nccwpck_require__(36841);
+const NOOP_TRACER = new NoopTracer_1.NoopTracer();
+/**
+ * Proxy tracer provided by the proxy tracer provider
+ *
+ * @since 1.0.0
+ */
+class ProxyTracer {
+    constructor(provider, name, version, options) {
+        this._provider = provider;
+        this.name = name;
+        this.version = version;
+        this.options = options;
+    }
+    startSpan(name, options, context) {
+        return this._getTracer().startSpan(name, options, context);
+    }
+    startActiveSpan(_name, _options, _context, _fn) {
+        const tracer = this._getTracer();
+        return Reflect.apply(tracer.startActiveSpan, tracer, arguments);
+    }
+    /**
+     * Try to get a tracer from the proxy tracer provider.
+     * If the proxy tracer provider has no delegate, return a noop tracer.
+     */
+    _getTracer() {
+        if (this._delegate) {
+            return this._delegate;
+        }
+        const tracer = this._provider.getDelegateTracer(this.name, this.version, this.options);
+        if (!tracer) {
+            return NOOP_TRACER;
+        }
+        this._delegate = tracer;
+        return this._delegate;
+    }
+}
+exports.ProxyTracer = ProxyTracer;
+//# sourceMappingURL=ProxyTracer.js.map
+
+/***/ }),
+
+/***/ 39774:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ProxyTracerProvider = void 0;
+const ProxyTracer_1 = __nccwpck_require__(53759);
+const NoopTracerProvider_1 = __nccwpck_require__(12448);
+const NOOP_TRACER_PROVIDER = new NoopTracerProvider_1.NoopTracerProvider();
+/**
+ * Tracer provider which provides {@link ProxyTracer}s.
+ *
+ * Before a delegate is set, tracers provided are NoOp.
+ *   When a delegate is set, traces are provided from the delegate.
+ *   When a delegate is set after tracers have already been provided,
+ *   all tracers already provided will use the provided delegate implementation.
+ *
+ * @deprecated This will be removed in the next major version.
+ * @since 1.0.0
+ */
+class ProxyTracerProvider {
+    /**
+     * Get a {@link ProxyTracer}
+     */
+    getTracer(name, version, options) {
+        var _a;
+        return ((_a = this.getDelegateTracer(name, version, options)) !== null && _a !== void 0 ? _a : new ProxyTracer_1.ProxyTracer(this, name, version, options));
+    }
+    getDelegate() {
+        var _a;
+        return (_a = this._delegate) !== null && _a !== void 0 ? _a : NOOP_TRACER_PROVIDER;
+    }
+    /**
+     * Set the delegate tracer provider
+     */
+    setDelegate(delegate) {
+        this._delegate = delegate;
+    }
+    getDelegateTracer(name, version, options) {
+        var _a;
+        return (_a = this._delegate) === null || _a === void 0 ? void 0 : _a.getTracer(name, version, options);
+    }
+}
+exports.ProxyTracerProvider = ProxyTracerProvider;
+//# sourceMappingURL=ProxyTracerProvider.js.map
+
+/***/ }),
+
+/***/ 76980:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.SamplingDecision = void 0;
+/**
+ * @deprecated use the one declared in @opentelemetry/sdk-trace-base instead.
+ * A sampling decision that determines how a {@link Span} will be recorded
+ * and collected.
+ *
+ * @since 1.0.0
+ */
+var SamplingDecision;
+(function (SamplingDecision) {
+    /**
+     * `Span.isRecording() === false`, span will not be recorded and all events
+     * and attributes will be dropped.
+     */
+    SamplingDecision[SamplingDecision["NOT_RECORD"] = 0] = "NOT_RECORD";
+    /**
+     * `Span.isRecording() === true`, but `Sampled` flag in {@link TraceFlags}
+     * MUST NOT be set.
+     */
+    SamplingDecision[SamplingDecision["RECORD"] = 1] = "RECORD";
+    /**
+     * `Span.isRecording() === true` AND `Sampled` flag in {@link TraceFlags}
+     * MUST be set.
+     */
+    SamplingDecision[SamplingDecision["RECORD_AND_SAMPLED"] = 2] = "RECORD_AND_SAMPLED";
+})(SamplingDecision = exports.SamplingDecision || (exports.SamplingDecision = {}));
+//# sourceMappingURL=SamplingResult.js.map
+
+/***/ }),
+
+/***/ 98181:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getSpanContext = exports.setSpanContext = exports.deleteSpan = exports.setSpan = exports.getActiveSpan = exports.getSpan = void 0;
+const context_1 = __nccwpck_require__(60859);
+const NonRecordingSpan_1 = __nccwpck_require__(33426);
+const context_2 = __nccwpck_require__(31964);
+/**
+ * span key
+ */
+const SPAN_KEY = (0, context_1.createContextKey)('OpenTelemetry Context Key SPAN');
+/**
+ * Return the span if one exists
+ *
+ * @param context context to get span from
+ */
+function getSpan(context) {
+    return context.getValue(SPAN_KEY) || undefined;
+}
+exports.getSpan = getSpan;
+/**
+ * Gets the span from the current context, if one exists.
+ */
+function getActiveSpan() {
+    return getSpan(context_2.ContextAPI.getInstance().active());
+}
+exports.getActiveSpan = getActiveSpan;
+/**
+ * Set the span on a context
+ *
+ * @param context context to use as parent
+ * @param span span to set active
+ */
+function setSpan(context, span) {
+    return context.setValue(SPAN_KEY, span);
+}
+exports.setSpan = setSpan;
+/**
+ * Remove current span stored in the context
+ *
+ * @param context context to delete span from
+ */
+function deleteSpan(context) {
+    return context.deleteValue(SPAN_KEY);
+}
+exports.deleteSpan = deleteSpan;
+/**
+ * Wrap span context in a NoopSpan and set as span in a new
+ * context
+ *
+ * @param context context to set active span on
+ * @param spanContext span context to be wrapped
+ */
+function setSpanContext(context, spanContext) {
+    return setSpan(context, new NonRecordingSpan_1.NonRecordingSpan(spanContext));
+}
+exports.setSpanContext = setSpanContext;
+/**
+ * Get the span context of the span if it exists.
+ *
+ * @param context context to get values from
+ */
+function getSpanContext(context) {
+    var _a;
+    return (_a = getSpan(context)) === null || _a === void 0 ? void 0 : _a.spanContext();
+}
+exports.getSpanContext = getSpanContext;
+//# sourceMappingURL=context-utils.js.map
+
+/***/ }),
+
+/***/ 79017:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.TraceStateImpl = void 0;
+const tracestate_validators_1 = __nccwpck_require__(51852);
+const MAX_TRACE_STATE_ITEMS = 32;
+const MAX_TRACE_STATE_LEN = 512;
+const LIST_MEMBERS_SEPARATOR = ',';
+const LIST_MEMBER_KEY_VALUE_SPLITTER = '=';
+/**
+ * TraceState must be a class and not a simple object type because of the spec
+ * requirement (https://www.w3.org/TR/trace-context/#tracestate-field).
+ *
+ * Here is the list of allowed mutations:
+ * - New key-value pair should be added into the beginning of the list
+ * - The value of any key can be updated. Modified keys MUST be moved to the
+ * beginning of the list.
+ */
+class TraceStateImpl {
+    constructor(rawTraceState) {
+        this._internalState = new Map();
+        if (rawTraceState)
+            this._parse(rawTraceState);
+    }
+    set(key, value) {
+        // TODO: Benchmark the different approaches(map vs list) and
+        // use the faster one.
+        const traceState = this._clone();
+        if (traceState._internalState.has(key)) {
+            traceState._internalState.delete(key);
+        }
+        traceState._internalState.set(key, value);
+        return traceState;
+    }
+    unset(key) {
+        const traceState = this._clone();
+        traceState._internalState.delete(key);
+        return traceState;
+    }
+    get(key) {
+        return this._internalState.get(key);
+    }
+    serialize() {
+        return (Array.from(this._internalState.keys())
+            // Use reduceRight() because keys are stored in reverse insertion order.
+            .reduceRight((agg, key) => {
+            agg.push(key + LIST_MEMBER_KEY_VALUE_SPLITTER + this.get(key));
+            return agg;
+        }, [])
+            .join(LIST_MEMBERS_SEPARATOR));
+    }
+    _parse(rawTraceState) {
+        if (rawTraceState.length > MAX_TRACE_STATE_LEN)
+            return;
+        this._internalState = rawTraceState
+            .split(LIST_MEMBERS_SEPARATOR)
+            // Use reduceRight() so new keys (.set(...)) will be placed at the beginning
+            .reduceRight((agg, part) => {
+            const listMember = part.trim(); // Optional Whitespace (OWS) handling
+            const i = listMember.indexOf(LIST_MEMBER_KEY_VALUE_SPLITTER);
+            if (i !== -1) {
+                const key = listMember.slice(0, i);
+                const value = listMember.slice(i + 1, part.length);
+                if ((0, tracestate_validators_1.validateKey)(key) && (0, tracestate_validators_1.validateValue)(value)) {
+                    agg.set(key, value);
+                }
+                else {
+                    // TODO: Consider to add warning log
+                }
+            }
+            return agg;
+        }, new Map());
+        // Because of the reverse() requirement, trunc must be done after map is created
+        if (this._internalState.size > MAX_TRACE_STATE_ITEMS) {
+            this._internalState = new Map(Array.from(this._internalState.entries())
+                .reverse() // Use reverse same as original tracestate parse chain
+                .slice(0, MAX_TRACE_STATE_ITEMS));
+        }
+    }
+    // @ts-expect-error TS6133 Accessed in tests only.
+    _keys() {
+        return Array.from(this._internalState.keys()).reverse();
+    }
+    _clone() {
+        const traceState = new TraceStateImpl();
+        traceState._internalState = new Map(this._internalState);
+        return traceState;
+    }
+}
+exports.TraceStateImpl = TraceStateImpl;
+//# sourceMappingURL=tracestate-impl.js.map
+
+/***/ }),
+
+/***/ 51852:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.validateValue = exports.validateKey = void 0;
+const VALID_KEY_CHAR_RANGE = '[_0-9a-z-*/]';
+const VALID_KEY = `[a-z]${VALID_KEY_CHAR_RANGE}{0,255}`;
+const VALID_VENDOR_KEY = `[a-z0-9]${VALID_KEY_CHAR_RANGE}{0,240}@[a-z]${VALID_KEY_CHAR_RANGE}{0,13}`;
+const VALID_KEY_REGEX = new RegExp(`^(?:${VALID_KEY}|${VALID_VENDOR_KEY})$`);
+const VALID_VALUE_BASE_REGEX = /^[ -~]{0,255}[!-~]$/;
+const INVALID_VALUE_COMMA_EQUAL_REGEX = /,|=/;
+/**
+ * Key is opaque string up to 256 characters printable. It MUST begin with a
+ * lowercase letter, and can only contain lowercase letters a-z, digits 0-9,
+ * underscores _, dashes -, asterisks *, and forward slashes /.
+ * For multi-tenant vendor scenarios, an at sign (@) can be used to prefix the
+ * vendor name. Vendors SHOULD set the tenant ID at the beginning of the key.
+ * see https://www.w3.org/TR/trace-context/#key
+ */
+function validateKey(key) {
+    return VALID_KEY_REGEX.test(key);
+}
+exports.validateKey = validateKey;
+/**
+ * Value is opaque string up to 256 characters printable ASCII RFC0020
+ * characters (i.e., the range 0x20 to 0x7E) except comma , and =.
+ */
+function validateValue(value) {
+    return (VALID_VALUE_BASE_REGEX.test(value) &&
+        !INVALID_VALUE_COMMA_EQUAL_REGEX.test(value));
+}
+exports.validateValue = validateValue;
+//# sourceMappingURL=tracestate-validators.js.map
+
+/***/ }),
+
+/***/ 23467:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.createTraceState = void 0;
+const tracestate_impl_1 = __nccwpck_require__(79017);
+/**
+ * @since 1.1.0
+ */
+function createTraceState(rawTraceState) {
+    return new tracestate_impl_1.TraceStateImpl(rawTraceState);
+}
+exports.createTraceState = createTraceState;
+//# sourceMappingURL=utils.js.map
+
+/***/ }),
+
+/***/ 38038:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.INVALID_SPAN_CONTEXT = exports.INVALID_TRACEID = exports.INVALID_SPANID = void 0;
+const trace_flags_1 = __nccwpck_require__(61263);
+/**
+ * @since 1.0.0
+ */
+exports.INVALID_SPANID = '0000000000000000';
+/**
+ * @since 1.0.0
+ */
+exports.INVALID_TRACEID = '00000000000000000000000000000000';
+/**
+ * @since 1.0.0
+ */
+exports.INVALID_SPAN_CONTEXT = {
+    traceId: exports.INVALID_TRACEID,
+    spanId: exports.INVALID_SPANID,
+    traceFlags: trace_flags_1.TraceFlags.NONE,
+};
+//# sourceMappingURL=invalid-span-constants.js.map
+
+/***/ }),
+
+/***/ 16009:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.SpanKind = void 0;
+/**
+ * @since 1.0.0
+ */
+var SpanKind;
+(function (SpanKind) {
+    /** Default value. Indicates that the span is used internally. */
+    SpanKind[SpanKind["INTERNAL"] = 0] = "INTERNAL";
+    /**
+     * Indicates that the span covers server-side handling of an RPC or other
+     * remote request.
+     */
+    SpanKind[SpanKind["SERVER"] = 1] = "SERVER";
+    /**
+     * Indicates that the span covers the client-side wrapper around an RPC or
+     * other remote request.
+     */
+    SpanKind[SpanKind["CLIENT"] = 2] = "CLIENT";
+    /**
+     * Indicates that the span describes producer sending a message to a
+     * broker. Unlike client and server, there is no direct critical path latency
+     * relationship between producer and consumer spans.
+     */
+    SpanKind[SpanKind["PRODUCER"] = 3] = "PRODUCER";
+    /**
+     * Indicates that the span describes consumer receiving a message from a
+     * broker. Unlike client and server, there is no direct critical path latency
+     * relationship between producer and consumer spans.
+     */
+    SpanKind[SpanKind["CONSUMER"] = 4] = "CONSUMER";
+})(SpanKind = exports.SpanKind || (exports.SpanKind = {}));
+//# sourceMappingURL=span_kind.js.map
+
+/***/ }),
+
+/***/ 88097:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.wrapSpanContext = exports.isSpanContextValid = exports.isValidSpanId = exports.isValidTraceId = void 0;
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+const invalid_span_constants_1 = __nccwpck_require__(38038);
+const NonRecordingSpan_1 = __nccwpck_require__(33426);
+// Valid characters (0-9, a-f, A-F) are marked as 1.
+const isHex = new Uint8Array([
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1,
+]);
+function isValidHex(id, length) {
+    // As of 1.9.0 the id was allowed to be a non-string value,
+    // even though it was not possible in the types.
+    if (typeof id !== 'string' || id.length !== length)
+        return false;
+    let r = 0;
+    for (let i = 0; i < id.length; i += 4) {
+        r +=
+            (isHex[id.charCodeAt(i)] | 0) +
+                (isHex[id.charCodeAt(i + 1)] | 0) +
+                (isHex[id.charCodeAt(i + 2)] | 0) +
+                (isHex[id.charCodeAt(i + 3)] | 0);
+    }
+    return r === length;
+}
+/**
+ * @since 1.0.0
+ */
+function isValidTraceId(traceId) {
+    return isValidHex(traceId, 32) && traceId !== invalid_span_constants_1.INVALID_TRACEID;
+}
+exports.isValidTraceId = isValidTraceId;
+/**
+ * @since 1.0.0
+ */
+function isValidSpanId(spanId) {
+    return isValidHex(spanId, 16) && spanId !== invalid_span_constants_1.INVALID_SPANID;
+}
+exports.isValidSpanId = isValidSpanId;
+/**
+ * Returns true if this {@link SpanContext} is valid.
+ * @return true if this {@link SpanContext} is valid.
+ *
+ * @since 1.0.0
+ */
+function isSpanContextValid(spanContext) {
+    return (isValidTraceId(spanContext.traceId) && isValidSpanId(spanContext.spanId));
+}
+exports.isSpanContextValid = isSpanContextValid;
+/**
+ * Wrap the given {@link SpanContext} in a new non-recording {@link Span}
+ *
+ * @param spanContext span context to be wrapped
+ * @returns a new non-recording {@link Span} with the provided context
+ */
+function wrapSpanContext(spanContext) {
+    return new NonRecordingSpan_1.NonRecordingSpan(spanContext);
+}
+exports.wrapSpanContext = wrapSpanContext;
+//# sourceMappingURL=spancontext-utils.js.map
+
+/***/ }),
+
+/***/ 84770:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.SpanStatusCode = void 0;
+/**
+ * An enumeration of status codes.
+ *
+ * @since 1.0.0
+ */
+var SpanStatusCode;
+(function (SpanStatusCode) {
+    /**
+     * The default status.
+     */
+    SpanStatusCode[SpanStatusCode["UNSET"] = 0] = "UNSET";
+    /**
+     * The operation has been validated by an Application developer or
+     * Operator to have completed successfully.
+     */
+    SpanStatusCode[SpanStatusCode["OK"] = 1] = "OK";
+    /**
+     * The operation contains an error.
+     */
+    SpanStatusCode[SpanStatusCode["ERROR"] = 2] = "ERROR";
+})(SpanStatusCode = exports.SpanStatusCode || (exports.SpanStatusCode = {}));
+//# sourceMappingURL=status.js.map
+
+/***/ }),
+
+/***/ 61263:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.TraceFlags = void 0;
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+/**
+ * @since 1.0.0
+ */
+var TraceFlags;
+(function (TraceFlags) {
+    /** Represents no flag set. */
+    TraceFlags[TraceFlags["NONE"] = 0] = "NONE";
+    /** Bit to represent whether trace is sampled in trace flags. */
+    TraceFlags[TraceFlags["SAMPLED"] = 1] = "SAMPLED";
+})(TraceFlags = exports.TraceFlags || (exports.TraceFlags = {}));
+//# sourceMappingURL=trace_flags.js.map
+
+/***/ }),
+
+/***/ 74736:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/*
+ * Copyright The OpenTelemetry Authors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.VERSION = void 0;
+// this is autogenerated file, see scripts/version-update.js
+exports.VERSION = '1.9.1';
+//# sourceMappingURL=version.js.map
+
+/***/ }),
+
 /***/ 89651:
 /***/ (function(__unused_webpack_module, exports) {
 
@@ -35054,7 +37351,7 @@ exports.partialParse = partialParse;
 
 "use strict";
 
-var _BaseAnthropic_instances, _a, _BaseAnthropic_encoder, _BaseAnthropic_baseURLOverridden;
+var _BaseAnthropic_instances, _a, _BaseAnthropic_encoder, _BaseAnthropic_openTelemetry, _BaseAnthropic_baseURLOverridden;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Anthropic = exports.BaseAnthropic = exports.AI_PROMPT = exports.HUMAN_PROMPT = void 0;
 const tslib_1 = __nccwpck_require__(14839);
@@ -35065,11 +37362,14 @@ const detect_platform_1 = __nccwpck_require__(5890);
 const request_signal_1 = __nccwpck_require__(85803);
 const Shims = tslib_1.__importStar(__nccwpck_require__(70693));
 const Opts = tslib_1.__importStar(__nccwpck_require__(21561));
+const tracing_1 = __nccwpck_require__(91705);
 const query_1 = __nccwpck_require__(1145);
+const api_1 = __nccwpck_require__(84028);
 const version_1 = __nccwpck_require__(86677);
 const Errors = tslib_1.__importStar(__nccwpck_require__(69955));
 const types_1 = __nccwpck_require__(74125);
 const token_cache_1 = __nccwpck_require__(19134);
+const tracing_2 = __nccwpck_require__(38225);
 const credential_chain_1 = __nccwpck_require__(69683);
 const middleware_1 = __nccwpck_require__(21709);
 const Pagination = tslib_1.__importStar(__nccwpck_require__(27117));
@@ -35109,6 +37409,34 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
             return this._authState.provider;
         }
         /**
+         * The `openTelemetry` option as this client settled it when it was constructed: `propagation` and
+         * each field of `traces` from the option, or else its default. A client constructed without the
+         * option has what the environment variables said. One constructed with `openTelemetry: false` has
+         * `traces.enabled: false` here.
+         *
+         * The value is frozen. It is a valid `openTelemetry` option, so a copy of this client can change
+         * one setting and keep the others:
+         *
+         * ```ts
+         * const { openTelemetry } = client;
+         * client.withOptions({
+         *   openTelemetry: { ...openTelemetry, traces: { ...openTelemetry.traces, contentMode: 'content' } },
+         * });
+         * ```
+         */
+        get openTelemetry() {
+            return tslib_1.__classPrivateFieldGet(this, _BaseAnthropic_openTelemetry, "f");
+        }
+        /**
+         * The instrumentation scope of this client's spans: the version of the package that the client
+         * is from, and for the client of another platform the platform's name, which the scope's name
+         * ends with. The clients for other platforms override it. The constructor calls it.
+         * @internal
+         */
+        _instrumentationScope() {
+            return { version: version_1.VERSION };
+        }
+        /**
          * API Client for interfacing with the Anthropic API.
          *
          * @param {string | null | undefined} [opts.apiKey=process.env['ANTHROPIC_API_KEY'] ?? null]
@@ -35127,6 +37455,13 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
             _BaseAnthropic_instances.add(this);
             this._requestAuthFlags = new WeakMap();
             _BaseAnthropic_encoder.set(this, void 0);
+            _BaseAnthropic_openTelemetry.set(this, void 0);
+            /**
+             * The `gen_ai.provider.name` of this client's spans: the platform that serves its requests.
+             * The clients for third-party platforms override it.
+             * @internal
+             */
+            this._genAIProviderName = 'anthropic';
             // An explicit `profile` is a constructor-level credential choice; when set,
             // do not let env ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN shadow it.
             if (apiKey === undefined) {
@@ -35166,6 +37501,10 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
                     log_1.defaultLogLevel;
             this.fetchOptions = options.fetchOptions;
             this.maxRetries = (0, values_1.validatePositiveInteger)('maxRetries', options.maxRetries ?? 2);
+            const scope = this._instrumentationScope();
+            tslib_1.__classPrivateFieldSet(this, _BaseAnthropic_openTelemetry, (0, tracing_1.resolveOpenTelemetryOptions)(options.openTelemetry), "f");
+            options.openTelemetry = tslib_1.__classPrivateFieldGet(this, _BaseAnthropic_openTelemetry, "f");
+            this._tracer = (0, tracing_1.guardTracing)(this, () => (0, tracing_1.getTracer)(tslib_1.__classPrivateFieldGet(this, _BaseAnthropic_openTelemetry, "f"), scope.version, scope.platform));
             this.fetch = options.fetch ?? Shims.getDefaultFetch();
             tslib_1.__classPrivateFieldSet(this, _BaseAnthropic_encoder, Opts.FallbackEncoder, "f");
             this.middleware = [...(options.middleware ?? [])];
@@ -35331,6 +37670,7 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
                 // mutual-exclusion check or precedence over the override.
                 ...(overridesStructuredAuth ? { credentials: undefined, config: undefined, profile: undefined } : {}),
                 ...options,
+                openTelemetry: options.openTelemetry ?? tslib_1.__classPrivateFieldGet(this, _BaseAnthropic_openTelemetry, "f"),
                 // Always set __auth so any stale value from ...this._options is
                 // overwritten. undefined means "build fresh auth from these options".
                 __auth: overridesAuth ? undefined : this._authState,
@@ -35475,8 +37815,11 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
          *
          * Runs after all middleware (including {@link backendMiddleware}),
          * immediately before each underlying fetch call, so it sees exactly what
-         * goes over the wire. Middleware may replay a request by calling `next()`
-         * more than once, so this hook can run multiple times per attempt:
+         * goes over the wire, except the trace-context headers of a traced call
+         * (`traceparent`, `tracestate`, `baggage`, and any other that the registered
+         * propagator writes): the client sets them again after this hook, so that a
+         * signature does not cover them. Middleware may replay a request by calling
+         * `next()` more than once, so this hook can run multiple times per attempt:
          * overrides must be idempotent and overwrite headers from a previous
          * invocation rather than append to them.
          */
@@ -35514,7 +37857,8 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
          * Running inside the user's middleware means user middleware always observes
          * canonical Anthropic-shaped traffic, and the adaptation re-runs (e.g.
          * re-signs) on every `next()` invocation, covering whatever the middleware
-         * mutated.
+         * mutated. It does not see the trace-context headers of a traced call: see
+         * {@link prepareRequest}.
          *
          * Errors thrown here follow the middleware error policy: they propagate to
          * the caller as-is — no retries, no `APIConnectionError` wrapping — unless
@@ -35545,9 +37889,33 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
             }));
         }
         request(options, remainingRetries = null) {
-            return new api_promise_1.APIPromise(this, this.makeRequest(options, remainingRetries, undefined));
+            if (!this._tracer) {
+                return new api_promise_1.APIPromise(this, this.makeRequest(options, remainingRetries, undefined));
+            }
+            return new api_promise_1.APIPromise(this, this.makeTracedRequest(options, remainingRetries));
         }
-        async makeRequest(optionsInput, retriesRemaining, retryOfRequestLogID) {
+        /**
+         * Makes the request inside the call span that the SDK method started and passed in the options
+         * (`__span`). The span ends here when the call fails, and otherwise when the application has
+         * read the response body: see `APIPromise`.
+         */
+        async makeTracedRequest(optionsInput, retriesRemaining) {
+            const options = await optionsInput;
+            const span = options.__span?.span;
+            if (!span) {
+                return this.makeRequest(options, retriesRemaining, undefined);
+            }
+            try {
+                return await api_1.context.with(api_1.trace.setSpan(api_1.context.active(), span), () => this.makeRequest(options, retriesRemaining, undefined, span));
+            }
+            catch (error) {
+                const result = { status: 'error', options, error };
+                (0, tracing_2.setAnthropicSpanAttributes)(this, span, result);
+                (0, tracing_1.guardTracing)(this, () => (0, tracing_1.endApiCallSpan)(span, result));
+                throw error;
+            }
+        }
+        async makeRequest(optionsInput, retriesRemaining, retryOfRequestLogID, span) {
             const options = await optionsInput;
             let maxRetries = (0, values_1.validatePositiveInteger)('maxRetries', options.maxRetries ?? this.maxRetries);
             if (this.isStreamBody(options.body)) {
@@ -35566,6 +37934,9 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
             /** Not an API request ID, just for correlating local log entries. */
             const requestLogID = 'log_' + ((Math.random() * (1 << 24)) | 0).toString(16).padStart(6, '0');
             const retryLogStr = retryOfRequestLogID === undefined ? '' : `, retryOf: ${retryOfRequestLogID}`;
+            if (span && this.openTelemetry.propagation) {
+                req.headers = (0, tracing_1.guardTracing)(this, () => (0, tracing_1.injectTraceHeaders)(span, req.headers)) ?? req.headers;
+            }
             const startTime = Date.now();
             if (options.signal?.aborted) {
                 throw new Errors.APIUserAbortError();
@@ -35612,7 +37983,7 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
                         durationMs: headersTime - startTime,
                         message: response.message,
                     });
-                    return this.retryRequest(options, retriesRemaining, retryOfRequestLogID ?? requestLogID);
+                    return this.retryRequest(options, retriesRemaining, retryOfRequestLogID ?? requestLogID, span);
                 }
                 (0, log_1.loggerFor)(this).info(`[${requestLogID}] connection ${isTimeout ? 'timed out' : 'failed'} - error; no more retries left`);
                 (0, log_1.debugLogRequestDetails)((0, log_1.loggerFor)(this), `[${requestLogID}] connection ${isTimeout ? 'timed out' : 'failed'} (error; no more retries left)`, {
@@ -35651,7 +38022,7 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
                         headers: response.headers,
                         durationMs: headersTime - startTime,
                     });
-                    return this.retryRequest(options, retriesRemaining, retryOfRequestLogID ?? requestLogID, response.headers);
+                    return this.retryRequest(options, retriesRemaining, retryOfRequestLogID ?? requestLogID, span, response.headers);
                 }
                 const retryMessage = shouldRetry ? `error; no more retries left` : `error; not retryable`;
                 (0, log_1.loggerFor)(this).info(`${responseInfo} - ${retryMessage}`);
@@ -35687,7 +38058,11 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
                 : { method: 'get', path, ...opts });
         }
         requestAPIList(Page, options) {
-            const request = this.makeRequest(options, null, undefined);
+            if (!this._tracer) {
+                const request = this.makeRequest(options, null, undefined);
+                return new Pagination.PagePromise(this, request, Page);
+            }
+            const request = this.makeTracedRequest(options, null);
             return new Pagination.PagePromise(this, request, Page);
         }
         async fetchWithTimeout(url, init, ms, controller, requestOptions, logCtx) {
@@ -35731,17 +38106,30 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
             };
             // Prepare the request (auth signing and other `prepareRequest` hooks) as
             // the innermost step, after any middleware — including the backend
-            // middleware, so it sees exactly what goes over the wire. Runs per
-            // inner-fetch invocation, so a request middleware rewrote — or replayed
-            // via a second `next()` call — is prepared fresh each time. Preparation is
-            // outside the timeout timer, matching its pre-middleware behavior.
+            // middleware, so it sees exactly what goes over the wire, except the trace
+            // headers. Runs per inner-fetch invocation, so a request middleware rewrote
+            // — or replayed via a second `next()` call — is prepared fresh each time.
+            // Preparation is outside the timeout timer, matching its pre-middleware
+            // behavior.
             const innerFetch = requestOptions === undefined ? timedFetch : (async (innerUrl, innerInit = {}) => {
                 const innerUrlStr = typeof innerUrl === 'string' ? innerUrl
                     : innerUrl instanceof URL ? innerUrl.href
                         : innerUrl.url;
                 innerInit.headers =
                     innerInit.headers instanceof Headers ? innerInit.headers : new Headers(innerInit.headers);
+                let traceHeaders = [];
+                if (requestOptions.__span) {
+                    innerInit.headers = new Headers(innerInit.headers);
+                    traceHeaders = (0, tracing_2.takeTraceHeaders)(innerInit.headers);
+                }
                 await this.prepareRequest(innerInit, { url: innerUrlStr, options: requestOptions });
+                if (traceHeaders.length) {
+                    innerInit.headers = (0, headers_1.buildHeaders)([innerInit.headers, traceHeaders]).values;
+                }
+                const call = requestOptions.__span;
+                if (call) {
+                    (0, tracing_1.guardTracing)(this, () => (0, tracing_1.recordAttempt)(call, innerInit.method ?? 'GET', innerUrlStr, this.openTelemetry.traces.contentMode === 'content'));
+                }
                 if (logCtx) {
                     (0, log_1.debugLogRequestDetails)((0, log_1.loggerFor)(this), `[${logCtx.requestLogID}] sending request`, {
                         retryOfRequestLogID: logCtx.retryOfRequestLogID,
@@ -35754,7 +38142,7 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
                 return timedFetch(innerUrl, innerInit);
             });
             const requestMiddleware = requestOptions?.middleware;
-            const backendMiddleware = this.backendMiddleware();
+            const backendMiddleware = requestOptions?.__span ? this.backendMiddleware().map(tracing_2.withoutTraceHeaders) : this.backendMiddleware();
             const allMiddleware = requestMiddleware?.length || backendMiddleware.length ?
                 [...this.middleware, ...(requestMiddleware ?? []), ...backendMiddleware]
                 : this.middleware;
@@ -35796,7 +38184,7 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
                 return true;
             return false;
         }
-        async retryRequest(options, retriesRemaining, requestLogID, responseHeaders) {
+        async retryRequest(options, retriesRemaining, requestLogID, span, responseHeaders) {
             let timeoutMillis;
             // Note the `retry-after-ms` header may not be standard, but is a good idea and we'd like proactive support for it.
             const retryAfterMillisHeader = responseHeaders?.get('retry-after-ms');
@@ -35825,7 +38213,7 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
                 timeoutMillis = this.calculateDefaultRetryTimeoutMillis(retriesRemaining, maxRetries);
             }
             await (0, sleep_1.sleep)(timeoutMillis, options.signal ?? undefined);
-            return this.makeRequest(options, retriesRemaining - 1, requestLogID);
+            return this.makeRequest(options, retriesRemaining - 1, requestLogID, span);
         }
         calculateDefaultRetryTimeoutMillis(retriesRemaining, maxRetries) {
             const initialRetryDelay = 0.5;
@@ -35960,7 +38348,7 @@ var BaseAnthropic = /* @__PURE__ */ (() => {
                     (Symbol.iterator in body && 'next' in body && typeof body.next === 'function')));
         }
     }
-    _a = BaseAnthropic, _BaseAnthropic_encoder = new WeakMap(), _BaseAnthropic_instances = new WeakSet(), _BaseAnthropic_baseURLOverridden = function _BaseAnthropic_baseURLOverridden() {
+    _a = BaseAnthropic, _BaseAnthropic_encoder = new WeakMap(), _BaseAnthropic_openTelemetry = new WeakMap(), _BaseAnthropic_instances = new WeakSet(), _BaseAnthropic_baseURLOverridden = function _BaseAnthropic_baseURLOverridden() {
         return this.baseURL !== 'https://api.anthropic.com';
     };
     BaseAnthropic.Anthropic = _a;
@@ -36024,6 +38412,9 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.APIPromise = void 0;
 const tslib_1 = __nccwpck_require__(14839);
 const parse_1 = __nccwpck_require__(47752);
+const tracing_1 = __nccwpck_require__(91705);
+const uploads_1 = __nccwpck_require__(59629);
+const tracing_2 = __nccwpck_require__(38225);
 var APIPromise = /* @__PURE__ */ (() => {
     /**
      * A subclass of `Promise` providing additional helper methods
@@ -36057,7 +38448,17 @@ var APIPromise = /* @__PURE__ */ (() => {
          * to your `tsconfig.json`.
          */
         asResponse() {
-            return this.responsePromise.then((p) => p.response);
+            return this.responsePromise.then((props) => {
+                // A traced API call's span ends with the body. A response read this way, before any parse
+                // of its body has begun, may never be parsed, so its span ends now, without the body.
+                const span = props.options.__span?.span;
+                if (span && !this.parsedPromise) {
+                    const result = { status: 'success', ...props, data: undefined };
+                    (0, tracing_2.setAnthropicSpanAttributes)(tslib_1.__classPrivateFieldGet(this, _APIPromise_client, "f"), span, result);
+                    (0, tracing_1.guardTracing)(tslib_1.__classPrivateFieldGet(this, _APIPromise_client, "f"), () => (0, tracing_1.endApiCallSpan)(span, result));
+                }
+                return props.response;
+            });
         }
         /**
          * Gets the parsed response data, the raw `Response` instance and the ID of the request,
@@ -36082,9 +38483,40 @@ var APIPromise = /* @__PURE__ */ (() => {
         }
         parse() {
             if (!this.parsedPromise) {
-                this.parsedPromise = this.responsePromise.then((data) => this.parseResponse(tslib_1.__classPrivateFieldGet(this, _APIPromise_client, "f"), data));
+                this.parsedPromise = this.responsePromise.then((props) => this.parseResponseTraced(props));
             }
             return this.parsedPromise;
+        }
+        /**
+         * Parses the body of an API call. When the call has a span, the span ends with the parse, or,
+         * when the parse returns a streamed body, when the application has read that stream.
+         */
+        async parseResponseTraced(props) {
+            const call = props.options.__span;
+            if (!call) {
+                return this.parseResponse(tslib_1.__classPrivateFieldGet(this, _APIPromise_client, "f"), props);
+            }
+            const { span } = call;
+            let data;
+            try {
+                data = await this.parseResponse(tslib_1.__classPrivateFieldGet(this, _APIPromise_client, "f"), props);
+            }
+            catch (error) {
+                const result = { status: 'error', ...props, error };
+                (0, tracing_2.setAnthropicSpanAttributes)(tslib_1.__classPrivateFieldGet(this, _APIPromise_client, "f"), span, result);
+                (0, tracing_1.guardTracing)(tslib_1.__classPrivateFieldGet(this, _APIPromise_client, "f"), () => (0, tracing_1.endApiCallSpan)(span, result));
+                throw error;
+            }
+            const result = { status: 'success', ...props, data };
+            (0, tracing_1.guardTracing)(tslib_1.__classPrivateFieldGet(this, _APIPromise_client, "f"), () => (0, tracing_1.setCreatedIDAttribute)(call, data));
+            (0, tracing_2.setAnthropicSpanAttributes)(tslib_1.__classPrivateFieldGet(this, _APIPromise_client, "f"), span, result);
+            if (props.options.stream && (0, uploads_1.isAsyncIterable)(data)) {
+                (0, tracing_1.guardTracing)(tslib_1.__classPrivateFieldGet(this, _APIPromise_client, "f"), () => (0, tracing_2.endAnthropicApiCallSpanWhenStreamEnds)(tslib_1.__classPrivateFieldGet(this, _APIPromise_client, "f"), span, data, props));
+            }
+            else {
+                (0, tracing_1.guardTracing)(tslib_1.__classPrivateFieldGet(this, _APIPromise_client, "f"), () => (0, tracing_1.endApiCallSpan)(span, result));
+            }
+            return data;
         }
         then(onfulfilled, onrejected) {
             return this.parse().then(onfulfilled, onrejected);
@@ -36761,6 +39193,7 @@ const tslib_1 = __nccwpck_require__(14839);
 const error_1 = __nccwpck_require__(69955);
 const parse_1 = __nccwpck_require__(47752);
 const api_promise_1 = __nccwpck_require__(9649);
+const tracing_1 = __nccwpck_require__(91705);
 const values_1 = __nccwpck_require__(17999);
 var AbstractPage = /* @__PURE__ */ (() => {
     class AbstractPage {
@@ -36782,7 +39215,19 @@ var AbstractPage = /* @__PURE__ */ (() => {
             if (!nextOptions) {
                 throw new error_1.AnthropicError('No next page expected; please check `.hasNextPage()` before calling `.getNextPage()`.');
             }
-            return await tslib_1.__classPrivateFieldGet(this, _AbstractPage_client, "f").requestAPIList(this.constructor, nextOptions);
+            // Each page is its own API call, with its own call span. `nextOptions` copies the previous
+            // page's options, including its `__span`, which has already ended.
+            const span = this.options.__span;
+            return await tslib_1.__classPrivateFieldGet(this, _AbstractPage_client, "f").requestAPIList(this.constructor, {
+                ...nextOptions,
+                __span: span &&
+                    (0, tracing_1.startApiCallSpan)(tslib_1.__classPrivateFieldGet(this, _AbstractPage_client, "f"), span.name, { openTelemetry: this.options.openTelemetry }, {
+                        route: span.route,
+                        queryParams: span.queryParams,
+                        contentQueryParams: span.contentQueryParams,
+                        attributes: span.attributes,
+                    }),
+            });
         }
         async *iterPages() {
             let page = this;
@@ -37092,7 +39537,14 @@ var Stream = /* @__PURE__ */ (() => {
                             sse.event === 'session.thread_status_terminated' ||
                             sse.event === 'event_start' ||
                             sse.event === 'event_delta' ||
-                            sse.event === 'system.message') {
+                            sse.event === 'system.message' ||
+                            sse.event === 'workflow_run.created' ||
+                            sse.event === 'workflow_run.status_running' ||
+                            sse.event === 'workflow_run.status_idle' ||
+                            sse.event === 'workflow_run.status_ended' ||
+                            sse.event === 'workflow_run.error' ||
+                            sse.event === 'workflow_run.phase_started' ||
+                            sse.event === 'workflow_run.phase_ended') {
                             try {
                                 yield JSON.parse(sse.data);
                             }
@@ -37186,7 +39638,7 @@ var Stream = /* @__PURE__ */ (() => {
         tee() {
             const left = [];
             const right = [];
-            const iterator = this.iterator();
+            const iterator = this[Symbol.asyncIterator]();
             const teeIterator = (queue) => {
                 return {
                     next: () => {
@@ -37482,13 +39934,22 @@ const shims_1 = __nccwpck_require__(70693);
 const line_1 = __nccwpck_require__(60491);
 var JSONLDecoder = /* @__PURE__ */ (() => {
     class JSONLDecoder {
-        constructor(iterator, controller) {
+        constructor(iterator, controller, 
+        // Node's fetch cancels an unread body once its response is garbage collected, so we hold a reference.
+        response) {
             this.iterator = iterator;
+            this.response = response;
             this.controller = controller;
         }
         async *decoder() {
+            const iterator = this.iterator;
+            if (!iterator) {
+                throw new error_1.AnthropicError('Cannot iterate over a consumed stream.');
+            }
+            // Lets the iterator be collected with this generator, even if the decoder is still held.
+            this.iterator = undefined;
             const lineDecoder = new line_1.LineDecoder();
-            for await (const chunk of this.iterator) {
+            for await (const chunk of iterator) {
                 for (const line of lineDecoder.decode(chunk)) {
                     yield JSON.parse(line);
                 }
@@ -37509,7 +39970,7 @@ var JSONLDecoder = /* @__PURE__ */ (() => {
                 }
                 throw new error_1.AnthropicError(`Attempted to iterate over a response with no body`);
             }
-            return new JSONLDecoder((0, shims_1.ReadableStreamToAsyncIterable)(response.body), controller);
+            return new JSONLDecoder((0, shims_1.ReadableStreamToAsyncIterable)(response.body), controller, response);
         }
     }
     return JSONLDecoder;
@@ -39342,9 +41803,9 @@ function ReadableStreamFrom(iterable) {
  *
  * This polyfill was pulled from https://github.com/MattiasBuelens/web-streams-polyfill/pull/122#issuecomment-1627354490
  */
-function ReadableStreamToAsyncIterable(stream) {
+function readableStreamIterator(stream) {
     if (stream[Symbol.asyncIterator])
-        return stream;
+        return stream[Symbol.asyncIterator]();
     const reader = stream.getReader();
     return {
         async next() {
@@ -39365,10 +41826,31 @@ function ReadableStreamToAsyncIterable(stream) {
             await cancelPromise;
             return { done: true, value: undefined };
         },
-        [Symbol.asyncIterator]() {
-            return this;
-        },
     };
+}
+// Cancels a stream whose reader was garbage collected before it finished. The reader's lock keeps
+// anything else from reading or cancelling the stream, so it would hold on to its connection.
+const droppedReaders = typeof FinalizationRegistry === 'undefined' ? undefined : (
+/* @__PURE__ */ new FinalizationRegistry(async (iter) => {
+    try {
+        await iter.return?.();
+    }
+    catch {
+        // The stream has already failed, e.g. because the request was aborted.
+    }
+}));
+async function* ReadableStreamToAsyncIterable(stream) {
+    const iter = readableStreamIterator(stream);
+    // Only this generator refers to `reader`, so it's collected once nothing can resume the generator.
+    const reader = {};
+    droppedReaders?.register(reader, iter, reader);
+    try {
+        for await (const chunk of { [Symbol.asyncIterator]: () => iter })
+            yield chunk;
+    }
+    finally {
+        droppedReaders?.unregister(reader);
+    }
 }
 /**
  * Cancels a ReadableStream we don't need to consume.
@@ -39596,6 +42078,509 @@ function propsForError(value) {
 
 /***/ }),
 
+/***/ 60773:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.traceHeaderNames = traceHeaderNames;
+const api_1 = __nccwpck_require__(84028);
+const log_1 = __nccwpck_require__(88991);
+/**
+ * The names, in lower case, of the headers that carry a trace context: those of W3C Trace Context
+ * and Baggage, and any other that the propagator the application registered writes. An HTTP
+ * instrumentation may add to them or replace them after a request is signed, so a signature must not
+ * cover them. A propagator that fails to list its fields adds none.
+ */
+function traceHeaderNames() {
+    const names = new Set(['traceparent', 'tracestate', 'baggage']);
+    try {
+        for (const name of api_1.propagation.fields()) {
+            names.add(name.toLowerCase());
+        }
+    }
+    catch (problem) {
+        // A signer calls this with no client at hand.
+        (0, log_1.defaultLogger)().debug('could not record telemetry', problem);
+    }
+    return names;
+}
+//# sourceMappingURL=trace-headers.js.map
+
+/***/ }),
+
+/***/ 91705:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ATTR_ANTHROPIC_SESSION_THREAD_ID = exports.ATTR_URL_SCHEME = exports.ATTR_URL_QUERY = exports.ATTR_URL_PATH = exports.ATTR_URL_FULL = exports.ATTR_SERVER_PORT = exports.ATTR_SERVER_ADDRESS = exports.ATTR_HTTP_ROUTE = exports.ATTR_HTTP_RESPONSE_STATUS_CODE = exports.ATTR_HTTP_REQUEST_RESEND_COUNT = exports.ATTR_HTTP_REQUEST_METHOD = exports.ATTR_GEN_AI_PROVIDER_NAME = exports.ATTR_GEN_AI_CONVERSATION_ID = exports.ATTR_ERROR_TYPE = void 0;
+exports.resolveOpenTelemetryOptions = resolveOpenTelemetryOptions;
+exports.getTracer = getTracer;
+exports.guardTracing = guardTracing;
+exports.startApiCallSpan = startApiCallSpan;
+exports.setCreatedIDAttribute = setCreatedIDAttribute;
+exports.recordAttempt = recordAttempt;
+exports.injectTraceHeaders = injectTraceHeaders;
+exports.endApiCallSpan = endApiCallSpan;
+exports.observeStream = observeStream;
+exports.endApiCallSpanWhenStreamEnds = endApiCallSpanWhenStreamEnds;
+exports.setErrorStatus = setErrorStatus;
+/**
+ * OpenTelemetry tracing of the client's API calls.
+ *
+ * Two terms recur in this file, and wherever else the SDK documents its spans:
+ *
+ * - An "API call" is one invocation of an SDK method that sends a request to the API. It
+ *   includes every retry, and reading the stream that the method returns. Its span, a `CLIENT`
+ *   span named after the method, is the "call span".
+ * - An "attempt" is one HTTP request within an API call, with its response when it receives
+ *   one. An API call that the SDK retries makes several attempts. This SDK emits no span per
+ *   attempt. The application's HTTP instrumentation, when it has one, emits each "attempt span"
+ *   as a child of the call span.
+ *
+ * Each SDK method starts the call span of the API call it makes (`startApiCallSpan`) and passes it
+ * down in the call's request options (`__span`), so every part of the call records on it as things
+ * happen. The client sends its trace context with each attempt (`injectTraceHeaders`), unless the
+ * `propagation` option is off, and ends it with the call's result: at once when the call fails or
+ * the response body has been parsed (`endApiCallSpan`), or, for a streamed body, when the
+ * application has read or closed the stream (`endApiCallSpanWhenStreamEnds`).
+ */
+const api_1 = __nccwpck_require__(84028);
+const error_1 = __nccwpck_require__(69955);
+const streaming_1 = __nccwpck_require__(14465);
+const errors_1 = __nccwpck_require__(17384);
+const headers_1 = __nccwpck_require__(60017);
+const env_1 = __nccwpck_require__(72894);
+const log_1 = __nccwpck_require__(88991);
+const INSTRUMENTATION_SCOPE = 'com.anthropic.sdk.typescript';
+// Attribute names of the OpenTelemetry semantic conventions, named as
+// `@opentelemetry/semantic-conventions` names them. They are copied rather than imported: that
+// package is not a dependency of this SDK.
+exports.ATTR_ERROR_TYPE = 'error.type';
+exports.ATTR_GEN_AI_CONVERSATION_ID = 'gen_ai.conversation.id';
+exports.ATTR_GEN_AI_PROVIDER_NAME = 'gen_ai.provider.name';
+exports.ATTR_HTTP_REQUEST_METHOD = 'http.request.method';
+exports.ATTR_HTTP_REQUEST_RESEND_COUNT = 'http.request.resend_count';
+exports.ATTR_HTTP_RESPONSE_STATUS_CODE = 'http.response.status_code';
+exports.ATTR_HTTP_ROUTE = 'http.route';
+exports.ATTR_SERVER_ADDRESS = 'server.address';
+exports.ATTR_SERVER_PORT = 'server.port';
+exports.ATTR_URL_FULL = 'url.full';
+exports.ATTR_URL_PATH = 'url.path';
+exports.ATTR_URL_QUERY = 'url.query';
+exports.ATTR_URL_SCHEME = 'url.scheme';
+// This API's own name, in the same style.
+exports.ATTR_ANTHROPIC_SESSION_THREAD_ID = 'anthropic.session.thread.id';
+/** The default `traces.maxContentBytes`. */
+const DEFAULT_MAX_CONTENT_BYTES = 750000;
+/**
+ * Settles `propagation` and the `traces` field of `option`, the `openTelemetry` client option. The
+ * environment variables apply only to a client that is given no option. An option that is given is
+ * complete: a field that it leaves unset has the default, whatever the environment says. A content
+ * mode or a size that is not valid is the default one.
+ *
+ * A client calls this once, when it is constructed, and keeps the result, which a
+ * `withOptions()` copy without its own option takes as it is. So a later change to the environment
+ * affects neither the client nor such a copy. The result is frozen.
+ */
+function resolveOpenTelemetryOptions(option) {
+    // `false` is short for `{ traces: false }`.
+    const { tracerProvider, propagation, traces } = option === false ? { traces: false } : option ?? optionFromEnv();
+    const { enabled, contentMode, maxContentBytes } = typeof traces === 'boolean' ? { enabled: traces } : traces ?? {};
+    return Object.freeze({
+        tracerProvider,
+        propagation: propagation ?? true,
+        traces: Object.freeze({
+            enabled: enabled ?? true,
+            contentMode: contentMode === 'content' ? 'content' : 'metadata_only',
+            maxContentBytes: maxContentBytes !== undefined && Number.isInteger(maxContentBytes) && maxContentBytes >= 1 ?
+                maxContentBytes
+                : DEFAULT_MAX_CONTENT_BYTES,
+        }),
+    });
+}
+/** What the environment variables give, for a client that is given no `openTelemetry` option. */
+function optionFromEnv() {
+    return {
+        propagation: (0, env_1.readEnv)('ANTHROPIC_OPEN_TELEMETRY_PROPAGATION')?.toLowerCase() !== 'false',
+        traces: {
+            enabled: (0, env_1.readEnv)('ANTHROPIC_OPEN_TELEMETRY')?.toLowerCase() !== 'false',
+            contentMode: (0, env_1.readEnv)('ANTHROPIC_OPEN_TELEMETRY_TRACES_CONTENT_MODE')?.toLowerCase() === 'content' ?
+                'content'
+                : 'metadata_only',
+            // The variable holds decimal digits only: `1e3` and `0x10` are not sizes.
+            maxContentBytes: Number(/^\d+$/.exec((0, env_1.readEnv)('ANTHROPIC_OPEN_TELEMETRY_TRACES_MAX_CONTENT_BYTES') ?? '')?.[0] ?? NaN),
+        },
+    };
+}
+/**
+ * The tracer for a client with the settled `openTelemetry` option `option`, or `undefined` when
+ * the client's spans are disabled.
+ * `version` is the SDK's version. It is a parameter because some packages build
+ * `src/internal` without `src/version.ts`. The client of another platform's package gives
+ * `platform`, which the name of the tracer's scope then ends with, and that package's `version`.
+ */
+function getTracer(option, version, platform) {
+    if (!option.traces.enabled) {
+        return undefined;
+    }
+    const scope = platform !== undefined ? `${INSTRUMENTATION_SCOPE}.${platform}` : INSTRUMENTATION_SCOPE;
+    return (option.tracerProvider ?? api_1.trace.getTracerProvider()).getTracer(scope, version);
+}
+/**
+ * Runs `step`, a step of tracing that calls the application's OpenTelemetry code: its tracer
+ * provider, sampler, span processors or propagator. A failure of telemetry never fails an API call,
+ * so what `step` throws goes to the logger of `client`, when there is one, and the result is then
+ * `undefined`: the SDK goes on as if tracing were off for that step.
+ */
+function guardTracing(client, step) {
+    try {
+        return step();
+    }
+    catch (problem) {
+        if (client) {
+            (0, log_1.loggerFor)(client).debug('could not record telemetry', problem);
+        }
+        return undefined;
+    }
+}
+/**
+ * Starts the call span of the API call that an SDK method of `client` is about to make with
+ * `options`, as a child of the current span. `name` is the span's name, and `settings` is what
+ * else the method says of the call. The method passes the result down in the call's request
+ * options, as `__span`.
+ *
+ * When `options` already has a span, that span is the result: a helper that calls an SDK method
+ * starts the span itself, to record on it, and the method's API call uses that span instead of
+ * starting another.
+ *
+ * Returns `undefined` when the client's spans are disabled, when the span failed to start
+ * ({@link guardTracing}), or when the span neither records nor propagates a trace context: such a
+ * span has no effect, so the API call runs as if tracing were off. With `propagation` off, a span
+ * with a valid context counts as propagating: it is the active span during the attempts, which the
+ * application's HTTP instrumentation continues.
+ */
+function startApiCallSpan(client, name, options, settings) {
+    if (options?.__span) {
+        return options.__span;
+    }
+    const tracer = client._tracer;
+    if (!tracer) {
+        return undefined;
+    }
+    return guardTracing(client, () => {
+        const startTime = Date.now();
+        // A Session thread is a conversation, so its ID in the path stands in for one the application
+        // did not give.
+        const threadID = settings?.attributes?.[exports.ATTR_ANTHROPIC_SESSION_THREAD_ID];
+        const conversationId = options?.openTelemetry?.conversationId ?? (typeof threadID === 'string' ? threadID : undefined);
+        const span = tracer.startSpan(name, {
+            kind: api_1.SpanKind.CLIENT,
+            // On the span from its start, with what the method gives, for a sampler to decide on.
+            attributes: {
+                [exports.ATTR_GEN_AI_PROVIDER_NAME]: client._genAIProviderName,
+                ...serverAttributes(client.baseURL),
+                ...(conversationId != null ? { [exports.ATTR_GEN_AI_CONVERSATION_ID]: conversationId } : undefined),
+                ...(settings?.route != null ? { [exports.ATTR_HTTP_ROUTE]: settings.route } : undefined),
+                ...settings?.attributes,
+            },
+        });
+        if (!span.isRecording() &&
+            !(client.openTelemetry.propagation ?
+                Object.keys(injectContext(span)).length > 0
+                : api_1.trace.isSpanContextValid(span.spanContext()))) {
+            return undefined;
+        }
+        return { ...settings, span, name, startTime };
+    });
+}
+/**
+ * Sets on `call`, the call span of an API call whose method creates one object, the ID of that
+ * object from `data`, the call's parsed response: its `id`, or the field that the method named.
+ * Does nothing for any other call, or when `data` has no string there.
+ */
+function setCreatedIDAttribute(call, data) {
+    if (call.createdIDAttribute === undefined || typeof data !== 'object' || data === null) {
+        return;
+    }
+    const id = data[call.createdIDField ?? 'id'];
+    if (typeof id === 'string') {
+        call.span.setAttribute(call.createdIDAttribute, id);
+    }
+}
+/**
+ * `server.address` and `server.port` for the server at `url`, a client's base URL.
+ */
+function serverAttributes(url) {
+    try {
+        const { hostname, port, protocol } = new URL(url);
+        return {
+            // `URL.hostname` keeps an IPv6 literal's brackets, which delimit it in a URL;
+            // `server.address` is the bare address.
+            [exports.ATTR_SERVER_ADDRESS]: hostname.replace(/^\[(.*)\]$/, '$1'),
+            [exports.ATTR_SERVER_PORT]: port ? Number(port)
+                : protocol === 'http:' ? 80
+                    : 443,
+        };
+    }
+    catch {
+        return {};
+    }
+}
+/**
+ * Records on `call` that the client is about to make an attempt of the call: a request with
+ * `method` to `url`. The first attempt gives the span `http.request.method` and the `url.*`
+ * attributes, which a later attempt never replaces. Each later attempt, whatever its reason,
+ * counts in `http.request.resend_count`, which a call with one attempt does not have.
+ *
+ * A query with a parameter whose value is content ({@link CONTENT_QUERY_PARAMS}, and the call's own
+ * `contentQueryParams`) makes `url.query` and `url.full` content too, which the span has only when
+ * `recordsContent` is true.
+ */
+function recordAttempt(call, method, url, recordsContent = false) {
+    call.attempts = (call.attempts ?? 0) + 1;
+    if (call.attempts > 1) {
+        call.span.setAttribute(exports.ATTR_HTTP_REQUEST_RESEND_COUNT, call.attempts - 1);
+        return;
+    }
+    call.span.setAttribute(exports.ATTR_HTTP_REQUEST_METHOD, method);
+    try {
+        const { protocol, host, pathname, search } = new URL(url);
+        const query = definedQuery(search.slice(1), call.queryParams, call.contentQueryParams);
+        call.span.setAttributes({
+            [exports.ATTR_URL_SCHEME]: protocol.slice(0, -1),
+            [exports.ATTR_URL_PATH]: pathname,
+        });
+        if (query?.content && !recordsContent) {
+            return;
+        }
+        call.span.setAttributes({
+            ...(query !== undefined ? { [exports.ATTR_URL_QUERY]: query.value } : undefined),
+            // With the recorded query, not the one sent.
+            [exports.ATTR_URL_FULL]: `${protocol}//${host}${pathname}${query !== undefined ? `?${query.value}` : ''}`,
+        });
+    }
+    catch { }
+}
+/**
+ * The query parameters whose value is content on every endpoint that defines them.
+ */
+const CONTENT_QUERY_PARAMS = ['email', 'path_prefix', 'expected_content_sha256'];
+/**
+ * The parts of `query`, a query string as sent, whose parameter is one of `defined`, as they were
+ * sent and in their order, or `undefined` when there is none. A part's parameter is its
+ * percent-decoded name, or that name without a final `[]`, which is how an array parameter `ids`
+ * is sent: a name with other brackets, such as `created_at[gte]`, has to be one of `defined` as it
+ * is. `content` says whether one of those parameters is one of {@link CONTENT_QUERY_PARAMS} or of
+ * `contentParams`.
+ */
+function definedQuery(query, defined, contentParams) {
+    if (!query || !defined?.length) {
+        return undefined;
+    }
+    let content = false;
+    const parts = query.split('&').filter((part) => {
+        try {
+            const name = decodeURIComponent(part.split('=', 1)[0]);
+            const param = defined.includes(name) || !name.endsWith('[]') ? name : name.slice(0, -2);
+            if (!defined.includes(param)) {
+                return false;
+            }
+            content || (content = CONTENT_QUERY_PARAMS.includes(param) || !!contentParams?.includes(param));
+            return true;
+        }
+        catch {
+            return false;
+        }
+    });
+    return parts.length ? { value: parts.join('&'), content } : undefined;
+}
+/**
+ * Returns `headers` with the trace context of `span` injected, as the propagator the
+ * application registered writes it, in place of any such headers already present. The client
+ * sends these with each attempt, so a retry carries the context afresh.
+ */
+function injectTraceHeaders(span, headers) {
+    // `fetchOptions` can replace the built headers with a plain object.
+    const values = (0, headers_1.buildHeaders)([headers]).values;
+    for (const [key, value] of Object.entries(injectContext(span))) {
+        values.set(key, value);
+    }
+    return values;
+}
+/**
+ * Ends `span`, the call span of an API call, now that the call has `result`. The span gets
+ * `http.response.status_code` when a response arrived, and its status: `ERROR` with `error.type`
+ * when the call failed, none when the application aborted it, and `OK` otherwise. The span of a
+ * streamed body that the application has yet to read ends through
+ * {@link endApiCallSpanWhenStreamEnds} instead.
+ *
+ * Does nothing to a span that is not recording, such as one that already ended.
+ */
+function endApiCallSpan(span, result) {
+    if (!span.isRecording()) {
+        return;
+    }
+    setResponseStatusCode(span, result);
+    switch (result.status) {
+        case 'success':
+            span.setStatus({ code: api_1.SpanStatusCode.OK });
+            break;
+        case 'error':
+            setErrorStatus(span, result.error);
+            break;
+    }
+    span.end();
+}
+/**
+ * Reports the application's read of `stream` to `observer`, by replacing the iterator of `stream`
+ * in place. `signal` is the abort signal of the request that `stream` reads. Only the first
+ * iterator is observed. What the callbacks throw is dropped.
+ */
+function observeStream(stream, signal, observer) {
+    // Unbound, so that the abort listener, which `signal` keeps, does not keep an unread `stream`.
+    const iterate = stream[Symbol.asyncIterator];
+    let ended = false;
+    const end = (how) => {
+        if (ended)
+            return;
+        ended = true;
+        signal.removeEventListener('abort', cancel);
+        try {
+            observer.onEnd(how);
+        }
+        catch { }
+    };
+    const cancel = () => end({ reason: 'canceled' });
+    if (signal.aborted)
+        return cancel();
+    signal.addEventListener('abort', cancel, { once: true });
+    let observed = false;
+    stream[Symbol.asyncIterator] = function () {
+        const source = iterate.call(this);
+        if (observed)
+            return source;
+        observed = true;
+        // From here the iterator sees every way the read can end. `Stream` also aborts its own
+        // controller when it fails or is closed, which must not count as the application's abort.
+        signal.removeEventListener('abort', cancel);
+        const iterator = {
+            async next() {
+                let result;
+                try {
+                    result = await source.next();
+                }
+                catch (error) {
+                    end({ reason: 'failed', error });
+                    throw error;
+                }
+                if (result.done) {
+                    // `Stream` ends quietly when the application aborts the request.
+                    end({ reason: signal.aborted ? 'canceled' : 'completed' });
+                }
+                else if (!ended) {
+                    try {
+                        observer.onItem?.(result.value);
+                    }
+                    catch { }
+                }
+                return result;
+            },
+            async return(value) {
+                cancel();
+                return (await source.return?.(value)) ?? { done: true, value };
+            },
+            async throw(error) {
+                cancel();
+                if (source.throw)
+                    return source.throw(error);
+                throw error;
+            },
+            [Symbol.asyncIterator]: () => iterator,
+        };
+        return iterator;
+    };
+}
+/**
+ * Ends `span`, the call span of an API call, when the application's read of its streamed response
+ * body `stream` ends. Server-sent events have no end event, so the server ending them is not `OK`;
+ * any other body is complete at its end.
+ */
+function endApiCallSpanWhenStreamEnds(span, stream, props) {
+    if (!span.isRecording())
+        return;
+    span.setAttribute(exports.ATTR_HTTP_RESPONSE_STATUS_CODE, props.response.status);
+    const isSSE = stream instanceof streaming_1.Stream;
+    observeStream(stream, props.controller.signal, {
+        onEnd(end) {
+            if (end.reason === 'failed')
+                setErrorStatus(span, end.error);
+            else if (end.reason === 'completed' && !isSSE) {
+                span.setStatus({ code: api_1.SpanStatusCode.OK });
+            }
+            span.end();
+        },
+    });
+}
+/**
+ * Sets `http.response.status_code` on the call span from the response in `result`, or from its
+ * error when that is an error response.
+ */
+function setResponseStatusCode(span, result) {
+    const status = result.response?.status ??
+        (result.status === 'error' && result.error instanceof error_1.APIError ? result.error.status : undefined);
+    if (status !== undefined) {
+        span.setAttribute(exports.ATTR_HTTP_RESPONSE_STATUS_CODE, status);
+    }
+}
+/**
+ * Gives `span` the status of an operation that failed with `error`: `ERROR`, with `error.type`
+ * set to `type` or else derived from `error`. An abort by the application is a cancellation,
+ * not a failure, and leaves the status unset.
+ */
+function setErrorStatus(span, error, type) {
+    if (error instanceof error_1.APIUserAbortError || (0, errors_1.isAbortError)(error)) {
+        return;
+    }
+    span.setStatus({ code: api_1.SpanStatusCode.ERROR });
+    span.setAttribute(exports.ATTR_ERROR_TYPE, type ?? errorType(error));
+}
+/**
+ * The headers that carry `span`'s trace context, from the propagator the application registered.
+ */
+function injectContext(span) {
+    const carrier = {};
+    api_1.propagation.inject(api_1.trace.setSpan(api_1.context.active(), span), carrier);
+    return carrier;
+}
+/**
+ * The `error.type` of an operation that failed with `error`. An error response has the type of
+ * its error envelope when the API sent one, and its status code otherwise.
+ */
+function errorType(error) {
+    if (error instanceof error_1.APIConnectionTimeoutError) {
+        return 'client_timeout_error';
+    }
+    if (error instanceof error_1.APIConnectionError) {
+        return 'connection_error';
+    }
+    if (error instanceof error_1.APIError) {
+        if (error.type) {
+            return error.type;
+        }
+        if (error.status !== undefined) {
+            return String(error.status);
+        }
+    }
+    return 'client_error';
+}
+//# sourceMappingURL=tracing.js.map
+
+/***/ }),
+
 /***/ 14839:
 /***/ ((__unused_webpack_module, exports) => {
 
@@ -39695,6 +42680,7 @@ exports.createForm = exports.multipartFormRequestOptions = exports.maybeMultipar
 exports.makeFile = makeFile;
 exports.getName = getName;
 const shims_1 = __nccwpck_require__(70693);
+const tracing_1 = __nccwpck_require__(91705);
 const checkFileSupport = () => {
     if (typeof File === 'undefined') {
         const { process } = globalThis;
@@ -39737,7 +42723,17 @@ const maybeMultipartFormRequestOptions = async (opts, fetch) => {
 };
 exports.maybeMultipartFormRequestOptions = maybeMultipartFormRequestOptions;
 const multipartFormRequestOptions = async (opts, fetch, stripFilenames = true) => {
-    return { ...opts, body: await (0, exports.createForm)(opts.body, fetch, stripFilenames) };
+    try {
+        return { ...opts, body: await (0, exports.createForm)(opts.body, fetch, stripFilenames) };
+    }
+    catch (error) {
+        // The client, which ends the call span of a failed call, never gets these options.
+        const span = opts.__span?.span;
+        if (span) {
+            (0, tracing_1.guardTracing)(typeof fetch === 'function' ? undefined : fetch, () => (0, tracing_1.endApiCallSpan)(span, { status: 'error', options: opts, error }));
+        }
+        throw error;
+    }
 };
 exports.multipartFormRequestOptions = multipartFormRequestOptions;
 const supportsFormDataMap = /* @__PURE__ */ new WeakMap();
@@ -40250,6 +43246,7 @@ const formatRequestDetails = (details) => {
         details.headers = Object.fromEntries((details.headers instanceof Headers ? [...details.headers] : Object.entries(details.headers)).map(([name, value]) => [
             name,
             (name.toLowerCase() === 'authorization' ||
+                name.toLowerCase() === 'proxy-authorization' ||
                 name.toLowerCase() === 'api-key' ||
                 name.toLowerCase() === 'x-api-key' ||
                 name.toLowerCase() === 'cookie' ||
@@ -40320,6 +43317,13 @@ const createPathTagFunction = (pathEncoder = encodeURIPath) => function path(sta
                     .slice(8, -1)} is not a valid path parameter`,
             });
         }
+        if (!postPath && encoded === '') {
+            invalidSegments.push({
+                start: previousValue.length + currentValue.length,
+                length: 0,
+                error: 'Value "" can\'t be safely passed as a path parameter',
+            });
+        }
         return previousValue + currentValue + (index === params.length ? '' : encoded);
     }, '');
     const pathOnly = path.split(/[?#]/, 1)[0];
@@ -40335,13 +43339,13 @@ const createPathTagFunction = (pathEncoder = encodeURIPath) => function path(sta
     }
     invalidSegments.sort((a, b) => a.start - b.start);
     if (invalidSegments.length > 0) {
-        let lastEnd = 0;
-        const underline = invalidSegments.reduce((acc, segment) => {
-            const spaces = ' '.repeat(segment.start - lastEnd);
-            const arrows = '^'.repeat(segment.length);
-            lastEnd = segment.start + segment.length;
-            return acc + spaces + arrows;
-        }, '');
+        const marks = [];
+        for (const segment of invalidSegments) {
+            for (let i = segment.start; i < segment.start + Math.max(1, segment.length); i++) {
+                marks[i] = '^';
+            }
+        }
+        const underline = Array.from(marks, (mark) => mark ?? ' ').join('');
         throw new error_1.AnthropicError(`Path parameters result in path with invalid segments:\n${invalidSegments
             .map((e) => e.error)
             .join('\n')}\n${path}\n${underline}`);
@@ -40350,7 +43354,7 @@ const createPathTagFunction = (pathEncoder = encodeURIPath) => function path(sta
 };
 exports.createPathTagFunction = createPathTagFunction;
 /**
- * URI-encodes path params and ensures no unsafe /./ or /../ path segments are introduced.
+ * URI-encodes path params and ensures that none before any ? or # is empty and none introduces an unsafe /./ or /../ path segment.
  */
 exports.path = (0, exports.createPathTagFunction)(encodeURIPath);
 //# sourceMappingURL=path.js.map
@@ -40610,7 +43614,7 @@ function checkNever(_value) { }
 
 "use strict";
 
-var _BetaMessageStream_instances, _BetaMessageStream_currentMessageSnapshot, _BetaMessageStream_params, _BetaMessageStream_connectedPromise, _BetaMessageStream_resolveConnectedPromise, _BetaMessageStream_rejectConnectedPromise, _BetaMessageStream_endPromise, _BetaMessageStream_resolveEndPromise, _BetaMessageStream_rejectEndPromise, _BetaMessageStream_listeners, _BetaMessageStream_ended, _BetaMessageStream_errored, _BetaMessageStream_aborted, _BetaMessageStream_catchingPromiseCreated, _BetaMessageStream_response, _BetaMessageStream_request_id, _BetaMessageStream_workspace_id, _BetaMessageStream_logger, _BetaMessageStream_getFinalMessage, _BetaMessageStream_getFinalText, _BetaMessageStream_handleError, _BetaMessageStream_beginRequest, _BetaMessageStream_addStreamEvent, _BetaMessageStream_endRequest, _BetaMessageStream_accumulateMessage, _BetaMessageStream_toolInputParseError;
+var _BetaMessageStream_instances, _BetaMessageStream_currentMessageSnapshot, _BetaMessageStream_params, _BetaMessageStream_connectedPromise, _BetaMessageStream_resolveConnectedPromise, _BetaMessageStream_rejectConnectedPromise, _BetaMessageStream_endPromise, _BetaMessageStream_resolveEndPromise, _BetaMessageStream_rejectEndPromise, _BetaMessageStream_listeners, _BetaMessageStream_ended, _BetaMessageStream_errored, _BetaMessageStream_aborted, _BetaMessageStream_catchingPromiseCreated, _BetaMessageStream_response, _BetaMessageStream_request_id, _BetaMessageStream_workspace_id, _BetaMessageStream_logger, _BetaMessageStream_client, _BetaMessageStream_span, _BetaMessageStream_getFinalMessage, _BetaMessageStream_getFinalText, _BetaMessageStream_handleError, _BetaMessageStream_beginRequest, _BetaMessageStream_addStreamEvent, _BetaMessageStream_endRequest, _BetaMessageStream_accumulateMessage, _BetaMessageStream_toolInputParseError;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.BetaMessageStream = void 0;
 const tslib_1 = __nccwpck_require__(14839);
@@ -40620,6 +43624,8 @@ const errors_1 = __nccwpck_require__(17384);
 const values_1 = __nccwpck_require__(17999);
 const streaming_1 = __nccwpck_require__(33101);
 const beta_parser_1 = __nccwpck_require__(30571);
+const beta_messages_request_1 = __nccwpck_require__(6222);
+const tracing_1 = __nccwpck_require__(38225);
 const message_stream_utils_1 = __nccwpck_require__(70289);
 function tracksToolInput(content) {
     return content.type === 'tool_use' || content.type === 'server_tool_use' || content.type === 'mcp_tool_use';
@@ -40648,8 +43654,16 @@ var BetaMessageStream = /* @__PURE__ */ (() => {
             _BetaMessageStream_request_id.set(this, void 0);
             _BetaMessageStream_workspace_id.set(this, void 0);
             _BetaMessageStream_logger.set(this, void 0);
+            // The client that makes the request, and the call span of the request, to record the message on.
+            // Both are set only for a stream that an SDK method created.
+            _BetaMessageStream_client.set(this, void 0);
+            _BetaMessageStream_span.set(this, void 0);
             _BetaMessageStream_handleError.set(this, (error) => {
                 tslib_1.__classPrivateFieldSet(this, _BetaMessageStream_errored, true, "f");
+                // The stream ignores the events after an error, so its message stops being what the API sent.
+                if (tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_span, "f")) {
+                    tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_span, "f").streamed = undefined;
+                }
                 if ((0, errors_1.isAbortError)(error)) {
                     error = new error_1.APIUserAbortError();
                 }
@@ -40684,6 +43698,7 @@ var BetaMessageStream = /* @__PURE__ */ (() => {
             tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_endPromise, "f").catch(() => { });
             tslib_1.__classPrivateFieldSet(this, _BetaMessageStream_params, params, "f");
             tslib_1.__classPrivateFieldSet(this, _BetaMessageStream_logger, opts?.logger ?? console, "f");
+            tslib_1.__classPrivateFieldSet(this, _BetaMessageStream_client, opts?.client, "f");
         }
         get response() {
             return tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_response, "f");
@@ -40729,8 +43744,11 @@ var BetaMessageStream = /* @__PURE__ */ (() => {
             runner._run(() => runner._fromReadableStream(stream));
             return runner;
         }
-        static createMessage(messages, params, options, { logger } = {}) {
-            const runner = new BetaMessageStream(params, { logger });
+        static createMessage(messages, params, options, { logger, client, } = {}) {
+            const runner = new BetaMessageStream(params, {
+                logger,
+                client,
+            });
             for (const message of params.messages) {
                 runner._addMessageParam(message);
             }
@@ -40764,12 +43782,33 @@ var BetaMessageStream = /* @__PURE__ */ (() => {
             }
             try {
                 tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_instances, "m", _BetaMessageStream_beginRequest).call(this);
+                // Started here, where a throw fails the stream, and kept to record the final message on.
+                // `create()` below gets it in its options, so it uses this span instead of starting its own.
+                tslib_1.__classPrivateFieldSet(this, _BetaMessageStream_span, options?.__span ?? (tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_client, "f") && (0, beta_messages_request_1.startMessagesStreamSpan)(tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_client, "f"), params, options)), "f");
                 const { response, data: stream } = await messages
-                    .create({ ...params, stream: true }, { ...options, signal: this.controller.signal })
+                    .create({ ...params, stream: true }, { ...options, __span: tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_span, "f"), signal: this.controller.signal })
                     .withResponse();
-                this._connected(response);
+                try {
+                    this._connected(response);
+                }
+                catch (error) {
+                    // Nothing reads the stream after a `connect` listener throws: closing it ends its span.
+                    if (tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_span, "f")) {
+                        tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_span, "f").failure = error;
+                    }
+                    stream.controller.abort();
+                    throw error;
+                }
                 for await (const event of stream) {
-                    tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_instances, "m", _BetaMessageStream_addStreamEvent).call(this, event);
+                    try {
+                        tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_instances, "m", _BetaMessageStream_addStreamEvent).call(this, event);
+                    }
+                    catch (error) {
+                        if (tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_span, "f")) {
+                            tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_span, "f").failure = error;
+                        }
+                        throw error;
+                    }
                 }
                 if (stream.controller.signal?.aborted) {
                     throw new error_1.APIUserAbortError();
@@ -40931,6 +43970,12 @@ var BetaMessageStream = /* @__PURE__ */ (() => {
                 this._emit('finalMessage', tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_instances, "m", _BetaMessageStream_getFinalMessage).call(this));
             }
         }
+        /** @internal A method so that the tool runner's stream can act before and after an event's listeners. */
+        _deliverEvent(event, snapshot) {
+            this._emit('_rawEvent', event);
+            if (snapshot)
+                this._emit('streamEvent', event, snapshot);
+        }
         async _fromReadableStream(readableStream, options) {
             const signal = options?.signal;
             let abortHandler;
@@ -40958,7 +44003,7 @@ var BetaMessageStream = /* @__PURE__ */ (() => {
                 }
             }
         }
-        [(_BetaMessageStream_currentMessageSnapshot = new WeakMap(), _BetaMessageStream_params = new WeakMap(), _BetaMessageStream_connectedPromise = new WeakMap(), _BetaMessageStream_resolveConnectedPromise = new WeakMap(), _BetaMessageStream_rejectConnectedPromise = new WeakMap(), _BetaMessageStream_endPromise = new WeakMap(), _BetaMessageStream_resolveEndPromise = new WeakMap(), _BetaMessageStream_rejectEndPromise = new WeakMap(), _BetaMessageStream_listeners = new WeakMap(), _BetaMessageStream_ended = new WeakMap(), _BetaMessageStream_errored = new WeakMap(), _BetaMessageStream_aborted = new WeakMap(), _BetaMessageStream_catchingPromiseCreated = new WeakMap(), _BetaMessageStream_response = new WeakMap(), _BetaMessageStream_request_id = new WeakMap(), _BetaMessageStream_workspace_id = new WeakMap(), _BetaMessageStream_logger = new WeakMap(), _BetaMessageStream_handleError = new WeakMap(), _BetaMessageStream_instances = new WeakSet(), _BetaMessageStream_getFinalMessage = function _BetaMessageStream_getFinalMessage() {
+        [(_BetaMessageStream_currentMessageSnapshot = new WeakMap(), _BetaMessageStream_params = new WeakMap(), _BetaMessageStream_connectedPromise = new WeakMap(), _BetaMessageStream_resolveConnectedPromise = new WeakMap(), _BetaMessageStream_rejectConnectedPromise = new WeakMap(), _BetaMessageStream_endPromise = new WeakMap(), _BetaMessageStream_resolveEndPromise = new WeakMap(), _BetaMessageStream_rejectEndPromise = new WeakMap(), _BetaMessageStream_listeners = new WeakMap(), _BetaMessageStream_ended = new WeakMap(), _BetaMessageStream_errored = new WeakMap(), _BetaMessageStream_aborted = new WeakMap(), _BetaMessageStream_catchingPromiseCreated = new WeakMap(), _BetaMessageStream_response = new WeakMap(), _BetaMessageStream_request_id = new WeakMap(), _BetaMessageStream_workspace_id = new WeakMap(), _BetaMessageStream_logger = new WeakMap(), _BetaMessageStream_client = new WeakMap(), _BetaMessageStream_span = new WeakMap(), _BetaMessageStream_handleError = new WeakMap(), _BetaMessageStream_instances = new WeakSet(), _BetaMessageStream_getFinalMessage = function _BetaMessageStream_getFinalMessage() {
             if (this.receivedMessages.length === 0) {
                 throw new error_1.AnthropicError('stream ended without producing a Message with role=assistant');
             }
@@ -40983,7 +44028,9 @@ var BetaMessageStream = /* @__PURE__ */ (() => {
             if (this.ended)
                 return;
             const messageSnapshot = tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_instances, "m", _BetaMessageStream_accumulateMessage).call(this, event);
-            this._emit('streamEvent', event, messageSnapshot);
+            this._deliverEvent(event, messageSnapshot);
+            if (!messageSnapshot)
+                return;
             switch (event.type) {
                 case 'content_block_delta': {
                     const content = messageSnapshot.content.at(-1);
@@ -41038,6 +44085,9 @@ var BetaMessageStream = /* @__PURE__ */ (() => {
                     break;
                 }
                 case 'message_stop': {
+                    if (tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_client, "f") && tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_span, "f") && tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_params, "f")) {
+                        (0, tracing_1.recordStreamedMessageContent)(tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_client, "f"), tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_span, "f"), tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_params, "f"), messageSnapshot);
+                    }
                     // Assertion needed until the generated request and response types of `tool_listing` agree.
                     this._addMessageParam(messageSnapshot);
                     this._addMessage((0, beta_parser_1.maybeParseBetaMessage)(messageSnapshot, tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_params, "f"), { logger: tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_logger, "f") }), true);
@@ -41049,6 +44099,9 @@ var BetaMessageStream = /* @__PURE__ */ (() => {
                 }
                 case 'message_start': {
                     tslib_1.__classPrivateFieldSet(this, _BetaMessageStream_currentMessageSnapshot, messageSnapshot, "f");
+                    if (tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_span, "f") && tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_params, "f")) {
+                        tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_span, "f").streamed = { body: tslib_1.__classPrivateFieldGet(this, _BetaMessageStream_params, "f"), message: messageSnapshot };
+                    }
                     break;
                 }
                 case 'content_block_start':
@@ -41073,9 +44126,8 @@ var BetaMessageStream = /* @__PURE__ */ (() => {
                 }
                 return event.message;
             }
-            if (!snapshot) {
-                throw new error_1.AnthropicError(`Unexpected event order, got ${event.type} before "message_start"`);
-            }
+            if (!snapshot)
+                return;
             switch (event.type) {
                 case 'message_stop':
                     return snapshot;
@@ -41208,6 +44260,8 @@ var BetaMessageStream = /* @__PURE__ */ (() => {
                     }
                     return snapshot;
                 }
+                default:
+                    return snapshot;
             }
         }, _BetaMessageStream_toolInputParseError = function _BetaMessageStream_toolInputParseError(block, err) {
             const jsonBuf = block[message_stream_utils_1.JSON_BUF_PROPERTY];
@@ -41216,7 +44270,7 @@ var BetaMessageStream = /* @__PURE__ */ (() => {
             const pushQueue = [];
             const readQueue = [];
             let done = false;
-            this.on('streamEvent', (event) => {
+            this.on('_rawEvent', (event) => {
                 const reader = readQueue.shift();
                 if (reader) {
                     reader.resolve(event);
@@ -41280,7 +44334,7 @@ exports.BetaMessageStream = BetaMessageStream;
 
 "use strict";
 
-var _MessageStream_instances, _MessageStream_currentMessageSnapshot, _MessageStream_params, _MessageStream_connectedPromise, _MessageStream_resolveConnectedPromise, _MessageStream_rejectConnectedPromise, _MessageStream_endPromise, _MessageStream_resolveEndPromise, _MessageStream_rejectEndPromise, _MessageStream_listeners, _MessageStream_ended, _MessageStream_errored, _MessageStream_aborted, _MessageStream_catchingPromiseCreated, _MessageStream_response, _MessageStream_request_id, _MessageStream_workspace_id, _MessageStream_logger, _MessageStream_getFinalMessage, _MessageStream_getFinalText, _MessageStream_handleError, _MessageStream_beginRequest, _MessageStream_addStreamEvent, _MessageStream_endRequest, _MessageStream_accumulateMessage;
+var _MessageStream_instances, _MessageStream_currentMessageSnapshot, _MessageStream_params, _MessageStream_connectedPromise, _MessageStream_resolveConnectedPromise, _MessageStream_rejectConnectedPromise, _MessageStream_endPromise, _MessageStream_resolveEndPromise, _MessageStream_rejectEndPromise, _MessageStream_listeners, _MessageStream_ended, _MessageStream_errored, _MessageStream_aborted, _MessageStream_catchingPromiseCreated, _MessageStream_response, _MessageStream_request_id, _MessageStream_workspace_id, _MessageStream_logger, _MessageStream_client, _MessageStream_span, _MessageStream_getFinalMessage, _MessageStream_getFinalText, _MessageStream_handleError, _MessageStream_beginRequest, _MessageStream_addStreamEvent, _MessageStream_endRequest, _MessageStream_accumulateMessage;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.MessageStream = void 0;
 const tslib_1 = __nccwpck_require__(14839);
@@ -41290,6 +44344,8 @@ const values_1 = __nccwpck_require__(17999);
 const error_1 = __nccwpck_require__(97735);
 const streaming_1 = __nccwpck_require__(33101);
 const parser_1 = __nccwpck_require__(60314);
+const messages_request_1 = __nccwpck_require__(74871);
+const tracing_1 = __nccwpck_require__(38225);
 const message_stream_utils_1 = __nccwpck_require__(70289);
 function tracksToolInput(content) {
     return content.type === 'tool_use' || content.type === 'server_tool_use';
@@ -41318,8 +44374,16 @@ var MessageStream = /* @__PURE__ */ (() => {
             _MessageStream_request_id.set(this, void 0);
             _MessageStream_workspace_id.set(this, void 0);
             _MessageStream_logger.set(this, void 0);
+            // The client that makes the request, and the call span of the request, to record the message on.
+            // Both are set only for a stream that an SDK method created.
+            _MessageStream_client.set(this, void 0);
+            _MessageStream_span.set(this, void 0);
             _MessageStream_handleError.set(this, (error) => {
                 tslib_1.__classPrivateFieldSet(this, _MessageStream_errored, true, "f");
+                // The stream ignores the events after an error, so its message stops being what the API sent.
+                if (tslib_1.__classPrivateFieldGet(this, _MessageStream_span, "f")) {
+                    tslib_1.__classPrivateFieldGet(this, _MessageStream_span, "f").streamed = undefined;
+                }
                 if ((0, errors_1.isAbortError)(error)) {
                     error = new error_1.APIUserAbortError();
                 }
@@ -41354,6 +44418,7 @@ var MessageStream = /* @__PURE__ */ (() => {
             tslib_1.__classPrivateFieldGet(this, _MessageStream_endPromise, "f").catch(() => { });
             tslib_1.__classPrivateFieldSet(this, _MessageStream_params, params, "f");
             tslib_1.__classPrivateFieldSet(this, _MessageStream_logger, opts?.logger ?? console, "f");
+            tslib_1.__classPrivateFieldSet(this, _MessageStream_client, opts?.client, "f");
         }
         get response() {
             return tslib_1.__classPrivateFieldGet(this, _MessageStream_response, "f");
@@ -41399,8 +44464,8 @@ var MessageStream = /* @__PURE__ */ (() => {
             runner._run(() => runner._fromReadableStream(stream));
             return runner;
         }
-        static createMessage(messages, params, options, { logger } = {}) {
-            const runner = new MessageStream(params, { logger });
+        static createMessage(messages, params, options, { logger, client, } = {}) {
+            const runner = new MessageStream(params, { logger, client });
             for (const message of params.messages) {
                 runner._addMessageParam(message);
             }
@@ -41434,12 +44499,33 @@ var MessageStream = /* @__PURE__ */ (() => {
             }
             try {
                 tslib_1.__classPrivateFieldGet(this, _MessageStream_instances, "m", _MessageStream_beginRequest).call(this);
+                // Started here, where a throw fails the stream, and kept to record the final message on.
+                // `create()` below gets it in its options, so it uses this span instead of starting its own.
+                tslib_1.__classPrivateFieldSet(this, _MessageStream_span, options?.__span ?? (tslib_1.__classPrivateFieldGet(this, _MessageStream_client, "f") && (0, messages_request_1.startMessagesStreamSpan)(tslib_1.__classPrivateFieldGet(this, _MessageStream_client, "f"), params, options)), "f");
                 const { response, data: stream } = await messages
-                    .create({ ...params, stream: true }, { ...options, signal: this.controller.signal })
+                    .create({ ...params, stream: true }, { ...options, __span: tslib_1.__classPrivateFieldGet(this, _MessageStream_span, "f"), signal: this.controller.signal })
                     .withResponse();
-                this._connected(response);
+                try {
+                    this._connected(response);
+                }
+                catch (error) {
+                    // Nothing reads the stream after a `connect` listener throws: closing it ends its span.
+                    if (tslib_1.__classPrivateFieldGet(this, _MessageStream_span, "f")) {
+                        tslib_1.__classPrivateFieldGet(this, _MessageStream_span, "f").failure = error;
+                    }
+                    stream.controller.abort();
+                    throw error;
+                }
                 for await (const event of stream) {
-                    tslib_1.__classPrivateFieldGet(this, _MessageStream_instances, "m", _MessageStream_addStreamEvent).call(this, event);
+                    try {
+                        tslib_1.__classPrivateFieldGet(this, _MessageStream_instances, "m", _MessageStream_addStreamEvent).call(this, event);
+                    }
+                    catch (error) {
+                        if (tslib_1.__classPrivateFieldGet(this, _MessageStream_span, "f")) {
+                            tslib_1.__classPrivateFieldGet(this, _MessageStream_span, "f").failure = error;
+                        }
+                        throw error;
+                    }
                 }
                 if (stream.controller.signal?.aborted) {
                     throw new error_1.APIUserAbortError();
@@ -41628,7 +44714,7 @@ var MessageStream = /* @__PURE__ */ (() => {
                 }
             }
         }
-        [(_MessageStream_currentMessageSnapshot = new WeakMap(), _MessageStream_params = new WeakMap(), _MessageStream_connectedPromise = new WeakMap(), _MessageStream_resolveConnectedPromise = new WeakMap(), _MessageStream_rejectConnectedPromise = new WeakMap(), _MessageStream_endPromise = new WeakMap(), _MessageStream_resolveEndPromise = new WeakMap(), _MessageStream_rejectEndPromise = new WeakMap(), _MessageStream_listeners = new WeakMap(), _MessageStream_ended = new WeakMap(), _MessageStream_errored = new WeakMap(), _MessageStream_aborted = new WeakMap(), _MessageStream_catchingPromiseCreated = new WeakMap(), _MessageStream_response = new WeakMap(), _MessageStream_request_id = new WeakMap(), _MessageStream_workspace_id = new WeakMap(), _MessageStream_logger = new WeakMap(), _MessageStream_handleError = new WeakMap(), _MessageStream_instances = new WeakSet(), _MessageStream_getFinalMessage = function _MessageStream_getFinalMessage() {
+        [(_MessageStream_currentMessageSnapshot = new WeakMap(), _MessageStream_params = new WeakMap(), _MessageStream_connectedPromise = new WeakMap(), _MessageStream_resolveConnectedPromise = new WeakMap(), _MessageStream_rejectConnectedPromise = new WeakMap(), _MessageStream_endPromise = new WeakMap(), _MessageStream_resolveEndPromise = new WeakMap(), _MessageStream_rejectEndPromise = new WeakMap(), _MessageStream_listeners = new WeakMap(), _MessageStream_ended = new WeakMap(), _MessageStream_errored = new WeakMap(), _MessageStream_aborted = new WeakMap(), _MessageStream_catchingPromiseCreated = new WeakMap(), _MessageStream_response = new WeakMap(), _MessageStream_request_id = new WeakMap(), _MessageStream_workspace_id = new WeakMap(), _MessageStream_logger = new WeakMap(), _MessageStream_client = new WeakMap(), _MessageStream_span = new WeakMap(), _MessageStream_handleError = new WeakMap(), _MessageStream_instances = new WeakSet(), _MessageStream_getFinalMessage = function _MessageStream_getFinalMessage() {
             if (this.receivedMessages.length === 0) {
                 throw new error_1.AnthropicError('stream ended without producing a Message with role=assistant');
             }
@@ -41653,6 +44739,9 @@ var MessageStream = /* @__PURE__ */ (() => {
             if (this.ended)
                 return;
             const messageSnapshot = tslib_1.__classPrivateFieldGet(this, _MessageStream_instances, "m", _MessageStream_accumulateMessage).call(this, event);
+            this._emit('_rawEvent', event);
+            if (!messageSnapshot)
+                return;
             this._emit('streamEvent', event, messageSnapshot);
             switch (event.type) {
                 case 'content_block_delta': {
@@ -41694,6 +44783,9 @@ var MessageStream = /* @__PURE__ */ (() => {
                     break;
                 }
                 case 'message_stop': {
+                    if (tslib_1.__classPrivateFieldGet(this, _MessageStream_client, "f") && tslib_1.__classPrivateFieldGet(this, _MessageStream_span, "f") && tslib_1.__classPrivateFieldGet(this, _MessageStream_params, "f")) {
+                        (0, tracing_1.recordStreamedMessageContent)(tslib_1.__classPrivateFieldGet(this, _MessageStream_client, "f"), tslib_1.__classPrivateFieldGet(this, _MessageStream_span, "f"), tslib_1.__classPrivateFieldGet(this, _MessageStream_params, "f"), messageSnapshot);
+                    }
                     this._addMessageParam(messageSnapshot);
                     this._addMessage((0, parser_1.maybeParseMessage)(messageSnapshot, tslib_1.__classPrivateFieldGet(this, _MessageStream_params, "f"), { logger: tslib_1.__classPrivateFieldGet(this, _MessageStream_logger, "f") }), true);
                     break;
@@ -41704,6 +44796,9 @@ var MessageStream = /* @__PURE__ */ (() => {
                 }
                 case 'message_start': {
                     tslib_1.__classPrivateFieldSet(this, _MessageStream_currentMessageSnapshot, messageSnapshot, "f");
+                    if (tslib_1.__classPrivateFieldGet(this, _MessageStream_span, "f") && tslib_1.__classPrivateFieldGet(this, _MessageStream_params, "f")) {
+                        tslib_1.__classPrivateFieldGet(this, _MessageStream_span, "f").streamed = { body: tslib_1.__classPrivateFieldGet(this, _MessageStream_params, "f"), message: messageSnapshot };
+                    }
                     break;
                 }
                 case 'content_block_start':
@@ -41728,9 +44823,8 @@ var MessageStream = /* @__PURE__ */ (() => {
                 }
                 return event.message;
             }
-            if (!snapshot) {
-                throw new error_1.AnthropicError(`Unexpected event order, got ${event.type} before "message_start"`);
-            }
+            if (!snapshot)
+                return;
             switch (event.type) {
                 case 'message_stop':
                     return snapshot;
@@ -41826,12 +44920,14 @@ var MessageStream = /* @__PURE__ */ (() => {
                     }
                     return snapshot;
                 }
+                default:
+                    return snapshot;
             }
         }, Symbol.asyncIterator)]() {
             const pushQueue = [];
             const readQueue = [];
             let done = false;
-            this.on('streamEvent', (event) => {
+            this.on('_rawEvent', (event) => {
                 const reader = readQueue.shift();
                 if (reader) {
                     reader.resolve(event);
@@ -42354,6 +45450,7 @@ function oidcFederationProvider(config) {
         try {
             resp = await config.fetch(url, {
                 method: 'POST',
+                redirect: 'manual',
                 headers: {
                     'Content-Type': 'application/json',
                     'anthropic-beta': `${types_1.OAUTH_API_BETA_HEADER},${types_1.FEDERATION_BETA_HEADER}`,
@@ -42886,6 +45983,7 @@ function userOAuthProvider(config) {
         try {
             resp = await config.fetch(url, {
                 method: 'POST',
+                redirect: 'manual',
                 headers: {
                     'Content-Type': 'application/json',
                     'anthropic-beta': types_1.OAUTH_API_BETA_HEADER,
@@ -42934,14 +46032,17 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.WorkPoller = exports.POLL_BLOCK_MS = exports.jitter = exports.isStatus = exports.isFatal4xx = exports.is4xx = void 0;
 exports.backoff = backoff;
 const tslib_1 = __nccwpck_require__(14839);
+const api_1 = __nccwpck_require__(84028);
 const error_1 = __nccwpck_require__(69955);
 const log_1 = __nccwpck_require__(88991);
 const sleep_1 = __nccwpck_require__(17742);
 const uuid_1 = __nccwpck_require__(49758);
 const abort_1 = __nccwpck_require__(81867);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const backoff_1 = __nccwpck_require__(82953);
 const helper_client_1 = __nccwpck_require__(39201);
+const tracing_2 = __nccwpck_require__(38225);
 var backoff_2 = __nccwpck_require__(82953);
 Object.defineProperty(exports, "is4xx", ({ enumerable: true, get: function () { return backoff_2.is4xx; } }));
 Object.defineProperty(exports, "isFatal4xx", ({ enumerable: true, get: function () { return backoff_2.isFatal4xx; } }));
@@ -43020,6 +46121,9 @@ var WorkPoller = /* @__PURE__ */ (() => {
                 throw new error_1.AnthropicError('Cannot iterate over a consumed WorkPoller');
             }
             tslib_1.__classPrivateFieldSet(this, _WorkPoller_consumed, true, "f");
+            // The context of whoever asks for the next item. Read where that caller resumes the generator:
+            // a context manager that does not follow promises has lost it after the next `await`.
+            let callerOtelContext = api_1.context.active();
             const log = (0, log_1.loggerFor)(this.client);
             log.info('poller starting', {
                 component: 'work-poller',
@@ -43066,6 +46170,7 @@ var WorkPoller = /* @__PURE__ */ (() => {
                         continue;
                     }
                     idle.onClaim();
+                    this._workSpan = (0, tracing_1.guardTracing)(this.client, () => (0, tracing_2.startEnvironmentWorkSpan)(this.client, work, callerOtelContext));
                     log.info('claimed work', {
                         component: 'work-poller',
                         environment_id: this.environmentId,
@@ -43077,10 +46182,12 @@ var WorkPoller = /* @__PURE__ */ (() => {
                     }
                     catch (e) {
                         log.error('ack failed', { work_id: work.id, error: String(e) });
+                        (0, tracing_1.guardTracing)(this.client, () => (0, tracing_2.failEnvironmentWorkSpan)(this._workSpan, tslib_1.__classPrivateFieldGet(this, _WorkPoller_controller, "f").signal, e));
                         continue;
                     }
                     try {
                         yield work;
+                        callerOtelContext = api_1.context.active();
                     }
                     finally {
                         // Post-handler stop. Runs whether the consumer body returned
@@ -43095,6 +46202,8 @@ var WorkPoller = /* @__PURE__ */ (() => {
                                     log.warn('stop failed', { work_id: work.id, error: String(e) });
                             }
                         }
+                        // The consumer has asked for the next item or left its loop, so it has finished with this one.
+                        (0, tracing_1.guardTracing)(this.client, () => (0, tracing_2.endEnvironmentWorkSpan)(this._workSpan, tslib_1.__classPrivateFieldGet(this, _WorkPoller_controller, "f").signal));
                     }
                 }
             }
@@ -43183,9 +46292,11 @@ const backoff_1 = __nccwpck_require__(82953);
 const abort_1 = __nccwpck_require__(81867);
 const values_1 = __nccwpck_require__(17999);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const SessionToolRunner_1 = __nccwpck_require__(41757);
 const poller_1 = __nccwpck_require__(97412);
 const helper_client_1 = __nccwpck_require__(39201);
+const tracing_2 = __nccwpck_require__(38225);
 const sync_interval_1 = __nccwpck_require__(90847);
 const HEARTBEAT_DEFAULT_MS = 30000;
 const HEARTBEAT_TTL_DEFAULT_MS = 90000;
@@ -43318,8 +46429,9 @@ var EnvironmentWorker = /* @__PURE__ */ (() => {
                 autoStop: false,
             });
             for await (const work of poller) {
+                const workSpan = poller._workSpan;
                 try {
-                    await tslib_1.__classPrivateFieldGet(this, _EnvironmentWorker_instances, "m", _EnvironmentWorker_handleItem).call(this, work, environmentKey, poller.signal);
+                    await (0, tracing_2.withEnvironmentWorkSpan)(this.client, workSpan, poller.signal, () => tslib_1.__classPrivateFieldGet(this, _EnvironmentWorker_instances, "m", _EnvironmentWorker_handleItem).call(this, work, environmentKey, poller.signal, workSpan));
                 }
                 catch (e) {
                     // One bad item fails that item, not the worker: the handler's teardown
@@ -43407,7 +46519,7 @@ var EnvironmentWorker = /* @__PURE__ */ (() => {
      * per-item calls; a missing/undecodable secret falls back to
      * `environmentKey` unchanged.
      */
-    async function _EnvironmentWorker_handleItem(work, environmentKey, externalSignal) {
+    async function _EnvironmentWorker_handleItem(work, environmentKey, externalSignal, workSpan) {
         const log = (0, log_1.loggerFor)(this.client);
         // The per-item credential: the sessions token carried inside the work
         // item's secret payload when the server issued one, otherwise the
@@ -43590,6 +46702,9 @@ var EnvironmentWorker = /* @__PURE__ */ (() => {
             else {
                 await forceStop(sessionClient, work, log, this.requestOptions);
             }
+            // The worker no longer holds the item, so it neither finished with it nor failed: no status.
+            if (lease.lost || lease.rejected)
+                (0, tracing_1.guardTracing)(this.client, () => workSpan?.end());
         }
     };
     return EnvironmentWorker;
@@ -43652,6 +46767,10 @@ var Lease = /* @__PURE__ */ (() => {
         /** True once the item belongs to the queue or another worker. */
         get lost() {
             return tslib_1.__classPrivateFieldGet(this, _Lease_endReason, "f") === 'lease_lost' || tslib_1.__classPrivateFieldGet(this, _Lease_endReason, "f") === 'assumed_lost';
+        }
+        /** True once the API rejected a heartbeat for good, so the worker cannot keep the lease. */
+        get rejected() {
+            return tslib_1.__classPrivateFieldGet(this, _Lease_endReason, "f") === 'heartbeat_rejected';
         }
     }
     _Lease_ctrl = new WeakMap(), _Lease_endReason = new WeakMap();
@@ -43793,10 +46912,9 @@ function copyClientForHelper(client, { authToken, helper }) {
     if (!authToken) {
         throw new error_1.AnthropicError(`copyClientForHelper: expected a non-empty authToken but received ${JSON.stringify(authToken)}`);
     }
-    const internal = client;
-    const parentDefaults = internal._options.defaultHeaders;
+    const parentDefaults = client._options.defaultHeaders;
     // Carry the parent's credential/profile headers; strip the auth ones (we re-auth below).
-    const parentAuthExtraHeaders = internal._authState?.extraHeaders;
+    const parentAuthExtraHeaders = client._authState?.extraHeaders;
     const inheritedAuthExtraHeaders = parentAuthExtraHeaders ?
         Object.fromEntries(Object.entries(parentAuthExtraHeaders).filter(([name]) => {
             const lower = name.toLowerCase();
@@ -43837,8 +46955,8 @@ var BetaToolRunnerStream = /* @__PURE__ */ (() => {
      * from it, and the caller's listeners and `for await` loops over the stream have handled the event that shows it.
      */
     class BetaToolRunnerStream extends BetaMessageStream_1.BetaMessageStream {
-        constructor(params, onToolCall) {
-            super(params);
+        constructor(params, onToolCall, client) {
+            super(params, { client });
             _BetaToolRunnerStream_instances.add(this);
             _BetaToolRunnerStream_onToolCall.set(this, void 0);
             /** The number of stream events emitted so far */
@@ -43860,30 +46978,25 @@ var BetaToolRunnerStream = /* @__PURE__ */ (() => {
             return tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_toolCalls, "f");
         }
         /** Sends the request as `client.beta.messages.stream()` does. */
-        static start(messages, params, options, onToolCall) {
-            const stream = new BetaToolRunnerStream({ ...params, stream: true }, onToolCall);
+        static start(client, params, options, onToolCall) {
+            const stream = new BetaToolRunnerStream({ ...params, stream: true }, onToolCall, client);
             for (const message of params.messages) {
                 stream._addMessageParam(message);
             }
-            stream._run(() => stream._createMessage(messages, { ...params, stream: true }, { ...options, headers: { ...options?.headers, [stainless_helper_header_1.STAINLESS_HELPER_METHOD_HEADER]: 'stream' } }));
+            stream._run(() => stream._createMessage(client.beta.messages, { ...params, stream: true }, { ...options, headers: { ...options?.headers, [stainless_helper_header_1.STAINLESS_HELPER_METHOD_HEADER]: 'stream' } }));
             return stream;
         }
-        _emit(event, ...args) {
+        _deliverEvent(event, snapshot) {
             var _a;
-            if (event !== 'streamEvent' || this.ended) {
-                super._emit(event, ...args);
-                return;
-            }
             // Counted first, so that a reader created by a listener of this event starts after it.
             tslib_1.__classPrivateFieldSet(this, _BetaToolRunnerStream_emitted, (_a = tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_emitted, "f"), _a++, _a), "f");
-            const [streamEvent, snapshot] = args;
-            const block = streamEvent.type === 'content_block_stop' ? snapshot.content[streamEvent.index] : undefined;
+            const block = event.type === 'content_block_stop' ? snapshot?.content[event.index] : undefined;
             const closed = block?.type === 'tool_use' ? block : undefined;
             if (closed) {
                 tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_toolCalls, "f").push(closed);
             }
-            super._emit(event, ...args);
-            tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_instances, "m", _BetaToolRunnerStream_track).call(this, streamEvent, closed);
+            super._deliverEvent(event, snapshot);
+            tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_instances, "m", _BetaToolRunnerStream_track).call(this, event, closed);
             tslib_1.__classPrivateFieldGet(this, _BetaToolRunnerStream_instances, "m", _BetaToolRunnerStream_release).call(this);
         }
         [(_BetaToolRunnerStream_onToolCall = new WeakMap(), _BetaToolRunnerStream_emitted = new WeakMap(), _BetaToolRunnerStream_readers = new WeakMap(), _BetaToolRunnerStream_toolCalls = new WeakMap(), _BetaToolRunnerStream_closed = new WeakMap(), _BetaToolRunnerStream_ready = new WeakMap(), _BetaToolRunnerStream_fallback = new WeakMap(), _BetaToolRunnerStream_instances = new WeakSet(), Symbol.asyncIterator)]() {
@@ -43964,6 +47077,1567 @@ exports.BetaToolRunnerStream = BetaToolRunnerStream;
 
 /***/ }),
 
+/***/ 6222:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.messagesCreateHeaders = messagesCreateHeaders;
+exports.startMessagesStreamSpan = startMessagesStreamSpan;
+exports.transformOutputFormat = transformOutputFormat;
+const error_1 = __nccwpck_require__(97735);
+const headers_1 = __nccwpck_require__(60017);
+const stainless_helper_header_1 = __nccwpck_require__(50324);
+const tracing_1 = __nccwpck_require__(91705);
+const tracing_2 = __nccwpck_require__(38225);
+/**
+ * The headers of a `messages.create` request. `create()` and `stream()` build them before they
+ * start the span, so that what throws here throws while no span is open.
+ */
+function messagesCreateHeaders(params, options) {
+    const { betas, user_profile_id, workspace_id, tools, messages } = params;
+    return (0, headers_1.buildHeaders)([
+        {
+            ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined),
+            ...(user_profile_id != null ? { 'anthropic-user-profile-id': user_profile_id } : undefined),
+            ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined),
+        },
+        (0, stainless_helper_header_1.stainlessHelperHeader)(tools, messages),
+        options?.headers,
+    ]);
+}
+/**
+ * Starts the call span of the request that a stream helper sends `body` with. The helper calls this
+ * as it sends the request, so that what throws here fails the stream. It records the final message
+ * on the span, which its `create()` call uses too.
+ */
+function startMessagesStreamSpan(client, body, options) {
+    if (!client._tracer)
+        return undefined;
+    // Built here too, where no span is open yet: the helper's `create()` call builds them again
+    // from the same input, so it cannot throw once the span is open.
+    const headers = messagesCreateHeaders(body, options);
+    return (0, tracing_1.startApiCallSpan)(client, 'anthropic.messages.create', options, (0, tracing_2.messagesCreateSpanSettings)(client, { ...transformOutputFormat(body), stream: true }, headers));
+}
+/**
+ * Transform deprecated output_format to output_config.format
+ * Returns a modified copy of the params without mutating the original
+ */
+function transformOutputFormat(params) {
+    if (!params.output_format) {
+        return params;
+    }
+    if (params.output_config?.format) {
+        throw new error_1.AnthropicError('Both output_format and output_config.format were provided. ' +
+            'Please use only output_config.format (output_format is deprecated).');
+    }
+    const { output_format, ...rest } = params;
+    return {
+        ...rest,
+        output_config: {
+            ...params.output_config,
+            format: output_format,
+        },
+    };
+}
+//# sourceMappingURL=beta-messages-request.js.map
+
+/***/ }),
+
+/***/ 74871:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.messagesCreateHeaders = messagesCreateHeaders;
+exports.startMessagesStreamSpan = startMessagesStreamSpan;
+const headers_1 = __nccwpck_require__(60017);
+const stainless_helper_header_1 = __nccwpck_require__(50324);
+const tracing_1 = __nccwpck_require__(91705);
+const tracing_2 = __nccwpck_require__(38225);
+/**
+ * The headers of a `messages.create` request. `create()` and `stream()` build them before they
+ * start the span, so that what throws here throws while no span is open.
+ */
+function messagesCreateHeaders(params, options) {
+    const { user_profile_id, workspace_id, tools, messages } = params;
+    return (0, headers_1.buildHeaders)([
+        {
+            ...(user_profile_id != null ? { 'anthropic-user-profile-id': user_profile_id } : undefined),
+            ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined),
+        },
+        (0, stainless_helper_header_1.stainlessHelperHeader)(tools, messages),
+        options?.headers,
+    ]);
+}
+/**
+ * Starts the call span of the request that a stream helper sends `body` with. The helper calls this
+ * as it sends the request, so that what throws here fails the stream. It records the final message
+ * on the span, which its `create()` call uses too.
+ */
+function startMessagesStreamSpan(client, body, options) {
+    if (!client._tracer)
+        return undefined;
+    // Built here too, where no span is open yet: the helper's `create()` call builds them again
+    // from the same input, so it cannot throw once the span is open.
+    const headers = messagesCreateHeaders(body, options);
+    return (0, tracing_1.startApiCallSpan)(client, 'anthropic.messages.create', options, (0, tracing_2.messagesCreateSpanSettings)(client, { ...body, stream: true }, headers));
+}
+//# sourceMappingURL=messages-request.js.map
+
+/***/ }),
+
+/***/ 78852:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.NO_UPLOAD_ROOTS = exports.UploadRefusedError = exports.ConfirmFailedError = exports.ConfirmDeclinedError = exports.URLRefusedError = exports.InvalidMemberInputError = exports.UnavailableMemberError = exports.DisabledMemberError = exports.UnknownMemberError = exports.ToolsetClosedError = exports.ToolsetContractError = exports.ToolsetConfigError = exports.ToolsetUsageError = void 0;
+const error_1 = __nccwpck_require__(69955);
+const ToolError_1 = __nccwpck_require__(81429);
+const sanitize_1 = __nccwpck_require__(51748);
+/**
+ * Thrown when your code uses a toolset's API incorrectly. Catch it to catch all three kinds below.
+ *
+ * The only exception the tool runner propagates from a member call: anything else a member throws becomes an
+ * `is_error` result the model can react to, and the loop continues.
+ */
+class ToolsetUsageError extends error_1.AnthropicError {
+    constructor(message, options) {
+        super(message);
+        this.name = 'ToolsetUsageError';
+        if (options && 'cause' in options)
+            this.cause = options.cause;
+    }
+}
+exports.ToolsetUsageError = ToolsetUsageError;
+/** A construction-time mistake: an option combination the toolset cannot honour. */
+class ToolsetConfigError extends ToolsetUsageError {
+    constructor(message, options) {
+        super(message, options);
+        this.name = 'ToolsetConfigError';
+    }
+}
+exports.ToolsetConfigError = ToolsetConfigError;
+/** Misuse of the SDK's own API detected at call time (a `browserState` that threw, a misrouted `tool_use`). */
+class ToolsetContractError extends ToolsetUsageError {
+    constructor(message, options) {
+        super(message, options);
+        this.name = 'ToolsetContractError';
+    }
+}
+exports.ToolsetContractError = ToolsetContractError;
+/** A member run on a toolset you already closed. */
+class ToolsetClosedError extends ToolsetUsageError {
+    constructor(message, options) {
+        super(message, options);
+        this.name = 'ToolsetClosedError';
+    }
+}
+exports.ToolsetClosedError = ToolsetClosedError;
+// --- the SDK's own refusals ---------------------------------------------------------------------------
+// Each is a `ToolError`, so the model reads it as an `is_error` result and the loop continues. The subclass lets
+// your code (an `execute` override, a test) identify the refusal without comparing text.
+/** The refusal the model reads for a member name the toolset does not have. */
+class UnknownMemberError extends ToolError_1.ToolError {
+    constructor(name, family) {
+        super(`Error: unknown ${family} toolset member '${(0, sanitize_1.quotedName)(name)}'`);
+        this.name = 'UnknownMemberError';
+    }
+}
+exports.UnknownMemberError = UnknownMemberError;
+/** The refusal the model reads for a member your application's `configs` disabled. */
+class DisabledMemberError extends ToolError_1.ToolError {
+    constructor(name) {
+        super(`The '${name}' action is not permitted by this application's permissions and cannot be used in this session.`);
+        this.name = 'DisabledMemberError';
+    }
+}
+exports.DisabledMemberError = DisabledMemberError;
+/** The refusal the model reads for a member the driver does not implement. */
+class UnavailableMemberError extends ToolError_1.ToolError {
+    constructor(name, family) {
+        super(`The ${family} toolset member '${name}' is not available in this environment.`);
+        this.name = 'UnavailableMemberError';
+    }
+}
+exports.UnavailableMemberError = UnavailableMemberError;
+/**
+ * The refusal the model reads when its `tool_use.input` does not fit the member: `problem` is the field and what was
+ * expected.
+ */
+class InvalidMemberInputError extends ToolError_1.ToolError {
+    constructor(name, family, problem) {
+        super(`invalid input for ${family} member '${name}': ${problem}`);
+        this.name = 'InvalidMemberInputError';
+    }
+}
+exports.InvalidMemberInputError = InvalidMemberInputError;
+/**
+ * The refusal the model reads when your `urlPolicy` threw something other than a `ToolError` (a `ToolError` it throws
+ * reaches the model as thrown). `reason` is the line it reads.
+ */
+class URLRefusedError extends ToolError_1.ToolError {
+    constructor(reason) {
+        // one bounded line: a reason may echo a model-written address of any length
+        super((0, sanitize_1.logSafe)(reason));
+        this.name = 'URLRefusedError';
+    }
+}
+exports.URLRefusedError = URLRefusedError;
+/** The refusal the model reads when your `confirm` callable answered anything but `true` for the member `name`. */
+class ConfirmDeclinedError extends ToolError_1.ToolError {
+    constructor(name) {
+        super(`The user did not grant permission to run '${name}'. Do not retry it unless the user asks you to.`);
+        this.name = 'ConfirmDeclinedError';
+    }
+}
+exports.ConfirmDeclinedError = ConfirmDeclinedError;
+/** The refusal the model reads when your `confirm` callable threw, so no answer could be obtained for `name`. */
+class ConfirmFailedError extends ToolError_1.ToolError {
+    constructor(name) {
+        super(`Permission to run '${name}' could not be obtained (the confirmation prompt failed). Do not retry it unless the user asks you to.`);
+        this.name = 'ConfirmFailedError';
+    }
+}
+exports.ConfirmFailedError = ConfirmFailedError;
+/**
+ * The refusal the model reads for a `file_upload` the file policy (or its absence) does not admit. `reason` is the line
+ * it reads.
+ */
+class UploadRefusedError extends ToolError_1.ToolError {
+    constructor(reason) {
+        super(reason);
+        this.name = 'UploadRefusedError';
+    }
+}
+exports.UploadRefusedError = UploadRefusedError;
+/** The refusal for a `file_upload` by path when no upload root is configured (no file policy, or one without roots). */
+exports.NO_UPLOAD_ROOTS = 'file_upload has no configured upload roots';
+//# sourceMappingURL=errors.js.map
+
+/***/ }),
+
+/***/ 96815:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.TOOLSET_TYPE_TO_FAMILY = void 0;
+exports.toolsetFamily = toolsetFamily;
+exports.isRunnableToolset = isRunnableToolset;
+/** Dated `tools[]` entry `type` → the family stamped on member blocks. */
+exports.TOOLSET_TYPE_TO_FAMILY = {
+    browser_toolset_20260801: 'browser',
+    computer_toolset_20260801: 'computer',
+};
+function toolsetFamily(toolset) {
+    return exports.TOOLSET_TYPE_TO_FAMILY[toolset.type];
+}
+/** Whether a `tools` entry is a toolset the runner can execute locally. */
+function isRunnableToolset(t) {
+    // `in` alone would accept inherited keys such as `toString`
+    return 'run' in t && t.type != null && Object.prototype.hasOwnProperty.call(exports.TOOLSET_TYPE_TO_FAMILY, t.type);
+}
+//# sourceMappingURL=family.js.map
+
+/***/ }),
+
+/***/ 39766:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.NOT_EXECUTED = void 0;
+exports.notExecutedText = notExecutedText;
+exports.toolsetResultBlock = toolsetResultBlock;
+exports.throwIfPropagates = throwIfPropagates;
+exports.throwIfAborted = throwIfAborted;
+exports.classify = classify;
+exports.runToolsetMember = runToolsetMember;
+const error_1 = __nccwpck_require__(69955);
+const ToolError_1 = __nccwpck_require__(81429);
+const errors_1 = __nccwpck_require__(78852);
+const sanitize_1 = __nccwpck_require__(51748);
+const family_1 = __nccwpck_require__(96815);
+/**
+ * What the runner answers for a toolset member it did not run because an earlier member of the same toolset failed
+ * in the same assistant turn: the model planned those actions as a sequence, and a later one rarely makes sense once
+ * an earlier one did not happen. The browser toolset's text; `notExecutedText` gives each family its own.
+ */
+exports.NOT_EXECUTED = 'Not executed: an earlier action in this turn failed.';
+const NOT_EXECUTED_BY_FAMILY = {
+    browser: exports.NOT_EXECUTED,
+    computer: 'Not executed: an earlier computer action in this turn failed.',
+};
+/** The not-executed text for `family` (a `tool_use.toolset_name`), or the browser's for a family the SDK doesn't know. */
+function notExecutedText(family) {
+    return Object.prototype.hasOwnProperty.call(NOT_EXECUTED_BY_FAMILY, family) ?
+        NOT_EXECUTED_BY_FAMILY[family]
+        : exports.NOT_EXECUTED;
+}
+/**
+ * The `tool_result` answering a member `tool_use`. `toolset_name` is required on a member result (the API rejects a
+ * mismatch), so it is echoed on error paths too.
+ */
+function toolsetResultBlock(toolUse, content, isError = false) {
+    if (isError && (content === '' || (Array.isArray(content) && content.length === 0))) {
+        // Deliberate: an empty ToolError (`throw new ToolError('')`, or one whose non-text blocks were dropped) would be
+        // an is_error result with empty content, which the API rejects with a 400, ending the whole run over a refusal
+        // the model could have recovered from. The model still learns the call failed, and the developer loses nothing
+        // they wrote.
+        content = 'The tool call failed with an empty error message.';
+    }
+    return {
+        type: 'tool_result',
+        tool_use_id: toolUse.id,
+        toolset_name: toolUse.toolset_name ?? null,
+        content,
+        ...(isError ? { is_error: true } : {}),
+    };
+}
+/**
+ * What never becomes a tool result: a `ToolsetUsageError` propagates as it is, and once the call's own `AbortSignal`
+ * has aborted the cancellation propagates as `APIUserAbortError`, whatever was thrown after it. An error named
+ * `AbortError` that a driver throws while that signal has not aborted (a page-aborted request, a driver's own timeout)
+ * is the driver's failure, not a cancellation.
+ */
+function throwIfPropagates(error, ctx) {
+    if (error instanceof errors_1.ToolsetUsageError)
+        throw error;
+    throwIfAborted(ctx.signal);
+}
+/** Once `signal` has aborted, throws the `APIUserAbortError` an aborted request throws, so one `catch` covers both. */
+function throwIfAborted(signal) {
+    if (signal?.aborted)
+        throw new error_1.APIUserAbortError();
+}
+/**
+ * How an exception out of a member call is classified, at the `execute` boundary and in the runner alike: what
+ * `throwIfPropagates` covers propagates, a `ToolError` is the member's own refusal, and anything else a driver throws
+ * (its `TypeError` included) becomes a refusal the model reads, so the loop continues.
+ */
+function classify(error, ctx) {
+    throwIfPropagates(error, ctx);
+    if (error instanceof ToolError_1.ToolError)
+        return error;
+    // Not cut here: the toolset cuts the text to the field limit when it builds the result.
+    return new ToolError_1.ToolError((0, sanitize_1.wellFormed)((0, sanitize_1.thrownErrorText)(error)));
+}
+/**
+ * Runs one member `tool_use` against `toolset` and builds its `tool_result`. Throws if `toolUse`
+ * is not a member call of this family: a block without `toolset_name` is a plain tool (possibly a
+ * custom tool sharing a member name) and must never be routed here.
+ */
+async function runToolsetMember(toolset, toolUse, options = {}) {
+    const family = (0, family_1.toolsetFamily)(toolset);
+    if (toolUse.toolset_name !== family) {
+        // a caller's routing mistake, like every other misuse of the toolset's API
+        throw new errors_1.ToolsetContractError(`tool_use ${JSON.stringify(toolUse.id)} (toolset_name=${JSON.stringify(toolUse.toolset_name ?? null)}, name=${JSON.stringify(toolUse.name)}) is not a member call of the ${JSON.stringify(family)} toolset`);
+    }
+    const ctx = { ...options, toolUse, toolUseBlock: toolUse };
+    try {
+        return toolsetResultBlock(toolUse, await toolset.run(ctx, toolUse));
+    }
+    catch (e) {
+        // `classify`, as an is_error result: a converted exception is cut to the field limit here
+        throwIfPropagates(e, ctx);
+        return toolsetResultBlock(toolUse, (0, sanitize_1.errorTextContent)(e instanceof ToolError_1.ToolError ? e.content : (0, sanitize_1.errorText)(e)), true);
+    }
+}
+//# sourceMappingURL=run.js.map
+
+/***/ }),
+
+/***/ 51748:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.FIELD_MAX = exports.LINE_UNSAFE = void 0;
+exports.wellFormed = wellFormed;
+exports.oneLine = oneLine;
+exports.logSafe = logSafe;
+exports.quotedName = quotedName;
+exports.thrownErrorText = thrownErrorText;
+exports.errorText = errorText;
+exports.cutPoints = cutPoints;
+exports.boundedTabURL = boundedTabURL;
+exports.errorTextContent = errorTextContent;
+/**
+ * C0 and C1 controls, the line separators and the bidi controls: anything that would break or reorder the one line a
+ * page- or model-supplied value goes into.
+ */
+exports.LINE_UNSAFE = '\\x00-\\x1f\\x7f-\\x9f\\u061c\\u200e\\u200f\\u2028\\u2029\\u202a-\\u202e\\u2066-\\u2069';
+const CONTROL_RE = /* @__PURE__ */ (() => new RegExp(`[${exports.LINE_UNSAFE}]+`, 'g'))();
+// An unpaired surrogate cannot be encoded as UTF-8: in a page-chosen string it would fail every request for as long
+// as the driver keeps reporting it. Folded to U+FFFD wherever page text is normalised (with the `u` flag the class
+// matches a surrogate only when it stands alone).
+const LONE_SURROGATE_RE = /[\uD800-\uDFFF]/gu;
+/** `text` with each unpaired surrogate replaced by U+FFFD, so it can be sent. */
+function wellFormed(text) {
+    return text.replace(LONE_SURROGATE_RE, '\uFFFD');
+}
+/**
+ * The API's limit for a text field of the block, for a URL, and the most of an exception's text an `is_error` result
+ * holds.
+ */
+exports.FIELD_MAX = 4096;
+const LOG_MAX = 200;
+/**
+ * A page- or model-supplied text on one line the model or an operator reads: a tab's title, a download's
+ * error, a field of a member's confirmation line. Line breaks, control and bidi characters are folded to
+ * spaces, a lone surrogate to U+FFFD, the ends trimmed, and the whole cut to `limit`.
+ */
+function oneLine(text, limit = exports.FIELD_MAX) {
+    return cutPoints(wellFormed(text).replace(CONTROL_RE, ' ').trim(), limit);
+}
+/** A model- or page-supplied name for a log record or an SDK-written error text: `oneLine`, cut short. @internal */
+function logSafe(name) {
+    return oneLine(name, LOG_MAX);
+}
+/**
+ * A model-chosen name as it is echoed inside single quotes in a text the model reads: one line, cut short, and without
+ * the quotes and runs of spaces that could make it read as part of the text around it.
+ * @internal
+ */
+function quotedName(name) {
+    return logSafe(name).replace(/[' ]+/g, ' ').trim();
+}
+/** `Error: <message>` for a thrown value other than a `ToolError`: an `Error`'s message, else it as a string. */
+function thrownErrorText(e) {
+    return `Error: ${e instanceof Error ? e.message : String(e)}`;
+}
+/**
+ * A caught exception's text as the `is_error` result the model reads (the same `Error: <message>` a failing function
+ * tool produces), made well-formed and cut to the field limit: a driver's exception can embed a page-sized payload.
+ */
+function errorText(error) {
+    return cutPoints(wellFormed(thrownErrorText(error)), exports.FIELD_MAX);
+}
+/**
+ * The first `limit` code points of `text`: a cut by UTF-16 units could split a surrogate pair, and a lone surrogate
+ * fails the request.
+ */
+function cutPoints(text, limit) {
+    if (text.length <= limit)
+        return text; // no more UTF-16 units than the limit: no more code points either
+    let end = 0;
+    let points = 0;
+    for (const ch of text) {
+        if (points === limit)
+            break;
+        points += 1;
+        end += ch.length;
+    }
+    return text.slice(0, end);
+}
+/**
+ * A tab's or download's URL as the model reads it: the driver's string folded to one line (line breaks, control and
+ * bidi characters a space, a lone surrogate U+FFFD) and held to the API's limit (`FIELD_MAX`, counted in code points).
+ * Nothing is parsed. A longer one becomes `…` and its first 4,095 code points, so that the cut text parses to no site.
+ */
+function boundedTabURL(url) {
+    const line = oneLine(url, Infinity);
+    return cutPoints(line, exports.FIELD_MAX) === line ? line : '\u2026' + cutPoints(line, exports.FIELD_MAX - 1);
+}
+/**
+ * The text blocks of a `ToolError`'s content. Deliberate, like the empty-content placeholder: the API accepts only
+ * text on an is_error result and answers anything else with a 400 that ends the run, so an image a member attached to
+ * its refusal is dropped here rather than ending the whole loop. The refusal's text still reaches the model.
+ */
+function errorTextContent(content) {
+    // The API rejects an `is_error` result whose content is empty or holds a non-text block. Empty text blocks are
+    // dropped too, so an error with no text left gets the placeholder from `toolsetResultBlock`.
+    if (typeof content === 'string')
+        return wellFormed(content);
+    return content
+        .filter((block) => block.type === 'text' && block.text !== '')
+        .map((block) => ({ ...block, text: wellFormed(block.text) }));
+}
+//# sourceMappingURL=sanitize.js.map
+
+/***/ }),
+
+/***/ 38225:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.withToolUseSpan = exports.startToolRunnerSpan = exports.withEnvironmentWorkSpan = exports.startEnvironmentWorkSpan = exports.failEnvironmentWorkSpan = exports.endEnvironmentWorkSpan = exports.recordStreamedMessageContent = exports.endAnthropicApiCallSpanWhenStreamEnds = exports.withoutTraceHeaders = exports.takeTraceHeaders = exports.setAnthropicSpanAttributes = exports.recordSessionsCreateResponse = exports.recordMessagesCreateResponse = exports.recordMessagesCreateRequest = exports.recordCountTokensResponse = exports.messagesCreateSpanSettings = void 0;
+var api_call_1 = __nccwpck_require__(34907);
+Object.defineProperty(exports, "messagesCreateSpanSettings", ({ enumerable: true, get: function () { return api_call_1.messagesCreateSpanSettings; } }));
+Object.defineProperty(exports, "recordCountTokensResponse", ({ enumerable: true, get: function () { return api_call_1.recordCountTokensResponse; } }));
+Object.defineProperty(exports, "recordMessagesCreateRequest", ({ enumerable: true, get: function () { return api_call_1.recordMessagesCreateRequest; } }));
+Object.defineProperty(exports, "recordMessagesCreateResponse", ({ enumerable: true, get: function () { return api_call_1.recordMessagesCreateResponse; } }));
+Object.defineProperty(exports, "recordSessionsCreateResponse", ({ enumerable: true, get: function () { return api_call_1.recordSessionsCreateResponse; } }));
+Object.defineProperty(exports, "setAnthropicSpanAttributes", ({ enumerable: true, get: function () { return api_call_1.setAnthropicSpanAttributes; } }));
+var headers_1 = __nccwpck_require__(94432);
+Object.defineProperty(exports, "takeTraceHeaders", ({ enumerable: true, get: function () { return headers_1.takeTraceHeaders; } }));
+Object.defineProperty(exports, "withoutTraceHeaders", ({ enumerable: true, get: function () { return headers_1.withoutTraceHeaders; } }));
+var streaming_1 = __nccwpck_require__(65622);
+Object.defineProperty(exports, "endAnthropicApiCallSpanWhenStreamEnds", ({ enumerable: true, get: function () { return streaming_1.endAnthropicApiCallSpanWhenStreamEnds; } }));
+Object.defineProperty(exports, "recordStreamedMessageContent", ({ enumerable: true, get: function () { return streaming_1.recordStreamedMessageContent; } }));
+var environments_1 = __nccwpck_require__(54462);
+Object.defineProperty(exports, "endEnvironmentWorkSpan", ({ enumerable: true, get: function () { return environments_1.endEnvironmentWorkSpan; } }));
+Object.defineProperty(exports, "failEnvironmentWorkSpan", ({ enumerable: true, get: function () { return environments_1.failEnvironmentWorkSpan; } }));
+Object.defineProperty(exports, "startEnvironmentWorkSpan", ({ enumerable: true, get: function () { return environments_1.startEnvironmentWorkSpan; } }));
+Object.defineProperty(exports, "withEnvironmentWorkSpan", ({ enumerable: true, get: function () { return environments_1.withEnvironmentWorkSpan; } }));
+var tools_1 = __nccwpck_require__(10861);
+Object.defineProperty(exports, "startToolRunnerSpan", ({ enumerable: true, get: function () { return tools_1.startToolRunnerSpan; } }));
+Object.defineProperty(exports, "withToolUseSpan", ({ enumerable: true, get: function () { return tools_1.withToolUseSpan; } }));
+//# sourceMappingURL=tracing.js.map
+
+/***/ }),
+
+/***/ 34907:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.setAnthropicSpanAttributes = setAnthropicSpanAttributes;
+exports.messagesCreateSpanSettings = messagesCreateSpanSettings;
+exports.recordMessagesCreateRequest = recordMessagesCreateRequest;
+exports.recordMessagesCreateResponse = recordMessagesCreateResponse;
+exports.recordCountTokensResponse = recordCountTokensResponse;
+exports.recordSessionsCreateResponse = recordSessionsCreateResponse;
+const error_1 = __nccwpck_require__(69955);
+const streaming_1 = __nccwpck_require__(14465);
+const headers_1 = __nccwpck_require__(60017);
+const log_1 = __nccwpck_require__(88991);
+const attributes_1 = __nccwpck_require__(37161);
+const content_1 = __nccwpck_require__(33819);
+const response_1 = __nccwpck_require__(46231);
+/**
+ * Sets the IDs in the response headers of `result` on `span`, the call span of any API call.
+ * A failure to record, here and below, is logged and never fails the API call.
+ */
+function setAnthropicSpanAttributes(client, span, result) {
+    if (!span.isRecording()) {
+        return;
+    }
+    try {
+        const error = result.status === 'error' ? result.error : undefined;
+        const headers = result.response?.headers ?? (error instanceof error_1.APIError ? error.headers : undefined);
+        for (const [attribute, header] of attributes_1.RESPONSE_HEADER_ATTRIBUTES) {
+            const value = headers?.get(header);
+            if (value) {
+                span.setAttribute(attribute, value);
+            }
+        }
+    }
+    catch (problem) {
+        (0, log_1.loggerFor)(client).debug('could not record the API call on its span', problem);
+    }
+}
+/**
+ * The attributes that a `messages.create` span starts with, from the request's `body` and
+ * `headers`. A sampler sees only the attributes that a span starts with.
+ */
+function messagesCreateSpanSettings(client, body, headers) {
+    const attributes = {
+        [attributes_1.ATTR_GEN_AI_OPERATION_NAME]: attributes_1.GEN_AI_OPERATION_NAME_VALUE_CHAT,
+        [attributes_1.ATTR_GEN_AI_REQUEST_MODEL]: body.model,
+    };
+    try {
+        // The client sends its default headers with the method's, which replace those of the same name.
+        const betas = ((0, headers_1.buildHeaders)([client._options.defaultHeaders, headers]).values.get('anthropic-beta') ?? '')
+            .split(',')
+            .map((beta) => beta.trim())
+            .filter(Boolean);
+        if (betas.length) {
+            attributes[attributes_1.ATTR_ANTHROPIC_BETA] = betas;
+        }
+        attributes[attributes_1.ATTR_GEN_AI_REQUEST_MAX_TOKENS] = body.max_tokens;
+        if (body.temperature != null) {
+            attributes[attributes_1.ATTR_GEN_AI_REQUEST_TEMPERATURE] = body.temperature;
+        }
+        if (body.top_p != null) {
+            attributes[attributes_1.ATTR_GEN_AI_REQUEST_TOP_P] = body.top_p;
+        }
+        if (body.top_k != null) {
+            attributes[attributes_1.ATTR_GEN_AI_REQUEST_TOP_K] = body.top_k;
+        }
+        if (body.stream === true) {
+            attributes[attributes_1.ATTR_GEN_AI_REQUEST_STREAM] = true;
+        }
+        // The beta method has already moved a deprecated `output_format` here.
+        if (body.output_config?.format?.type === 'json_schema') {
+            attributes[attributes_1.ATTR_GEN_AI_OUTPUT_TYPE] = attributes_1.GEN_AI_OUTPUT_TYPE_VALUE_JSON;
+        }
+        const effort = body.output_config?.effort;
+        if (effort != null) {
+            attributes[attributes_1.ATTR_GEN_AI_REQUEST_REASONING_LEVEL] = effort;
+        }
+        if (body.service_tier != null) {
+            attributes[attributes_1.ATTR_ANTHROPIC_REQUEST_SERVICE_TIER] = body.service_tier;
+        }
+        const thinking = body.thinking;
+        if (thinking != null) {
+            attributes[attributes_1.ATTR_ANTHROPIC_THINKING_TYPE] = thinking.type;
+        }
+        if (thinking?.type === 'enabled') {
+            attributes[attributes_1.ATTR_ANTHROPIC_THINKING_BUDGET_TOKENS] = thinking.budget_tokens;
+        }
+    }
+    catch (problem) {
+        (0, log_1.loggerFor)(client).debug('could not record the request on its span', problem);
+    }
+    return { route: '/v1/messages', attributes };
+}
+/**
+ * In content mode, sets the request's content on `call`. The span does not start with it, because
+ * the size limit counts it together with the response's content. Returns `call`.
+ */
+function recordMessagesCreateRequest(client, call, body) {
+    if (!call?.span.isRecording()) {
+        return call;
+    }
+    try {
+        const { contentMode, maxContentBytes } = client.openTelemetry.traces;
+        if (contentMode === 'content') {
+            (0, content_1.setMessageContentAttributes)(call, body, undefined, maxContentBytes);
+        }
+    }
+    catch (problem) {
+        (0, log_1.loggerFor)(client).debug('could not record the request on its span', problem);
+    }
+    return call;
+}
+/**
+ * Sets the response attributes and, in content mode, the response's content on `call`. A streamed
+ * response is recorded as the application reads it (`endAnthropicApiCallSpanWhenStreamEnds`).
+ */
+function recordMessagesCreateResponse(client, call, body, data) {
+    if (!call?.span.isRecording() || data instanceof streaming_1.Stream) {
+        return;
+    }
+    const span = call.span;
+    try {
+        (0, response_1.setResponseAttributes)(span, data, data.usage, true);
+        const { contentMode, maxContentBytes } = client.openTelemetry.traces;
+        if (contentMode === 'content') {
+            (0, content_1.setMessageContentAttributes)(call, body, data.content, maxContentBytes);
+        }
+    }
+    catch (problem) {
+        (0, log_1.loggerFor)(client).debug('could not record the response on its span', problem);
+    }
+}
+/** Sets the token count of a `messages.countTokens` response on `call`. */
+function recordCountTokensResponse(client, call, count) {
+    try {
+        call?.span.setAttribute(attributes_1.ATTR_ANTHROPIC_MESSAGE_COUNT_TOKENS_INPUT_TOKENS, count.input_tokens);
+    }
+    catch (problem) {
+        (0, log_1.loggerFor)(client).debug('could not record the response on its span', problem);
+    }
+}
+/** Sets the Agent's name and model on `call`, as the created `session` resolved them. */
+function recordSessionsCreateResponse(client, call, session) {
+    try {
+        call?.span.setAttributes({
+            [attributes_1.ATTR_GEN_AI_AGENT_NAME]: session.agent.name,
+            [attributes_1.ATTR_GEN_AI_REQUEST_MODEL]: session.agent.model.id,
+        });
+    }
+    catch (problem) {
+        (0, log_1.loggerFor)(client).debug('could not record the response on its span', problem);
+    }
+}
+//# sourceMappingURL=api-call.js.map
+
+/***/ }),
+
+/***/ 37161:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ATTR_ANTHROPIC_USAGE_COMPACTION_INPUT_TOKENS = exports.ATTR_ANTHROPIC_USAGE_CACHE_CREATION_EPHEMERAL_5M_INPUT_TOKENS = exports.ATTR_ANTHROPIC_USAGE_CACHE_CREATION_EPHEMERAL_1H_INPUT_TOKENS = exports.ATTR_ANTHROPIC_TOOLSET_NAME = exports.ATTR_ANTHROPIC_TOOL_RESULT_CONTENT = exports.ATTR_ANTHROPIC_THINKING_TYPE = exports.ATTR_ANTHROPIC_THINKING_BUDGET_TOKENS = exports.ATTR_ANTHROPIC_RESPONSE_SERVICE_TIER = exports.ATTR_ANTHROPIC_REQUEST_SERVICE_TIER = exports.ATTR_ANTHROPIC_MESSAGE_COUNT_TOKENS_INPUT_TOKENS = exports.ATTR_ANTHROPIC_MESSAGE_STOP_REASON = exports.ATTR_ANTHROPIC_CONTENT_TRUNCATED = exports.ATTR_ANTHROPIC_BETA = exports.ATTR_ANTHROPIC_WORKSPACE_ID = exports.ATTR_ANTHROPIC_ORGANIZATION_ID = exports.ATTR_ANTHROPIC_REQUEST_ID = exports.GEN_AI_TOOL_TYPE_VALUE_FUNCTION = exports.GEN_AI_OUTPUT_TYPE_VALUE_JSON = exports.GEN_AI_OPERATION_NAME_VALUE_INVOKE_AGENT = exports.GEN_AI_OPERATION_NAME_VALUE_EXECUTE_TOOL = exports.GEN_AI_OPERATION_NAME_VALUE_CHAT = exports.ATTR_GEN_AI_USAGE_REASONING_OUTPUT_TOKENS = exports.ATTR_GEN_AI_USAGE_OUTPUT_TOKENS = exports.ATTR_GEN_AI_USAGE_INPUT_TOKENS = exports.ATTR_GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS = exports.ATTR_GEN_AI_USAGE_CACHE_WRITE_INPUT_TOKENS = exports.ATTR_GEN_AI_TOOL_TYPE = exports.ATTR_GEN_AI_TOOL_NAME = exports.ATTR_GEN_AI_TOOL_DESCRIPTION = exports.ATTR_GEN_AI_TOOL_CALL_ID = exports.ATTR_GEN_AI_TOOL_CALL_ARGUMENTS = exports.ATTR_GEN_AI_SYSTEM_INSTRUCTIONS = exports.ATTR_GEN_AI_RESPONSE_TIME_TO_FIRST_CHUNK = exports.ATTR_GEN_AI_RESPONSE_MODEL = exports.ATTR_GEN_AI_RESPONSE_ID = exports.ATTR_GEN_AI_REQUEST_TOP_P = exports.ATTR_GEN_AI_REQUEST_TOP_K = exports.ATTR_GEN_AI_REQUEST_TEMPERATURE = exports.ATTR_GEN_AI_REQUEST_STREAM = exports.ATTR_GEN_AI_REQUEST_STOP_SEQUENCES = exports.ATTR_GEN_AI_REQUEST_REASONING_LEVEL = exports.ATTR_GEN_AI_REQUEST_MODEL = exports.ATTR_GEN_AI_REQUEST_MAX_TOKENS = exports.ATTR_GEN_AI_PROVIDER_NAME = exports.ATTR_GEN_AI_OUTPUT_TYPE = exports.ATTR_GEN_AI_OUTPUT_MESSAGES = exports.ATTR_GEN_AI_OPERATION_NAME = exports.ATTR_GEN_AI_INPUT_MESSAGES = exports.ATTR_GEN_AI_CONVERSATION_ID = exports.ATTR_GEN_AI_AGENT_NAME = void 0;
+exports.RESPONSE_HEADER_ATTRIBUTES = exports.ATTR_ANTHROPIC_USAGE_COMPACTION_OUTPUT_TOKENS = void 0;
+// Named as `@opentelemetry/semantic-conventions` names them, and copied: that package exports the
+// `gen_ai.*` names only from its unstable `incubating` entry point, which says to copy them.
+exports.ATTR_GEN_AI_AGENT_NAME = 'gen_ai.agent.name';
+var tracing_1 = __nccwpck_require__(91705);
+Object.defineProperty(exports, "ATTR_GEN_AI_CONVERSATION_ID", ({ enumerable: true, get: function () { return tracing_1.ATTR_GEN_AI_CONVERSATION_ID; } }));
+exports.ATTR_GEN_AI_INPUT_MESSAGES = 'gen_ai.input.messages';
+exports.ATTR_GEN_AI_OPERATION_NAME = 'gen_ai.operation.name';
+exports.ATTR_GEN_AI_OUTPUT_MESSAGES = 'gen_ai.output.messages';
+exports.ATTR_GEN_AI_OUTPUT_TYPE = 'gen_ai.output.type';
+var tracing_2 = __nccwpck_require__(91705);
+Object.defineProperty(exports, "ATTR_GEN_AI_PROVIDER_NAME", ({ enumerable: true, get: function () { return tracing_2.ATTR_GEN_AI_PROVIDER_NAME; } }));
+exports.ATTR_GEN_AI_REQUEST_MAX_TOKENS = 'gen_ai.request.max_tokens';
+exports.ATTR_GEN_AI_REQUEST_MODEL = 'gen_ai.request.model';
+exports.ATTR_GEN_AI_REQUEST_REASONING_LEVEL = 'gen_ai.request.reasoning.level';
+exports.ATTR_GEN_AI_REQUEST_STOP_SEQUENCES = 'gen_ai.request.stop_sequences';
+exports.ATTR_GEN_AI_REQUEST_STREAM = 'gen_ai.request.stream';
+exports.ATTR_GEN_AI_REQUEST_TEMPERATURE = 'gen_ai.request.temperature';
+exports.ATTR_GEN_AI_REQUEST_TOP_K = 'gen_ai.request.top_k';
+exports.ATTR_GEN_AI_REQUEST_TOP_P = 'gen_ai.request.top_p';
+exports.ATTR_GEN_AI_RESPONSE_ID = 'gen_ai.response.id';
+exports.ATTR_GEN_AI_RESPONSE_MODEL = 'gen_ai.response.model';
+exports.ATTR_GEN_AI_RESPONSE_TIME_TO_FIRST_CHUNK = 'gen_ai.response.time_to_first_chunk';
+exports.ATTR_GEN_AI_SYSTEM_INSTRUCTIONS = 'gen_ai.system_instructions';
+exports.ATTR_GEN_AI_TOOL_CALL_ARGUMENTS = 'gen_ai.tool.call.arguments';
+exports.ATTR_GEN_AI_TOOL_CALL_ID = 'gen_ai.tool.call.id';
+exports.ATTR_GEN_AI_TOOL_DESCRIPTION = 'gen_ai.tool.description';
+exports.ATTR_GEN_AI_TOOL_NAME = 'gen_ai.tool.name';
+exports.ATTR_GEN_AI_TOOL_TYPE = 'gen_ai.tool.type';
+exports.ATTR_GEN_AI_USAGE_CACHE_WRITE_INPUT_TOKENS = 'gen_ai.usage.cache_write.input_tokens';
+exports.ATTR_GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS = 'gen_ai.usage.cache_read.input_tokens';
+exports.ATTR_GEN_AI_USAGE_INPUT_TOKENS = 'gen_ai.usage.input_tokens';
+exports.ATTR_GEN_AI_USAGE_OUTPUT_TOKENS = 'gen_ai.usage.output_tokens';
+exports.ATTR_GEN_AI_USAGE_REASONING_OUTPUT_TOKENS = 'gen_ai.usage.reasoning.output_tokens';
+exports.GEN_AI_OPERATION_NAME_VALUE_CHAT = 'chat';
+exports.GEN_AI_OPERATION_NAME_VALUE_EXECUTE_TOOL = 'execute_tool';
+exports.GEN_AI_OPERATION_NAME_VALUE_INVOKE_AGENT = 'invoke_agent';
+exports.GEN_AI_OUTPUT_TYPE_VALUE_JSON = 'json';
+exports.GEN_AI_TOOL_TYPE_VALUE_FUNCTION = 'function';
+// This API's own attribute names, in the same style.
+exports.ATTR_ANTHROPIC_REQUEST_ID = 'anthropic.request.id';
+exports.ATTR_ANTHROPIC_ORGANIZATION_ID = 'anthropic.organization.id';
+exports.ATTR_ANTHROPIC_WORKSPACE_ID = 'anthropic.workspace.id';
+exports.ATTR_ANTHROPIC_BETA = 'anthropic.beta';
+exports.ATTR_ANTHROPIC_CONTENT_TRUNCATED = 'anthropic.content.truncated';
+exports.ATTR_ANTHROPIC_MESSAGE_STOP_REASON = 'anthropic.message.stop_reason';
+exports.ATTR_ANTHROPIC_MESSAGE_COUNT_TOKENS_INPUT_TOKENS = 'anthropic.message.count_tokens.input_tokens';
+exports.ATTR_ANTHROPIC_REQUEST_SERVICE_TIER = 'anthropic.request.service_tier';
+exports.ATTR_ANTHROPIC_RESPONSE_SERVICE_TIER = 'anthropic.response.service_tier';
+exports.ATTR_ANTHROPIC_THINKING_BUDGET_TOKENS = 'anthropic.thinking.budget_tokens';
+exports.ATTR_ANTHROPIC_THINKING_TYPE = 'anthropic.thinking.type';
+exports.ATTR_ANTHROPIC_TOOL_RESULT_CONTENT = 'anthropic.tool_result.content';
+exports.ATTR_ANTHROPIC_TOOLSET_NAME = 'anthropic.toolset.name';
+exports.ATTR_ANTHROPIC_USAGE_CACHE_CREATION_EPHEMERAL_1H_INPUT_TOKENS = 'anthropic.usage.cache_creation.ephemeral_1h_input_tokens';
+exports.ATTR_ANTHROPIC_USAGE_CACHE_CREATION_EPHEMERAL_5M_INPUT_TOKENS = 'anthropic.usage.cache_creation.ephemeral_5m_input_tokens';
+exports.ATTR_ANTHROPIC_USAGE_COMPACTION_INPUT_TOKENS = 'anthropic.usage.compaction.input_tokens';
+exports.ATTR_ANTHROPIC_USAGE_COMPACTION_OUTPUT_TOKENS = 'anthropic.usage.compaction.output_tokens';
+exports.RESPONSE_HEADER_ATTRIBUTES = [
+    [exports.ATTR_ANTHROPIC_REQUEST_ID, 'request-id'],
+    [exports.ATTR_ANTHROPIC_ORGANIZATION_ID, 'anthropic-organization-id'],
+    [exports.ATTR_ANTHROPIC_WORKSPACE_ID, 'anthropic-workspace-id'],
+];
+//# sourceMappingURL=attributes.js.map
+
+/***/ }),
+
+/***/ 33819:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.setMessageContentAttributes = setMessageContentAttributes;
+exports.toolResultContentBlocks = toolResultContentBlocks;
+exports.setContentAttributes = setContentAttributes;
+const attributes_1 = __nccwpck_require__(37161);
+/**
+ * Sets the content attributes of a `messages.create` API call, within `limit` bytes: first
+ * with the request alone, and again with `output`, the response's content blocks. The second call
+ * sets only the output when that fits beside the request's content, and otherwise sets everything
+ * again to remove more of it.
+ */
+function setMessageContentAttributes(call, body, output, limit) {
+    const span = call.span;
+    const requestSize = call.requestContentSize;
+    if (output !== undefined && requestSize !== undefined) {
+        const outputMessages = JSON.stringify([{ role: 'assistant', parts: contentParts(output) }]);
+        if (requestSize + 3 * outputMessages.length <= limit ||
+            requestSize + utf8Length(outputMessages) <= limit) {
+            span.setAttribute(attributes_1.ATTR_GEN_AI_OUTPUT_MESSAGES, outputMessages);
+            return;
+        }
+    }
+    const size = setContentAttributes(span, {
+        // An empty list sets no attribute.
+        [attributes_1.ATTR_GEN_AI_REQUEST_STOP_SEQUENCES]: body.stop_sequences?.length ? [...body.stop_sequences] : undefined,
+        [attributes_1.ATTR_GEN_AI_SYSTEM_INSTRUCTIONS]: body.system === undefined ? undefined : contentParts(body.system),
+        [attributes_1.ATTR_GEN_AI_INPUT_MESSAGES]: body.messages.map((message) => ({ role: message.role, parts: contentParts(message.content) })),
+        [attributes_1.ATTR_GEN_AI_OUTPUT_MESSAGES]: output === undefined ? undefined : [{ role: 'assistant', parts: contentParts(output) }],
+    }, limit);
+    if (output === undefined) {
+        call.requestContentSize = size;
+    }
+}
+function contentParts(content) {
+    if (typeof content === 'string') {
+        return [{ type: 'text', content }];
+    }
+    return content?.map(blockPart) ?? [];
+}
+/**
+ * The part of a content block. A block that the conventions have no part for is a part with only
+ * a type: image and document data is large and binary, and redacted thinking is encrypted.
+ */
+function blockPart(block) {
+    switch (block.type) {
+        case 'text':
+            return { type: 'text', content: block.text };
+        case 'thinking':
+            return { type: 'reasoning', content: block.thinking };
+        case 'tool_use':
+            return {
+                type: 'tool_call',
+                id: block.id,
+                name: block.name,
+                arguments: block.input,
+                // Only a call to a member of a toolset, such as `computer`, has one.
+                ...(typeof block.toolset_name === 'string' ?
+                    { anthropic_toolset_name: block.toolset_name }
+                    : undefined),
+            };
+        case 'server_tool_use':
+            return { type: 'tool_call', id: block.id, name: block.name, arguments: block.input };
+        case 'mcp_tool_use':
+            return {
+                type: 'tool_call',
+                id: block.id,
+                name: block.name,
+                arguments: block.input,
+                anthropic_mcp_server_name: block.server_name,
+            };
+        case 'tool_result':
+            return {
+                type: 'tool_call_response',
+                id: block.tool_use_id,
+                response: toolResultContentBlocks(block.content),
+            };
+        default:
+            if (typeof block.type !== 'string') {
+                return { type: 'anthropic_unknown' };
+            }
+            if (block.type.endsWith('_tool_result') && 'tool_use_id' in block) {
+                return {
+                    type: 'tool_call_response',
+                    id: block.tool_use_id,
+                    response: resultBlockContent(block.content),
+                };
+            }
+            return { type: `anthropic_${block.type}` };
+    }
+}
+/**
+ * The content blocks of a tool result, always as a list: a result with no content has none. A text
+ * block and a search result block keep their fields ({@link withoutLeftOutFields}), and any other
+ * block has only its type.
+ */
+function toolResultContentBlocks(content) {
+    // A tool written in JavaScript can return `null`, which the runner sends as it is.
+    if (content === undefined || content === null) {
+        return [];
+    }
+    if (typeof content === 'string') {
+        return [{ type: 'text', text: content }];
+    }
+    return content.map((block) => {
+        if (block.type === 'text' || block.type === 'search_result') {
+            return withoutLeftOutFields(block);
+        }
+        if (typeof block.type !== 'string') {
+            return { type: 'unknown' };
+        }
+        return { type: block.type };
+    });
+}
+/**
+ * What a span holds of the content of a server tool's or an MCP tool's result block, which is a
+ * string, a list of blocks, or one object such as a code execution result or an error: always a
+ * list, which holds that one object alone.
+ */
+function resultBlockContent(content) {
+    if (content === undefined || content === null) {
+        return [];
+    }
+    if (typeof content === 'string') {
+        return [{ type: 'text', text: content }];
+    }
+    if (!Array.isArray(content)) {
+        return [withoutLeftOutFields(content)];
+    }
+    return content.map((block) => {
+        if (block.type === 'text' || block.type === 'search_result' || block.type === 'web_search_result') {
+            return withoutLeftOutFields(block);
+        }
+        if (typeof block.type !== 'string') {
+            return { type: 'unknown' };
+        }
+        return { type: block.type };
+    });
+}
+/**
+ * `value` without, at any depth, the fields whose name starts with `encrypted_`, which are opaque,
+ * and without image and document data, which is large and binary.
+ */
+function withoutLeftOutFields(value) {
+    if (Array.isArray(value)) {
+        return value.map(withoutLeftOutFields);
+    }
+    if (typeof value !== 'object' || value === null) {
+        return value;
+    }
+    const { type, file_type } = value;
+    if (type === 'image' || type === 'document') {
+        return { type };
+    }
+    const isImageOrDocumentView = type === 'text_editor_code_execution_view_result' && (file_type === 'image' || file_type === 'pdf');
+    // `Object.fromEntries` defines each field, so one named `__proto__` is kept like any other.
+    return Object.fromEntries(Object.entries(value)
+        .filter(([name]) => !name.startsWith('encrypted_') && !(name === 'content' && isImageOrDocumentView))
+        .map(([name, field]) => [name, withoutLeftOutFields(field)]));
+}
+/**
+ * Sets the content attributes of `span` within `limit` bytes of UTF-8.
+ * `gen_ai.request.stop_sequences` alone is not JSON: the conventions type it as an array of
+ * strings, which every backend takes, and its size is that of its strings. Each other attribute is
+ * one JSON string.
+ *
+ * A UTF-16 code unit takes at most three bytes, so content whose `length` is at most a third of
+ * the limit fits, as most does, and is not measured. Other content is measured in bytes
+ * ({@link utf8Length}).
+ *
+ * First, the stop sequences, and an attribute that {@link ContentAttributes} does not name, are
+ * left out whole when they alone are over the limit. Then message parts are removed to fit
+ * ({@link withoutFirstParts}), and on a tool span the last blocks of the tool result
+ * ({@link truncateToolResultContent}). A span that lost any of these gets
+ * `anthropic.content.truncated`. Only what stays after that can leave a span over the limit: an
+ * emptied list, a message without parts, and the last text part, cut from its end.
+ *
+ * Returns the size of what it set, or more than that when it did not measure.
+ */
+function setContentAttributes(span, attributes, limit) {
+    const { [attributes_1.ATTR_GEN_AI_REQUEST_STOP_SEQUENCES]: stopSequences, [attributes_1.ATTR_GEN_AI_SYSTEM_INSTRUCTIONS]: instructions, [attributes_1.ATTR_GEN_AI_INPUT_MESSAGES]: input, [attributes_1.ATTR_GEN_AI_OUTPUT_MESSAGES]: output, [attributes_1.ATTR_ANTHROPIC_TOOL_RESULT_CONTENT]: toolResult, ...others } = attributes;
+    const messages = {
+        [attributes_1.ATTR_GEN_AI_SYSTEM_INSTRUCTIONS]: instructions,
+        [attributes_1.ATTR_GEN_AI_INPUT_MESSAGES]: input,
+        [attributes_1.ATTR_GEN_AI_OUTPUT_MESSAGES]: output,
+    };
+    const values = {};
+    const blocks = toolResult?.map((block) => JSON.stringify(block));
+    // The 1 more for each string and the 2 are the commas and the brackets of the tool result.
+    const length = [...(stopSequences ?? []), ...(blocks ?? [])].reduce((sum, text) => sum + text.length + 1, 2) +
+        serialize(others, values) +
+        serialize(messages, values);
+    const sizeOf = 3 * length <= limit ? (text) => 3 * text.length : utf8Length;
+    const sizeOfMessages = () => Object.keys(messages).reduce((sum, key) => sum + sizeOf(values[key] ?? ''), 0);
+    const stopSequencesSize = stopSequences?.reduce((sum, each) => sum + sizeOf(each), 0) ?? 0;
+    const keepsStopSequences = stopSequences !== undefined && stopSequencesSize <= limit;
+    let size = keepsStopSequences ? stopSequencesSize : 0;
+    let truncated = stopSequences !== undefined && !keepsStopSequences;
+    for (const key of Object.keys(others)) {
+        const jsonSize = sizeOf(values[key] ?? '');
+        if (jsonSize > limit) {
+            delete values[key];
+            truncated = true;
+        }
+        else {
+            size += jsonSize;
+        }
+    }
+    let messagesSize = sizeOfMessages();
+    if (size + messagesSize > limit) {
+        const { truncated: lostParts, ...fitted } = withoutFirstParts(messages, size + messagesSize - limit);
+        truncated || (truncated = lostParts);
+        serialize(fitted, values);
+        messagesSize = sizeOfMessages();
+    }
+    size += messagesSize;
+    if (blocks !== undefined) {
+        const kept = truncateToolResultContent(blocks, limit - size, sizeOf);
+        values[attributes_1.ATTR_ANTHROPIC_TOOL_RESULT_CONTENT] = kept.json;
+        size += kept.size;
+        truncated || (truncated = kept.truncated);
+    }
+    if (truncated) {
+        span.setAttribute(attributes_1.ATTR_ANTHROPIC_CONTENT_TRUNCATED, true);
+    }
+    if (keepsStopSequences) {
+        span.setAttribute(attributes_1.ATTR_GEN_AI_REQUEST_STOP_SEQUENCES, stopSequences);
+    }
+    for (const [key, value] of Object.entries(values)) {
+        span.setAttribute(key, value);
+    }
+    return size;
+}
+/** Puts the JSON of each defined attribute in `values`, and returns the `length` of what it put there. */
+function serialize(attributes, values) {
+    let length = 0;
+    for (const [key, value] of Object.entries(attributes)) {
+        if (value !== undefined) {
+            values[key] = JSON.stringify(value);
+            length += values[key].length;
+        }
+    }
+    return length;
+}
+/**
+ * `attributes` with `excess` bytes less of JSON. The parts of the system instructions, the
+ * input messages and the output messages are one list, which loses whole parts from its start. The
+ * last part left, when it is a text part, keeps the start of its `content` that fits.
+ */
+function withoutFirstParts(attributes, excess) {
+    const withOwnParts = (messages) => messages?.map((message) => ({ ...message, parts: [...message.parts] }));
+    const instructions = attributes[attributes_1.ATTR_GEN_AI_SYSTEM_INSTRUCTIONS]?.slice();
+    const input = withOwnParts(attributes[attributes_1.ATTR_GEN_AI_INPUT_MESSAGES]);
+    const output = withOwnParts(attributes[attributes_1.ATTR_GEN_AI_OUTPUT_MESSAGES]);
+    const lists = [instructions ?? [], ...[...(input ?? []), ...(output ?? [])].map(({ parts }) => parts)];
+    let left = lists.reduce((sum, parts) => sum + parts.length, 0);
+    let truncated = false;
+    for (const parts of lists) {
+        let removed = 0;
+        while (excess > 0 && removed < parts.length) {
+            const part = parts[removed];
+            const size = utf8Length(JSON.stringify(part));
+            const content = part['content'];
+            if (left === 1 && part.type === 'text' && typeof content === 'string') {
+                const kept = startThatFits(part, content, size - excess);
+                if (kept !== content) {
+                    parts[removed] = { ...part, content: kept };
+                    truncated = true;
+                }
+                break;
+            }
+            // A part that has one after it loses the comma between them too.
+            excess -= size + (removed + 1 < parts.length ? 1 : 0);
+            removed++;
+            left--;
+            truncated = true;
+        }
+        parts.splice(0, removed);
+    }
+    return {
+        [attributes_1.ATTR_GEN_AI_SYSTEM_INSTRUCTIONS]: instructions,
+        [attributes_1.ATTR_GEN_AI_INPUT_MESSAGES]: input,
+        [attributes_1.ATTR_GEN_AI_OUTPUT_MESSAGES]: output,
+        truncated,
+    };
+}
+/**
+ * The longest start of `content` with which the JSON of the text part `part` fits in `limit`
+ * bytes. It never ends between the two halves of a surrogate pair.
+ */
+function startThatFits(part, content, limit) {
+    const room = limit - utf8Length(JSON.stringify({ ...part, content: '' }));
+    // A character takes at least one byte of the JSON, so those that fit are among the first `room`.
+    // In their JSON each is itself, or an escape sequence, which starts with a backslash and is
+    // ASCII. A surrogate pair is one character, and itself: the JSON escapes only a half of one.
+    const head = content.slice(0, Math.max(room, 0));
+    const escaped = JSON.stringify(head);
+    let length = 0;
+    let escapedLength = 0;
+    let size = 0;
+    while (length < head.length) {
+        const point = escaped.codePointAt(1 + escapedLength);
+        const units = point > 0xffff ? 2 : 1;
+        const escapedUnits = point !== 0x5c ? units
+            : escaped[2 + escapedLength] === 'u' ? 6
+                : 2;
+        size +=
+            point < 0x80 ? escapedUnits
+                : point < 0x800 ? 2
+                    : point < 0x10000 ? 3
+                        : 4;
+        if (size > room) {
+            break;
+        }
+        escapedLength += escapedUnits;
+        length += units;
+    }
+    return content.slice(0, length);
+}
+/**
+ * The JSON of the first of `blocks`, each the JSON of a content block of a tool result, that fit
+ * in `limit` bytes, the size of that JSON as `sizeOf` measures it, and whether it is not all of them.
+ */
+function truncateToolResultContent(blocks, limit, sizeOf) {
+    const kept = [];
+    // The JSON of an array is its brackets, its elements, and a comma between each two.
+    let size = 2;
+    for (const block of blocks) {
+        const next = size + (kept.length === 0 ? 0 : 1) + sizeOf(block);
+        if (next > limit) {
+            break;
+        }
+        kept.push(block);
+        size = next;
+    }
+    return { json: '[' + kept.join(',') + ']', size, truncated: kept.length < blocks.length };
+}
+/** The size of `text` in UTF-8, in bytes. It makes no copy of the text to measure it. */
+function utf8Length(text) {
+    let size = 0;
+    for (let index = 0; index < text.length; index++) {
+        const unit = text.charCodeAt(index);
+        if (unit < 0x80) {
+            size += 1;
+        }
+        else if (unit < 0x800) {
+            size += 2;
+        }
+        else if (unit >= 0xd800 && unit < 0xdc00 && (text.charCodeAt(index + 1) & 0xfc00) === 0xdc00) {
+            // The two halves of a surrogate pair are one character of four bytes.
+            size += 4;
+            index++;
+        }
+        else {
+            size += 3;
+        }
+    }
+    return size;
+}
+//# sourceMappingURL=content.js.map
+
+/***/ }),
+
+/***/ 54462:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.startEnvironmentWorkSpan = startEnvironmentWorkSpan;
+exports.endEnvironmentWorkSpan = endEnvironmentWorkSpan;
+exports.failEnvironmentWorkSpan = failEnvironmentWorkSpan;
+exports.withEnvironmentWorkSpan = withEnvironmentWorkSpan;
+const api_1 = __nccwpck_require__(84028);
+const tracing_1 = __nccwpck_require__(91705);
+const attributes_1 = __nccwpck_require__(37161);
+/**
+ * Starts the span of `work`, a Work item that the work poller just claimed, under `parentContext`:
+ * the context of whoever asked the poller for the item.
+ */
+function startEnvironmentWorkSpan(client, work, parentContext) {
+    return client._tracer?.startSpan('anthropic.environment.work', {
+        kind: api_1.SpanKind.INTERNAL,
+        attributes: {
+            [attributes_1.ATTR_GEN_AI_PROVIDER_NAME]: client._genAIProviderName,
+            'anthropic.environment.id': work.environment_id,
+            'anthropic.environment.work.id': work.id,
+            'anthropic.session.id': work.data.id,
+        },
+    }, parentContext);
+}
+/**
+ * Ends the span of a Work item that is finished with as `OK`. The status stays unset when `signal`,
+ * the work poller's, was aborted first: the item was then neither finished with nor failed.
+ */
+function endEnvironmentWorkSpan(span, signal) {
+    if (!span?.isRecording()) {
+        return;
+    }
+    if (!signal.aborted) {
+        span.setStatus({ code: api_1.SpanStatusCode.OK });
+    }
+    span.end();
+}
+/**
+ * Ends the span of a Work item whose handling failed with `error`. The status stays unset when
+ * `signal`, the work poller's, was aborted first, or `error` is such an abort.
+ */
+function failEnvironmentWorkSpan(span, signal, error) {
+    if (!span?.isRecording()) {
+        return;
+    }
+    if (!signal.aborted) {
+        (0, tracing_1.setErrorStatus)(span, error);
+    }
+    span.end();
+}
+/**
+ * Runs `handle`, the environment worker's handling of a Work item, with the item's span current,
+ * and ends the span with how that went.
+ */
+async function withEnvironmentWorkSpan(client, span, signal, handle) {
+    if (!span) {
+        return handle();
+    }
+    try {
+        await api_1.context.with(api_1.trace.setSpan(api_1.context.active(), span), handle);
+    }
+    catch (error) {
+        (0, tracing_1.guardTracing)(client, () => failEnvironmentWorkSpan(span, signal, error));
+        throw error;
+    }
+    (0, tracing_1.guardTracing)(client, () => endEnvironmentWorkSpan(span, signal));
+}
+//# sourceMappingURL=environments.js.map
+
+/***/ }),
+
+/***/ 94432:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.takeTraceHeaders = takeTraceHeaders;
+exports.withoutTraceHeaders = withoutTraceHeaders;
+const trace_headers_1 = __nccwpck_require__(60773);
+/**
+ * Removes the trace-context headers ({@link traceHeaderNames}) from `headers` and returns them.
+ */
+function takeTraceHeaders(headers) {
+    // By the names that `headers` has: a propagator can list a field that `Headers` rejects as a name.
+    const names = (0, trace_headers_1.traceHeaderNames)();
+    const taken = Array.from(headers.entries()).filter(([name]) => names.has(name));
+    for (const [name] of taken) {
+        headers.delete(name);
+    }
+    return taken;
+}
+/**
+ * Returns a middleware that runs `middleware`, which may sign the request, without the trace-context
+ * headers, and sets them again on what `middleware` passes on.
+ */
+function withoutTraceHeaders(middleware) {
+    return (request, next, ctx) => {
+        const headers = new Headers(request.headers);
+        const traceHeaders = takeTraceHeaders(headers);
+        return middleware({ ...request, headers }, (inner) => {
+            const restored = new Headers(inner.headers);
+            for (const [name, value] of traceHeaders)
+                restored.set(name, value);
+            return next({ ...inner, headers: restored });
+        }, ctx);
+    };
+}
+//# sourceMappingURL=headers.js.map
+
+/***/ }),
+
+/***/ 46231:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.setResponseAttributes = setResponseAttributes;
+const attributes_1 = __nccwpck_require__(37161);
+/**
+ * Sets the attributes that come from a Message. The stop reason and the output usage are final
+ * only from the `message_delta` of a streamed Message on, and are set only when `complete` is true.
+ */
+function setResponseAttributes(span, message, usage, complete) {
+    span.setAttribute(attributes_1.ATTR_GEN_AI_RESPONSE_ID, message.id);
+    span.setAttribute(attributes_1.ATTR_GEN_AI_RESPONSE_MODEL, message.model);
+    span.setAttribute(attributes_1.ATTR_GEN_AI_USAGE_INPUT_TOKENS, usage.input_tokens + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0));
+    if (usage.cache_creation_input_tokens != null) {
+        span.setAttribute(attributes_1.ATTR_GEN_AI_USAGE_CACHE_WRITE_INPUT_TOKENS, usage.cache_creation_input_tokens);
+    }
+    if (usage.cache_read_input_tokens != null) {
+        span.setAttribute(attributes_1.ATTR_GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS, usage.cache_read_input_tokens);
+    }
+    const written = usage.cache_creation;
+    if (written != null) {
+        span.setAttribute(attributes_1.ATTR_ANTHROPIC_USAGE_CACHE_CREATION_EPHEMERAL_5M_INPUT_TOKENS, written.ephemeral_5m_input_tokens);
+        span.setAttribute(attributes_1.ATTR_ANTHROPIC_USAGE_CACHE_CREATION_EPHEMERAL_1H_INPUT_TOKENS, written.ephemeral_1h_input_tokens);
+    }
+    if (usage.service_tier != null) {
+        span.setAttribute(attributes_1.ATTR_ANTHROPIC_RESPONSE_SERVICE_TIER, usage.service_tier);
+    }
+    if (!complete) {
+        return;
+    }
+    span.setAttribute(attributes_1.ATTR_GEN_AI_USAGE_OUTPUT_TOKENS, usage.output_tokens);
+    const details = usage.output_tokens_details;
+    if (details != null) {
+        span.setAttribute(attributes_1.ATTR_GEN_AI_USAGE_REASONING_OUTPUT_TOKENS, details.thinking_tokens);
+    }
+    // The usage above leaves out what the compactions used, which only the iterations have.
+    const compactions = usage.iterations?.filter((each) => each.type === 'compaction') ?? [];
+    if (compactions.length > 0) {
+        span.setAttribute(attributes_1.ATTR_ANTHROPIC_USAGE_COMPACTION_INPUT_TOKENS, compactions.reduce((sum, each) => sum + each.input_tokens + each.cache_read_input_tokens + each.cache_creation_input_tokens, 0));
+        span.setAttribute(attributes_1.ATTR_ANTHROPIC_USAGE_COMPACTION_OUTPUT_TOKENS, compactions.reduce((sum, each) => sum + each.output_tokens, 0));
+    }
+    if (message.stop_reason != null) {
+        span.setAttribute(attributes_1.ATTR_ANTHROPIC_MESSAGE_STOP_REASON, message.stop_reason);
+    }
+}
+//# sourceMappingURL=response.js.map
+
+/***/ }),
+
+/***/ 65622:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.recordStreamedMessageContent = recordStreamedMessageContent;
+exports.endAnthropicApiCallSpanWhenStreamEnds = endAnthropicApiCallSpanWhenStreamEnds;
+const api_1 = __nccwpck_require__(84028);
+const error_1 = __nccwpck_require__(69955);
+const streaming_1 = __nccwpck_require__(14465);
+const tracing_1 = __nccwpck_require__(91705);
+const log_1 = __nccwpck_require__(88991);
+const values_1 = __nccwpck_require__(17999);
+const attributes_1 = __nccwpck_require__(37161);
+const content_1 = __nccwpck_require__(33819);
+const response_1 = __nccwpck_require__(46231);
+/**
+ * In content mode, records `message`, which a stream helper accumulated, as the response content
+ * of `call`, under the same size limit as a response that is not streamed.
+ */
+function recordStreamedMessageContent(client, call, body, message) {
+    if (!call.span.isRecording() || client.openTelemetry.traces.contentMode !== 'content') {
+        return;
+    }
+    try {
+        (0, content_1.setMessageContentAttributes)(call, body, message.content, client.openTelemetry.traces.maxContentBytes);
+    }
+    catch (problem) {
+        (0, log_1.loggerFor)(client).debug('could not record the streamed message on its span', problem);
+    }
+}
+/**
+ * Ends `span` when the application's read of `stream` ends. Only the stream of `messages.create`
+ * has events that the span records.
+ */
+function endAnthropicApiCallSpanWhenStreamEnds(client, span, stream, props) {
+    if (props.options.__span?.name === 'anthropic.messages.create' && stream instanceof streaming_1.Stream) {
+        endMessagesCreateSpanWhenStreamEnds(client, span, stream, props);
+    }
+    else {
+        (0, tracing_1.endApiCallSpanWhenStreamEnds)(span, stream, props);
+    }
+}
+/**
+ * Ends the span of a `messages.create` API call when the application's read of `stream` ends, with
+ * the attributes of the Message that the events reconstruct, as far as it was read. The content is
+ * that of a stream helper's Message: the helper records it at `message_stop`
+ * (`recordStreamedMessageContent`), and a stream that ends earlier records it here.
+ */
+function endMessagesCreateSpanWhenStreamEnds(client, span, stream, props) {
+    if (!span.isRecording()) {
+        return;
+    }
+    span.setAttribute(tracing_1.ATTR_HTTP_RESPONSE_STATUS_CODE, props.response.status);
+    const call = props.options.__span;
+    const startTime = call?.startTime;
+    let message;
+    let usage;
+    let sawDelta = false;
+    let sawMessageDelta = false;
+    let sawStop = false;
+    (0, tracing_1.observeStream)(stream, props.controller.signal, {
+        onItem(event) {
+            try {
+                switch (event.type) {
+                    case 'message_start': {
+                        const { id, model, stop_reason } = event.message;
+                        message = { id, model, stop_reason };
+                        usage = { ...event.message.usage };
+                        break;
+                    }
+                    case 'content_block_start':
+                        // A fallback block names the model that produces the rest of the Message.
+                        if (message && event.content_block.type === 'fallback') {
+                            message.model = event.content_block.to.model;
+                        }
+                        break;
+                    case 'message_delta':
+                        if (message && usage) {
+                            // Totals for the whole Message, null when they do not apply, so one that is present
+                            // replaces the earlier value.
+                            usage.output_tokens = event.usage.output_tokens;
+                            if (event.usage.input_tokens != null) {
+                                usage.input_tokens = event.usage.input_tokens;
+                            }
+                            if (event.usage.cache_creation_input_tokens != null) {
+                                usage.cache_creation_input_tokens = event.usage.cache_creation_input_tokens;
+                            }
+                            if (event.usage.cache_read_input_tokens != null) {
+                                usage.cache_read_input_tokens = event.usage.cache_read_input_tokens;
+                            }
+                            if (event.usage.output_tokens_details != null) {
+                                usage.output_tokens_details = event.usage.output_tokens_details;
+                            }
+                            if ('iterations' in event.usage && event.usage.iterations != null) {
+                                usage.iterations = event.usage.iterations;
+                            }
+                            if (event.delta.stop_reason != null) {
+                                message.stop_reason = event.delta.stop_reason;
+                            }
+                            sawMessageDelta = true;
+                        }
+                        break;
+                    case 'message_stop':
+                        sawStop = true;
+                        break;
+                    case 'content_block_delta':
+                        // The first chunk is the first delta, of any type, not an earlier event.
+                        if (!sawDelta && startTime !== undefined) {
+                            span.setAttribute(attributes_1.ATTR_GEN_AI_RESPONSE_TIME_TO_FIRST_CHUNK, (Date.now() - startTime) / 1000);
+                        }
+                        sawDelta = true;
+                        break;
+                    case 'content_block_stop':
+                        break;
+                    default:
+                        (0, values_1.checkNever)(event);
+                }
+            }
+            catch (problem) {
+                (0, log_1.loggerFor)(client).debug('could not record the stream on its span', problem);
+            }
+        },
+        onEnd(end) {
+            try {
+                if (message && usage) {
+                    // `message_delta` has the stop reason and the final output usage, so a stream cut short
+                    // after it still has them.
+                    (0, response_1.setResponseAttributes)(span, message, usage, sawMessageDelta || sawStop);
+                }
+            }
+            catch (problem) {
+                (0, log_1.loggerFor)(client).debug('could not record the stream on its span', problem);
+            }
+            const failure = call?.failure;
+            // A helper that failed on an event did not build the Message that the stream sent.
+            if (!sawStop && call?.streamed && failure === undefined) {
+                recordStreamedMessageContent(client, call, call.streamed.body, call.streamed.message);
+            }
+            if (end.reason === 'failed') {
+                (0, tracing_1.setErrorStatus)(span, end.error);
+            }
+            else if (failure !== undefined) {
+                (0, tracing_1.setErrorStatus)(span, failure, 'client_error');
+            }
+            else if (end.reason === 'completed') {
+                if (sawStop) {
+                    span.setStatus({ code: api_1.SpanStatusCode.OK });
+                }
+                else {
+                    // The application sees the stream end without an error, so only the span fails.
+                    (0, tracing_1.setErrorStatus)(span, new error_1.AnthropicError('The stream ended before message_stop.'), 'api_error');
+                }
+            }
+            // Otherwise the application closed the stream before the API did, which leaves the status
+            // unset, even after `message_stop`.
+            (0, tracing_1.guardTracing)(client, () => span.end());
+        },
+    });
+}
+//# sourceMappingURL=streaming.js.map
+
+/***/ }),
+
+/***/ 10861:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.startToolRunnerSpan = startToolRunnerSpan;
+exports.withToolUseSpan = withToolUseSpan;
+const api_1 = __nccwpck_require__(84028);
+const stainless_helper_header_1 = __nccwpck_require__(50324);
+const tracing_1 = __nccwpck_require__(91705);
+const log_1 = __nccwpck_require__(88991);
+const attributes_1 = __nccwpck_require__(37161);
+const content_1 = __nccwpck_require__(33819);
+/**
+ * Starts the `anthropic.messages.tool_runner` span of one loop of the Messages tool runner, as a
+ * child of the current span. The runner sets its status and ends it.
+ */
+function startToolRunnerSpan(client, params, conversationId) {
+    // A client whose spans are disabled computes nothing for one.
+    if (!client._tracer)
+        return undefined;
+    const hasJSONOutput = params.output_config?.format?.type === 'json_schema' || params.output_format?.type === 'json_schema';
+    return client._tracer.startSpan('anthropic.messages.tool_runner', {
+        kind: api_1.SpanKind.INTERNAL,
+        attributes: {
+            [attributes_1.ATTR_GEN_AI_OPERATION_NAME]: attributes_1.GEN_AI_OPERATION_NAME_VALUE_INVOKE_AGENT,
+            [attributes_1.ATTR_GEN_AI_PROVIDER_NAME]: client._genAIProviderName,
+            [attributes_1.ATTR_GEN_AI_REQUEST_MODEL]: params.model,
+            ...(hasJSONOutput ? { [attributes_1.ATTR_GEN_AI_OUTPUT_TYPE]: attributes_1.GEN_AI_OUTPUT_TYPE_VALUE_JSON } : undefined),
+            ...(conversationId != null ? { [attributes_1.ATTR_GEN_AI_CONVERSATION_ID]: conversationId } : undefined),
+        },
+    });
+}
+/**
+ * Runs `run`, one client tool run of a tool runner, with the run's span current, and returns its
+ * result. An error result fails the span with `tool_error`, unless the application has aborted
+ * `signal`: a canceled run gets no status and no result.
+ */
+async function withToolUseSpan(client, tool, toolUse, options, run) {
+    // A client whose spans are disabled computes nothing for one.
+    const tracer = client._tracer;
+    if (!tracer)
+        return run();
+    const { signal, conversationId, sessionID, parentContext = api_1.context.active() } = options;
+    // Only a tool that the application or an MCP server defines has a description. It is not content.
+    const description = 'description' in tool ? tool.description : undefined;
+    const attributes = {
+        [attributes_1.ATTR_GEN_AI_OPERATION_NAME]: attributes_1.GEN_AI_OPERATION_NAME_VALUE_EXECUTE_TOOL,
+        [attributes_1.ATTR_GEN_AI_PROVIDER_NAME]: client._genAIProviderName,
+        [attributes_1.ATTR_GEN_AI_TOOL_NAME]: toolUse.name,
+        // Only a call to a member of a toolset, such as `computer`, has one.
+        ...('toolset_name' in toolUse && typeof toolUse.toolset_name === 'string' ?
+            { [attributes_1.ATTR_ANTHROPIC_TOOLSET_NAME]: toolUse.toolset_name }
+            : undefined),
+        ...(description ? { [attributes_1.ATTR_GEN_AI_TOOL_DESCRIPTION]: description } : undefined),
+        [attributes_1.ATTR_GEN_AI_TOOL_CALL_ID]: toolUse.id,
+        [attributes_1.ATTR_GEN_AI_TOOL_TYPE]: attributes_1.GEN_AI_TOOL_TYPE_VALUE_FUNCTION,
+        ...(conversationId != null ? { [attributes_1.ATTR_GEN_AI_CONVERSATION_ID]: conversationId } : undefined),
+        ...(sessionID != null ? { 'anthropic.session.id': sessionID } : undefined),
+        // Only a Session event of a child thread has one.
+        ...('session_thread_id' in toolUse && toolUse.session_thread_id != null ?
+            { 'anthropic.session.thread.id': toolUse.session_thread_id }
+            : undefined),
+    };
+    const operation = toolUse.type === 'agent.tool_use' ? 'anthropic.tool_use'
+        : (0, stainless_helper_header_1.wasCreatedByStainlessHelper)(tool) && tool[stainless_helper_header_1.SDK_HELPER_SYMBOL] === 'mcpTool' ? 'anthropic.mcp_tool_use'
+            : 'anthropic.custom_tool_use';
+    const span = (0, tracing_1.guardTracing)(client, () => tracer.startSpan(`${operation} ${toolUse.name}`, { kind: api_1.SpanKind.INTERNAL, attributes }, parentContext));
+    if (!span)
+        return run();
+    let result;
+    try {
+        result = await api_1.context.with(api_1.trace.setSpan(parentContext, span), run);
+        return result;
+    }
+    finally {
+        // `run` makes an error result of what the tool throws, so no result is the runner's own failure.
+        const succeeded = result !== undefined && !result.isError;
+        const canceled = !succeeded && signal?.aborted === true;
+        const { contentMode, maxContentBytes } = client.openTelemetry.traces;
+        if (contentMode === 'content' && span.isRecording()) {
+            try {
+                (0, content_1.setContentAttributes)(span, {
+                    [attributes_1.ATTR_GEN_AI_TOOL_CALL_ARGUMENTS]: toolUse.input,
+                    [attributes_1.ATTR_ANTHROPIC_TOOL_RESULT_CONTENT]: result && !canceled ? (0, content_1.toolResultContentBlocks)(result.content) : undefined,
+                }, maxContentBytes);
+            }
+            catch (problem) {
+                // A failure to record telemetry, such as content that JSON cannot hold, must not fail the run.
+                (0, log_1.loggerFor)(client).debug('could not record the tool run on its span', problem);
+            }
+        }
+        (0, tracing_1.guardTracing)(client, () => {
+            if (succeeded) {
+                span.setStatus({ code: api_1.SpanStatusCode.OK });
+            }
+            else if (!canceled) {
+                (0, tracing_1.setErrorStatus)(span, result, 'tool_error');
+            }
+            span.end();
+        });
+    }
+}
+//# sourceMappingURL=tools.js.map
+
+/***/ }),
+
 /***/ 82793:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -43976,6 +48650,7 @@ const error_1 = __nccwpck_require__(69955);
 const streaming_1 = __nccwpck_require__(14465);
 const errors_1 = __nccwpck_require__(17384);
 const headers_1 = __nccwpck_require__(60017);
+const shims_1 = __nccwpck_require__(70693);
 const stainless_helper_header_1 = __nccwpck_require__(50324);
 const values_1 = __nccwpck_require__(17999);
 var request_options_1 = __nccwpck_require__(21561);
@@ -44066,10 +48741,10 @@ function patchField(target, key, value) {
  * still-open stream, so the client sees one continuous message in the
  * server-side `fallbacks` wire shape: a `fallback` content block at each model
  * boundary, monotonic block indices, and per-hop `usage.iterations` on the
- * final `message_delta`. Only `model` is honored from each entry on this path:
- * the credit token is redeemable only against the refused request's body, so
- * the other per-entry overrides (`max_tokens`, `thinking`, ...) would be
- * rejected.
+ * final `message_delta`. Only `model` and `speed` are honored from each entry
+ * on this path. The other per-entry overrides are ignored, because the credit
+ * token is tied to the refused request's body. A `speed` value replaces the
+ * request's, and `speed: null` omits it.
  *
  * A `between_tools` thinking config is sent to a fallback as `disabled`, since
  * the fallback model may not accept it; when not streaming, an entry that sets
@@ -44083,6 +48758,10 @@ function patchField(target, key, value) {
  * rejects (HTTP 400) is retried once without it; a fallback whose request
  * fails outright is skipped — its token was never redeemed, so it carries to
  * the next entry.
+ *
+ * A `speed: 'fast'` request that falls back to an entry with no `speed`, and
+ * is rejected with a 429 or 529, is retried once on that entry without
+ * `speed`. Set `speed: 'fast'` on the entry to keep it fast-only.
  *
  * To keep later requests on the model that accepted, pass a
  * {@link BetaFallbackState} via the `fallbackState` request option; requests
@@ -44145,7 +48824,9 @@ function betaRefusalFallbackMiddleware(fallbacks, options = {}) {
         // a non-string body can't be respliced or redeemed against — leave the
         // request untouched (the streaming path stands down on it below too)
         const initialRequest = typeof request.body !== 'string' ? request : { ...request, body: JSON.stringify(initialBody) };
-        const response = await next(initialRequest);
+        const response = startIndex === -1 ?
+            await next(initialRequest)
+            : (await sendHop(next, ctx, fallbacks[startIndex], initialRequest)).response;
         if (!response.ok) {
             return response;
         }
@@ -44195,7 +48876,7 @@ function betaRefusalFallbackMiddleware(fallbacks, options = {}) {
                 trigger: { type: 'refusal', category: message.stop_details?.category ?? null },
             });
             requestedModel = entry.model;
-            res = await next({
+            ({ response: res } = await sendHop(next, ctx, entry, {
                 ...request,
                 body: JSON.stringify({
                     ...applyFallbackPatch(body, entry),
@@ -44203,7 +48884,7 @@ function betaRefusalFallbackMiddleware(fallbacks, options = {}) {
                         { fallback_credit_token: creditTokenParam(message.stop_details.fallback_credit_token) }
                         : undefined),
                 }),
-            });
+            }));
         }
         if (fallbackBlocks.length === 0) {
             return res;
@@ -44302,7 +48983,9 @@ async function* splicedEvents({ request, response, next, ctx, fallbacks, firstHo
         toIterationUsage('message', a.model ?? '', a.refused.usage),
     ];
     for (let hop = firstHop; hop < fallbacks.length; hop++) {
-        const model = fallbacks[hop].model;
+        const entry = fallbacks[hop];
+        const { model } = entry;
+        let { speed } = entry;
         const hasNext = hop + 1 < fallbacks.length;
         pin(hop);
         // --- boundary: a `fallback` content block at the next monotonic index ---
@@ -44333,12 +49016,15 @@ async function* splicedEvents({ request, response, next, ctx, fallbacks, firstHo
         let resB = null;
         let failure = null;
         for (let attempt = 0; attempt < 2; attempt++) {
-            const reqB = buildFallbackRequest(request, { model, creditToken: token, continuation });
+            const reqB = buildFallbackRequest(request, { model, speed, creditToken: token, continuation });
             // controller mirrors the original signal and additionally fires when the
             // spliced body is cancelled — either must abort an in-flight hop request.
             reqB.signal = controller.signal;
             try {
-                resB = await next(reqB);
+                const sent = await sendHop(next, ctx, entry, reqB);
+                resB = sent.response;
+                if (sent.droppedSpeed)
+                    speed = null;
             }
             catch (err) {
                 // the consumer cancelled (or the original request was aborted): unwind
@@ -44615,10 +49301,11 @@ class BlockTracker {
 function creditTokenParam(token) {
     return { token, mode: 'best_effort' };
 }
-function buildFallbackRequest(orig, { model, creditToken, continuation, }) {
+function buildFallbackRequest(orig, { model, speed, creditToken, continuation, }) {
     // the caller guarantees a JSON string body (checked before stream A is read)
     const body = JSON.parse(orig.body);
     body.model = model;
+    patchField(body, 'speed', speed);
     body.fallback_credit_token = creditTokenParam(creditToken);
     if (body.thinking?.type === 'between_tools') {
         body.thinking = { type: 'disabled' };
@@ -44630,15 +49317,30 @@ function buildFallbackRequest(orig, { model, creditToken, continuation, }) {
     if (continuation.length) {
         body.messages = [...body.messages, { role: 'assistant', content: continuation }];
     }
-    // Do NOT touch max_tokens (or any other render-shaping field): the token is
-    // only redeemable against the same request body as the refused request —
-    // model, fallback_credit_token, and the one appended assistant turn are the
-    // only permitted deltas; anything else is a 400 ("request body ... does not
-    // match the original refused request"). This is also why the per-entry
-    // BetaFallbackParam overrides are ignored on the streaming path. The one
-    // exception is a carried `between_tools` thinking config, which the fallback
-    // model may not accept: it becomes `disabled`, served without the credit.
+    // The other per-entry overrides are not applied, because the credit token is
+    // tied to the refused request's body. `speed` and a carried `between_tools`
+    // thinking config are the exceptions: the fallback model may not accept them.
     return { ...orig, headers: new Headers(orig.headers), body: JSON.stringify(body) };
+}
+/**
+ * Send a request built from `entry`. One that is `fast` only because the
+ * original request was, and is rejected with a 429 or 529, is resent once
+ * without `speed`, and that response stands in for the first. `droppedSpeed`
+ * tells the caller, so a later request for the same hop can leave it out too.
+ */
+async function sendHop(next, ctx, entry, request) {
+    const response = await next(request);
+    if ((response.status !== 429 && response.status !== 529) ||
+        entry.speed !== undefined ||
+        typeof request.body !== 'string') {
+        return { response, droppedSpeed: false };
+    }
+    const { speed, ...body } = JSON.parse(request.body);
+    if (speed !== 'fast')
+        return { response, droppedSpeed: false };
+    ctx.logger.info(`anthropic-sdk: betaRefusalFallbackMiddleware: fast fallback request to ${entry.model} was rejected (HTTP ${response.status}); retrying without \`speed\``);
+    await (0, shims_1.CancelReadableStream)(response.body);
+    return { response: await next({ ...request, body: JSON.stringify(body) }), droppedSpeed: true };
 }
 // --- block accumulation & prefill conversion -------------------------------
 /** Apply a content_block_delta to the accumulating block at `index`. */
@@ -44849,6 +49551,7 @@ exports.toolName = toolName;
 exports.toolErrorContent = toolErrorContent;
 exports.runRunnableTool = runRunnableTool;
 const ToolError_1 = __nccwpck_require__(81429);
+const sanitize_1 = __nccwpck_require__(51748);
 /**
  * The name the model calls a tool by: `mcp_server_name` for MCP toolsets, `type` for nameless server
  * toolsets (browser/computer), `name` for everything else.
@@ -44860,7 +49563,7 @@ function toolName(tool) {
 }
 /** Tool-result content for a thrown value: a {@link ToolError}'s own content, otherwise `Error: <message>`. */
 function toolErrorContent(e) {
-    return e instanceof ToolError_1.ToolError ? e.content : `Error: ${e instanceof Error ? e.message : String(e)}`;
+    return e instanceof ToolError_1.ToolError ? e.content : (0, sanitize_1.thrownErrorText)(e);
 }
 /** Parse the input, run the tool, and turn anything thrown into an error result. */
 async function runRunnableTool(tool, rawInput, context) {
@@ -44882,19 +49585,28 @@ async function runRunnableTool(tool, rawInput, context) {
 
 "use strict";
 
-var _BetaToolRunner_instances, _BetaToolRunner_consumed, _BetaToolRunner_mutated, _BetaToolRunner_state, _BetaToolRunner_options, _BetaToolRunner_message, _BetaToolRunner_stream, _BetaToolRunner_toolResponse, _BetaToolRunner_completion, _BetaToolRunner_iterationCount, _BetaToolRunner_compaction, _BetaToolRunner_calls, _BetaToolRunner_lastStopReason, _BetaToolRunner_toolOverrides, _BetaToolRunner_pendingToolChanges, _BetaToolRunner_send, _BetaToolRunner_streamThatStartsTools, _BetaToolRunner_startedCallsSettled, _BetaToolRunner_compact, _BetaToolRunner_runnableTools, _BetaToolRunner_availableToolNames, _BetaToolRunner_recordRemovalsFromHistory, _BetaToolRunner_compactAfterFinalTurn, _BetaToolRunner_generateToolResponse, _BetaToolRunner_flushPendingToolChanges, _BetaToolRunner_pendingToolChangesMessage;
+var _BetaToolRunner_instances, _BetaToolRunner_consumed, _BetaToolRunner_mutated, _BetaToolRunner_state, _BetaToolRunner_options, _BetaToolRunner_message, _BetaToolRunner_stream, _BetaToolRunner_toolResponse, _BetaToolRunner_completion, _BetaToolRunner_iterationCount, _BetaToolRunner_toolRunnerOtelContext, _BetaToolRunner_compaction, _BetaToolRunner_calls, _BetaToolRunner_lastStopReason, _BetaToolRunner_toolOverrides, _BetaToolRunner_pendingToolChanges, _BetaToolRunner_withToolRunnerSpan, _BetaToolRunner_send, _BetaToolRunner_streamThatStartsTools, _BetaToolRunner_startedCallsSettled, _BetaToolRunner_compact, _BetaToolRunner_runnableTools, _BetaToolRunner_availableToolNames, _BetaToolRunner_recordRemovalsFromHistory, _BetaToolRunner_compactAfterFinalTurn, _BetaToolRunner_generateToolResponse, _BetaToolRunner_toolsetFamilies, _BetaToolRunner_flushPendingToolChanges, _BetaToolRunner_pendingToolChangesMessage;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.BetaToolRunner = void 0;
 const tslib_1 = __nccwpck_require__(14839);
-const ToolError_1 = __nccwpck_require__(81429);
+const api_1 = __nccwpck_require__(84028);
+const BetaRunnableTool_1 = __nccwpck_require__(35280);
+const family_1 = __nccwpck_require__(96815);
+const run_1 = __nccwpck_require__(39766);
+const sanitize_1 = __nccwpck_require__(51748);
+const errors_1 = __nccwpck_require__(78852);
 const error_1 = __nccwpck_require__(69955);
 const beta_1 = __nccwpck_require__(79221);
 const BetaToolRunnerStream_1 = __nccwpck_require__(57589);
+const tracing_1 = __nccwpck_require__(91705);
+const tracing_2 = __nccwpck_require__(38225);
 const headers_1 = __nccwpck_require__(60017);
 const promise_1 = __nccwpck_require__(65760);
 const values_1 = __nccwpck_require__(17999);
 const log_1 = __nccwpck_require__(88991);
 const stainless_helper_header_1 = __nccwpck_require__(50324);
+const USE_A_NEW_RUNNER = "a tool runner's toolsets come only from its tools param; change them with setMessagesParams(), or build a new runner";
+const REMOVE_WITH_A_NEW_RUNNER = "a tool runner's toolsets come only from its tools param; remove it there with setMessagesParams(), or build a new runner without it";
 var BetaToolRunner = /* @__PURE__ */ (() => {
     /**
      * A ToolRunner handles the automatic conversation loop between the assistant and tools.
@@ -44924,6 +49636,11 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
             _BetaToolRunner_completion.set(this, void 0);
             /** Number of iterations (API requests) made so far */
             _BetaToolRunner_iterationCount.set(this, 0);
+            /**
+             * The OpenTelemetry `Context` of the loop that is running: the one that was active when the loop
+             * started, with the tool runner span set as the active span.
+             */
+            _BetaToolRunner_toolRunnerOtelContext.set(this, void 0);
             /** A compaction scheduled with `compactBeforeNextTurn()`, in flight until its response has been handled */
             _BetaToolRunner_compaction.set(this, { status: 'idle' });
             /** The tool calls of the current reply that are held or have started, by `tool_use` id. See `runToolsEagerly`. */
@@ -44953,9 +49670,8 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
                     messages: JSON.parse(JSON.stringify(withToolDefinitions(params.messages))),
                 },
             }, "f");
-            // Cloning drops symbol-keyed properties, so collect helper marks
-            // from the original params here — the create()-side collector won't see
-            // them on the cloned messages.
+            // Cloning drops symbol-keyed properties, so collect helper marks from the original params here: the
+            // create()-side collector won't find them on the cloned messages, nor on a toolset's serialized entry.
             const collected = (0, stainless_helper_header_1.collectStainlessHelpers)(params.tools, params.messages);
             tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_options, {
                 ...options,
@@ -44967,7 +49683,12 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
             }, "f");
             tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_completion, (0, promise_1.promiseWithResolvers)(), "f");
         }
-        async *[(_BetaToolRunner_consumed = new WeakMap(), _BetaToolRunner_mutated = new WeakMap(), _BetaToolRunner_state = new WeakMap(), _BetaToolRunner_options = new WeakMap(), _BetaToolRunner_message = new WeakMap(), _BetaToolRunner_stream = new WeakMap(), _BetaToolRunner_toolResponse = new WeakMap(), _BetaToolRunner_completion = new WeakMap(), _BetaToolRunner_iterationCount = new WeakMap(), _BetaToolRunner_compaction = new WeakMap(), _BetaToolRunner_calls = new WeakMap(), _BetaToolRunner_lastStopReason = new WeakMap(), _BetaToolRunner_toolOverrides = new WeakMap(), _BetaToolRunner_pendingToolChanges = new WeakMap(), _BetaToolRunner_instances = new WeakSet(), Symbol.asyncIterator)]() {
+        async *[(_BetaToolRunner_consumed = new WeakMap(), _BetaToolRunner_mutated = new WeakMap(), _BetaToolRunner_state = new WeakMap(), _BetaToolRunner_options = new WeakMap(), _BetaToolRunner_message = new WeakMap(), _BetaToolRunner_stream = new WeakMap(), _BetaToolRunner_toolResponse = new WeakMap(), _BetaToolRunner_completion = new WeakMap(), _BetaToolRunner_iterationCount = new WeakMap(), _BetaToolRunner_toolRunnerOtelContext = new WeakMap(), _BetaToolRunner_compaction = new WeakMap(), _BetaToolRunner_calls = new WeakMap(), _BetaToolRunner_lastStopReason = new WeakMap(), _BetaToolRunner_toolOverrides = new WeakMap(), _BetaToolRunner_pendingToolChanges = new WeakMap(), _BetaToolRunner_instances = new WeakSet(), _BetaToolRunner_withToolRunnerSpan = function _BetaToolRunner_withToolRunnerSpan(fn) {
+            if (!tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_toolRunnerOtelContext, "f")) {
+                return fn();
+            }
+            return api_1.context.with(tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_toolRunnerOtelContext, "f"), fn);
+        }, Symbol.asyncIterator)]() {
             var _a;
             if (tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_consumed, "f")) {
                 throw new error_1.AnthropicError('Cannot iterate over a consumed stream');
@@ -44975,6 +49696,8 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
             tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_consumed, true, "f");
             tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_mutated, true, "f");
             tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_toolResponse, undefined, "f");
+            const toolRunnerSpan = (0, tracing_1.guardTracing)(this.client, () => (0, tracing_2.startToolRunnerSpan)(this.client, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f").openTelemetry?.conversationId));
+            tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_toolRunnerOtelContext, toolRunnerSpan && api_1.trace.setSpan(api_1.context.active(), toolRunnerSpan), "f");
             try {
                 while (true) {
                     try {
@@ -44995,42 +49718,47 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
                         tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_message, undefined, "f");
                         const { max_iterations, runToolsEagerly, ...params } = tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params;
                         yield* tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_send).call(this, params);
-                        if (!tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_mutated, "f")) {
-                            const message = await tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_message, "f");
-                            const nextStep = determineNextStepFromStopReason(message.stop_reason);
-                            tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_lastStopReason, message.stop_reason, "f");
-                            tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.messages.push({
-                                role: message.role,
-                                content: asContentParam(message.content),
-                            });
-                            // Container-bound server tools reject a follow-up request that omits the container the
-                            // previous turn ran in, so carry its id forward unless the caller pinned one themselves.
-                            const { container } = tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params;
-                            if (message.container) {
-                                if (container == null) {
-                                    tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.container = message.container.id;
+                        const next = await tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_withToolRunnerSpan).call(this, async () => {
+                            if (!tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_mutated, "f")) {
+                                const message = await tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_message, "f");
+                                const nextStep = determineNextStepFromStopReason(message.stop_reason);
+                                tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_lastStopReason, message.stop_reason, "f");
+                                tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.messages.push({
+                                    role: message.role,
+                                    content: asContentParam(message.content),
+                                });
+                                // Container-bound server tools reject a follow-up request that omits the container the
+                                // previous turn ran in, so carry its id forward unless the caller pinned one themselves.
+                                const { container } = tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params;
+                                if (message.container) {
+                                    if (container == null) {
+                                        tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.container = message.container.id;
+                                    }
+                                    else if (typeof container === 'object' && container.id == null) {
+                                        tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.container = { ...container, id: message.container.id };
+                                    }
                                 }
-                                else if (typeof container === 'object' && container.id == null) {
-                                    tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.container = { ...container, id: message.container.id };
+                                if (nextStep === 'stop') {
+                                    return 'stop';
+                                }
+                                if (nextStep === 'resume') {
+                                    return 'continue';
                                 }
                             }
-                            if (nextStep === 'stop') {
-                                yield* tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_compactAfterFinalTurn).call(this);
-                                break;
+                            else {
+                                // The caller has taken over the history, so the last response no longer says how it ends.
+                                tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_lastStopReason, null, "f");
                             }
-                            if (nextStep === 'resume') {
-                                continue;
+                            const toolMessage = await tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_generateToolResponse).call(this, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.messages.at(-1), tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f").signal, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_toolRunnerOtelContext, "f"));
+                            if (toolMessage) {
+                                tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.messages.push(toolMessage);
                             }
-                        }
-                        else {
-                            // The caller has taken over the history, so the last response no longer says how it ends.
-                            tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_lastStopReason, null, "f");
-                        }
-                        const toolMessage = await tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_generateToolResponse).call(this, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.messages.at(-1));
-                        if (toolMessage) {
-                            tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.messages.push(toolMessage);
-                        }
-                        else if (!tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_mutated, "f")) {
+                            else if (!tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_mutated, "f")) {
+                                return 'stop';
+                            }
+                            return 'continue';
+                        });
+                        if (next === 'stop') {
                             yield* tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_compactAfterFinalTurn).call(this);
                             break;
                         }
@@ -45045,14 +49773,23 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
                     throw new error_1.AnthropicError('ToolRunner concluded without a message from the server');
                 }
                 tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_completion, "f").resolve(await tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_message, "f"));
+                (0, tracing_1.guardTracing)(this.client, () => toolRunnerSpan?.setStatus({ code: api_1.SpanStatusCode.OK }));
             }
             catch (error) {
+                if (toolRunnerSpan) {
+                    (0, tracing_1.guardTracing)(this.client, () => (0, tracing_1.setErrorStatus)(toolRunnerSpan, error));
+                }
                 tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_consumed, false, "f");
                 // Silence unhandled promise errors
                 tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_completion, "f").promise.catch(() => { });
                 tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_completion, "f").reject(error);
                 tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_completion, (0, promise_1.promiseWithResolvers)(), "f");
                 throw error;
+            }
+            finally {
+                // Ends with no status when the application closed the iterator: a cancellation.
+                (0, tracing_1.guardTracing)(this.client, () => toolRunnerSpan?.end());
+                tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_toolRunnerOtelContext, undefined, "f");
             }
         }
         setMessagesParams(paramsOrMutator) {
@@ -45094,11 +49831,14 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
          * }
          */
         async generateToolResponse(signal = tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f").signal) {
+            // Read before the first `await`: a context manager that does not follow promises has lost the
+            // caller's context after it. Only a tool span has a use for it.
+            const callerOtelContext = this.client._tracer ? api_1.context.active() : undefined;
             const message = (await tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_message, "f")) ?? this.params.messages.at(-1);
             if (!message) {
                 return null;
             }
-            return tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_generateToolResponse).call(this, message, signal);
+            return tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_generateToolResponse).call(this, message, signal, callerOtelContext);
         }
         /**
          * Hold a tool call of the current reply until you are done with the reply, which is when it runs without
@@ -45107,7 +49847,8 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
          * With `runToolsEagerly` the runner otherwise starts each call while the reply streams, as soon as
          * the model has moved on from it: when the next block starts, or the reply stops with `tool_use`. A call
          * never starts before your stream listeners and any `for await` over the stream have handled that event, so
-         * you can call this from either once you have seen the call. The other calls of the reply still start early.
+         * you can call this from either once you have seen the call. The other calls of the reply still start early,
+         * except the later calls of the same toolset, which a toolset runs in order.
          * It does nothing for a call that has started, outside the loop body, and without `runToolsEagerly`.
          *
          * @param toolUse - The `tool_use` block of the call, or its id
@@ -45263,9 +50004,11 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
          *
          * Each tool's whole definition is sent in a `tool_addition` block with the next request, and a
          * runnable tool replaces a runnable tool of the same name straight away, even for a call already in
-         * the message being handled. A call that started while the reply streamed keeps the old one. A raw
-         * definition is only sent: the runner never runs it, and stops running a tool of the same name.
-         * Requires the `inline-tools-2026-09-15` beta, which the runner does not add for you.
+         * the message being handled. A call that started while the reply streamed keeps the old one. A raw definition
+         * is only sent: the runner never runs it, and stops running a tool of the same name. Passing a runnable toolset,
+         * or a raw definition of a toolset the runner has, throws `ToolsetContractError` and adds nothing: a runner's
+         * toolsets come only from `params.tools`. A tool named like one of its toolsets is left to the API, which rejects
+         * it with the next request. Requires the `inline-tools-2026-09-15` beta, which the runner does not add for you.
          *
          * @param tools - Runnable tools (for example from `betaZodTool()`) or raw tool definitions
          *
@@ -45273,6 +50016,18 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
          * runner.addTools(queryDatabaseTool);
          */
         addTools(...tools) {
+            const families = tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_toolsetFamilies).call(this);
+            for (const tool of tools) {
+                if ((0, family_1.isRunnableToolset)(tool)) {
+                    throw new errors_1.ToolsetContractError(`addTools() can't add the '${(0, sanitize_1.quotedName)((0, family_1.toolsetFamily)(tool))}' toolset: ${USE_A_NEW_RUNNER}`);
+                }
+                // The API treats a definition of one of the runner's families as replacing that toolset, which would leave the
+                // model with a toolset the runner doesn't run.
+                const family = definitionFamily(tool);
+                if (families.has(family)) {
+                    throw new errors_1.ToolsetContractError(`addTools() can't replace the '${(0, sanitize_1.quotedName)(family)}' toolset: ${USE_A_NEW_RUNNER}`);
+                }
+            }
             for (const tool of tools) {
                 // A definition without a `name` (an `mcp_toolset`) is nothing the runner runs or stops running.
                 if ('name' in tool) {
@@ -45285,10 +50040,11 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
          * Take tools away from the model without changing `params.tools`, which would miss the prompt cache.
          *
          * The tools stop being run straight away: a call to one of them, even one in the message being
-         * handled, gets the same "not found" error result as a call to an unknown tool. A call that started
-         * while the reply streamed finishes as usual. The model is told in a `tool_removal` block with the
-         * next request. Use {@link addTools} to bring a tool back.
-         * Requires the `inline-tools-2026-09-15` beta, which the runner does not add for you.
+         * handled, gets the same "not found" error result as a call to an unknown tool. A call that started while the
+         * reply streamed finishes as usual. The model is told in a `tool_removal` block with the next request. Use
+         * {@link addTools} to bring a tool back. Passing the name of one of the runner's toolsets throws
+         * `ToolsetContractError` and removes nothing. Requires the `inline-tools-2026-09-15` beta, which the runner does
+         * not add for you.
          *
          * @param tools - The tools to remove, or their names
          *
@@ -45296,6 +50052,14 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
          * runner.removeTools('query_database');
          */
         removeTools(...tools) {
+            const families = tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_toolsetFamilies).call(this);
+            for (const tool of tools) {
+                // A toolset's name is always its own: the API rejects any other tool of that name.
+                const name = typeof tool === 'string' ? tool : tool.name;
+                if (families.has(name)) {
+                    throw new errors_1.ToolsetContractError(`removeTools() can't remove the '${(0, sanitize_1.quotedName)(name)}' toolset: ${REMOVE_WITH_A_NEW_RUNNER}`);
+                }
+            }
             for (const tool of tools) {
                 const name = typeof tool === 'string' ? tool : tool.name;
                 tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_toolOverrides, "f").set(name, null);
@@ -45319,15 +50083,15 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
     async function* _BetaToolRunner_send(params) {
         await tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_startedCallsSettled).call(this);
         tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_calls, undefined, "f");
-        params = {
+        params = tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_withToolRunnerSpan).call(this, () => ({
             ...params,
             ...(params.tools && { tools: params.tools.map(toolDefinition) }),
             messages: withToolDefinitions(params.messages),
-        };
+        }));
         if (params.stream) {
-            tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_stream, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.runToolsEagerly ?
+            tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_stream, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_withToolRunnerSpan).call(this, () => tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.runToolsEagerly ?
                 tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_streamThatStartsTools).call(this, params)
-                : this.client.beta.messages.stream({ ...params }, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f")), "f");
+                : this.client.beta.messages.stream({ ...params }, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f"))), "f");
             tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_message, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_stream, "f").finalMessage(), "f");
             // Make sure that this promise doesn't throw before we get the option to do something about it.
             // Error will be caught when we call await this.#message ultimately
@@ -45335,19 +50099,42 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
             yield tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_stream, "f");
         }
         else {
-            tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_message, this.client.beta.messages.create({ ...params, stream: false }, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f")), "f");
+            tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_message, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_withToolRunnerSpan).call(this, () => this.client.beta.messages.create({ ...params, stream: false }, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f"))), "f");
             yield tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_message, "f");
         }
     }, _BetaToolRunner_streamThatStartsTools = function _BetaToolRunner_streamThatStartsTools(params) {
         const calls = new Map();
         tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_calls, calls, "f");
-        return BetaToolRunnerStream_1.BetaToolRunnerStream.start(this.client.beta.messages, params, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f"), (toolUse) => {
+        // A toolset runs its calls one at a time, in the model's order. So a toolset's call starts here only while the
+        // toolset is idle, and once one of its calls waits for the reply or fails, its later calls wait for the reply too.
+        const toolsets = new Map();
+        return BetaToolRunnerStream_1.BetaToolRunnerStream.start(this.client, params, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f"), (toolUse) => {
             // Held, or started by `generateToolResponse()` before a reader that is behind got to the call.
-            if (calls.has(toolUse.id)) {
+            const known = calls.has(toolUse.id);
+            // A call named after a toolset is a toolset call with malformed actions, which `generateToolResponse()` answers.
+            const malformed = !toolUse.toolset_name && tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_toolsetFamilies).call(this).has(toolUse.name);
+            const family = malformed ? toolUse.name : toolUse.toolset_name;
+            if (family) {
+                if (known || malformed || toolsets.has(family)) {
+                    toolsets.set(family, 'waiting');
+                    return;
+                }
+                toolsets.set(family, 'running');
+                const result = runToolsetCall(tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params, family, toolUse, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f"), this.client, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_toolRunnerOtelContext, "f"));
+                calls.set(toolUse.id, { status: 'started', result });
+                result.then(({ is_error }) => {
+                    if (is_error || toolsets.get(family) === 'waiting')
+                        toolsets.set(family, 'waiting');
+                    else
+                        toolsets.delete(family);
+                }, () => toolsets.set(family, 'waiting'));
+                return;
+            }
+            if (known) {
                 return;
             }
             // The call looks its tool up now, so a later `addTools()` or `removeTools()` doesn't change it.
-            const result = runToolCall(tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_runnableTools).call(this), tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_availableToolNames).call(this), toolUse, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f"));
+            const result = runToolCall(tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_runnableTools).call(this), tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_availableToolNames).call(this), toolUse, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f"), this.client, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_toolRunnerOtelContext, "f"));
             // Marks a rejection as handled until the results are collected.
             result.catch(() => { });
             calls.set(toolUse.id, { status: 'started', result });
@@ -45384,7 +50171,7 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
     }, _BetaToolRunner_runnableTools = function _BetaToolRunner_runnableTools() {
         const runnable = new Map();
         for (const tool of tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.tools) {
-            if ('run' in tool) {
+            if ('run' in tool && 'name' in tool) {
                 runnable.set(tool.name, tool);
             }
         }
@@ -45437,12 +50224,14 @@ var BetaToolRunner = /* @__PURE__ */ (() => {
             return;
         }
         yield* tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_compact).call(this, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_compaction, "f").config);
-    }, _BetaToolRunner_generateToolResponse = async function _BetaToolRunner_generateToolResponse(lastMessage, signal = tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f").signal) {
+    }, _BetaToolRunner_generateToolResponse = async function _BetaToolRunner_generateToolResponse(lastMessage, signal, toolOtelContext) {
         if (tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_toolResponse, "f") !== undefined) {
             return tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_toolResponse, "f");
         }
-        tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_toolResponse, generateToolResponse(tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_runnableTools).call(this), tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_availableToolNames).call(this), lastMessage, { ...tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f"), signal }, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_calls, "f")), "f");
+        tslib_1.__classPrivateFieldSet(this, _BetaToolRunner_toolResponse, generateToolResponse(tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_runnableTools).call(this), tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_instances, "m", _BetaToolRunner_availableToolNames).call(this), lastMessage, { ...tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_options, "f"), signal }, tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_calls, "f"), this.client, toolOtelContext), "f");
         return tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_toolResponse, "f");
+    }, _BetaToolRunner_toolsetFamilies = function _BetaToolRunner_toolsetFamilies() {
+        return new Set(tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_state, "f").params.tools.filter(family_1.isRunnableToolset).map(family_1.toolsetFamily));
     }, _BetaToolRunner_flushPendingToolChanges = function _BetaToolRunner_flushPendingToolChanges() {
         // A paused turn has to go back as the last message, so the changes wait for the request after it.
         if (tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_lastStopReason, "f") === 'pause_turn' || tslib_1.__classPrivateFieldGet(this, _BetaToolRunner_pendingToolChanges, "f").length === 0) {
@@ -45519,8 +50308,9 @@ function toolDefinition(tool) {
         return tool;
     }
     const apiKeys = beta_1.BETA_CLIENT_TOOL_UNION_KEYS;
+    const fields = 'toJSON' in tool && typeof tool.toJSON === 'function' ? tool.toJSON() : tool;
     return {
-        ...Object.fromEntries(Object.entries(tool).filter(([key]) => apiKeys.includes(key))),
+        ...Object.fromEntries(Object.entries(fields).filter(([key]) => apiKeys.includes(key))),
         ...((0, stainless_helper_header_1.wasCreatedByStainlessHelper)(tool) && { [stainless_helper_header_1.SDK_HELPER_SYMBOL]: tool[stainless_helper_header_1.SDK_HELPER_SYMBOL] }),
     };
 }
@@ -45535,7 +50325,7 @@ function withToolDefinitions(messages) {
         return { ...message, content };
     });
 }
-async function generateToolResponse(runnable, available, lastMessage, requestOptions, calls) {
+async function generateToolResponse(params, runnable, available, lastMessage, requestOptions, calls, client, toolOtelContext) {
     // Only process if the last message is from the assistant and has tool use blocks
     if (!lastMessage ||
         lastMessage.role !== 'assistant' ||
@@ -45547,12 +50337,52 @@ async function generateToolResponse(runnable, available, lastMessage, requestOpt
     if (toolUseBlocks.length === 0) {
         return null;
     }
-    const toolResults = await Promise.all(toolUseBlocks.map((toolUse) => {
+    // A toolset's members run one at a time in the order the model wrote them, and once one is answered with is_error
+    // the rest of that toolset's members in this turn are not run (notExecutedText). Function tools run alongside them
+    // and neither wait on nor stop a toolset's members.
+    const sequences = new Map();
+    const toolResults = await Promise.all(toolUseBlocks.map(async (toolUse) => {
+        // The call may have started while the reply streamed, or in an earlier `generateToolResponse()`.
         const call = calls?.get(toolUse.id);
-        if (call?.status === 'started') {
-            return call.result;
+        const started = call?.status === 'started' ? call.result : undefined;
+        // Members dispatch by family, never by name: a custom tool may share the bare `name`.
+        if (toolUse.toolset_name) {
+            const family = toolUse.toolset_name;
+            const sequence = sequences.get(family) ?? { tail: Promise.resolve(), failed: false };
+            sequences.set(family, sequence);
+            const registered = params.tools.some((t) => (0, family_1.isRunnableToolset)(t) && (0, family_1.toolsetFamily)(t) === family);
+            const run = started ??
+                sequence.tail.then(() => sequence.failed ?
+                    (0, run_1.toolsetResultBlock)(toolUse, (0, run_1.notExecutedText)(family), true)
+                    : runToolsetCall(params, family, toolUse, requestOptions, client, toolOtelContext));
+            // A rejection (a usage error) propagates through Promise.all and stops the run. It also stops this toolset's
+            // later members here, which would otherwise still be dispatched after the run has failed.
+            sequence.tail = run.then(({ is_error }) => {
+                if (is_error && registered)
+                    sequence.failed = true;
+            }, () => {
+                sequence.failed = true;
+            });
+            calls?.set(toolUse.id, { status: 'started', result: run });
+            return run;
         }
-        const result = runToolCall(runnable, available, toolUse, requestOptions);
+        if (started) {
+            return started;
+        }
+        // A `tool_removal` is only a hint to the model, which may still emit a tool_use for a
+        // withdrawn tool — treat those exactly like a tool that was never defined.
+        const tool = available.has(toolUse.name) ? runnable.get(toolUse.name) : undefined;
+        if (!tool && params.tools.some((t) => (0, family_1.isRunnableToolset)(t) && (0, family_1.toolsetFamily)(t) === toolUse.name)) {
+            // A call named after a toolset in the run, but with no `toolset_name`, is a toolset call with malformed
+            // actions. It fails like one of the toolset's calls, so the toolset's later calls in this turn are not run.
+            const sequence = sequences.get(toolUse.name) ?? { tail: Promise.resolve(), failed: false };
+            sequences.set(toolUse.name, sequence);
+            sequence.tail = sequence.tail.then(() => {
+                sequence.failed = true;
+            });
+            return malformedToolsetCallResult(toolUse);
+        }
+        const result = runToolCall(runnable, available, toolUse, requestOptions, client, toolOtelContext);
         calls?.set(toolUse.id, { status: 'started', result });
         return result;
     }));
@@ -45561,39 +50391,46 @@ async function generateToolResponse(runnable, available, lastMessage, requestOpt
         content: toolResults,
     };
 }
-async function runToolCall(runnable, available, toolUse, requestOptions) {
+/** Runs a toolset's call with the toolset of its family in the run. */
+async function runToolsetCall(params, family, toolUse, requestOptions, client, toolOtelContext) {
+    const toolset = params.tools.find((t) => (0, family_1.isRunnableToolset)(t) && (0, family_1.toolsetFamily)(t) === family);
+    if (!toolset) {
+        return (0, run_1.toolsetResultBlock)(toolUse, `Error: Toolset '${(0, sanitize_1.quotedName)(family)}' member '${(0, sanitize_1.quotedName)(toolUse.name)}' not found`, true);
+    }
+    const spanOptions = {
+        signal: requestOptions?.signal,
+        conversationId: requestOptions?.openTelemetry?.conversationId,
+        parentContext: toolOtelContext,
+    };
+    const outcome = await (0, tracing_2.withToolUseSpan)(client, toolset, toolUse, spanOptions, async () => {
+        const block = await (0, run_1.runToolsetMember)(toolset, toolUse, { signal: requestOptions?.signal });
+        return { block, content: block.content ?? [], isError: block.is_error === true };
+    });
+    return outcome.block;
+}
+async function runToolCall(runnable, available, toolUse, requestOptions, client, toolOtelContext) {
     // A `tool_removal` is only a hint to the model, which may still emit a tool_use for a
     // withdrawn tool — treat those exactly like a tool that was never defined.
     const tool = available.has(toolUse.name) ? runnable.get(toolUse.name) : undefined;
     if (!tool) {
         return toolNotFoundResult(toolUse);
     }
-    try {
-        let input = toolUse.input;
-        if ('parse' in tool && tool.parse) {
-            input = tool.parse(input);
-        }
-        const result = await tool.run(input, {
-            toolUse: toolUse,
-            toolUseBlock: toolUse,
-            signal: requestOptions?.signal,
-        });
-        return {
-            type: 'tool_result',
-            tool_use_id: toolUse.id,
-            content: result,
-        };
-    }
-    catch (error) {
-        return {
-            type: 'tool_result',
-            tool_use_id: toolUse.id,
-            content: error instanceof ToolError_1.ToolError ?
-                error.content
-                : `Error: ${error instanceof Error ? error.message : String(error)}`,
-            is_error: true,
-        };
-    }
+    const spanOptions = {
+        signal: requestOptions?.signal,
+        conversationId: requestOptions?.openTelemetry?.conversationId,
+        parentContext: toolOtelContext,
+    };
+    const outcome = await (0, tracing_2.withToolUseSpan)(client, tool, toolUse, spanOptions, () => (0, BetaRunnableTool_1.runRunnableTool)(tool, toolUse.input, {
+        toolUse,
+        toolUseBlock: toolUse,
+        signal: requestOptions?.signal,
+    }));
+    return {
+        type: 'tool_result',
+        tool_use_id: toolUse.id,
+        content: outcome.content,
+        ...(outcome.isError ? { is_error: true } : undefined),
+    };
 }
 /**
  * Response content is sent back as request content unchanged. The generated request type of the
@@ -45603,6 +50440,13 @@ async function runToolCall(runnable, available, toolUse, requestOptions) {
 function asContentParam(content) {
     return content;
 }
+/**
+ * A definition's family, as the API computes it for a toolset: its type without the date, and without `_toolset`.
+ * So a later `browser_toolset_*` version is the browser family, and `computer_20250124` the computer family.
+ */
+function definitionFamily(tool) {
+    return (tool.type ?? 'custom').replace(/_\d{8}$/, '').replace(/_toolset$/, '');
+}
 function toolNotFoundResult(toolUse) {
     return {
         type: 'tool_result',
@@ -45610,6 +50454,41 @@ function toolNotFoundResult(toolUse) {
         content: `Error: Tool '${toolUse.name}' not found`,
         is_error: true,
     };
+}
+/** The error for a toolset call with malformed actions. None of its actions run. */
+function malformedToolsetCallResult(toolUse) {
+    return {
+        type: 'tool_result',
+        tool_use_id: toolUse.id,
+        content: `Error: the '${(0, sanitize_1.quotedName)(toolUse.name)}' toolset could not run this call${malformedActions(toolUse.input)}; nothing in the batch was executed`,
+        is_error: true,
+    };
+}
+/** What is wrong with the call's `actions`. It quotes action names but no other part of the input. */
+function malformedActions(input) {
+    const fields = typeof input === 'object' && input !== null ? input : {};
+    if (!('actions' in fields)) {
+        const action = 'action' in fields ? fields.action : undefined;
+        return typeof action === 'string' ?
+            `: the call has no 'actions' list (action: '${(0, sanitize_1.quotedName)(action)}')`
+            : ": the call has no 'actions' list";
+    }
+    const { actions } = fields;
+    if (typeof actions === 'string')
+        return ": 'actions' is text, not a list of actions";
+    if (!Array.isArray(actions))
+        return ": 'actions' is not a list of actions";
+    if (actions.length === 0)
+        return ": the 'actions' list is empty";
+    const names = [];
+    for (const [i, entry] of actions.entries()) {
+        const action = typeof entry === 'object' && entry !== null && 'action' in entry ? entry.action : undefined;
+        if (typeof action !== 'string')
+            return `: action ${i} must be an object with a string 'action' field`;
+        names.push(`'${(0, sanitize_1.quotedName)(action)}'`);
+    }
+    const more = names.length > 10 ? `, and ${names.length - 10} more` : '';
+    return `: its actions could not be run as sent (actions: ${names.slice(0, 10).join(', ')}${more})`;
 }
 function applyToolChange(block, available) {
     switch (block.type) {
@@ -45681,10 +50560,11 @@ function determineNextStepFromStopReason(stopReason) {
 
 "use strict";
 
-var _IdleClock_maxIdleMs, _IdleClock_onExpire, _IdleClock_blockers, _IdleClock_armPending, _IdleClock_timer, _SessionToolRunner_instances, _SessionToolRunner_consumed, _SessionToolRunner_controller, _SessionToolRunner_detachExternal, _SessionToolRunner_requestOpts, _SessionToolRunner_toolByName, _SessionToolRunner_logger, _SessionToolRunner_seen, _SessionToolRunner_answered, _SessionToolRunner_confirmationVerdicts, _SessionToolRunner_awaitingConfirmation, _SessionToolRunner_results, _SessionToolRunner_inFlightCount, _SessionToolRunner_sendRetryWindowMs, _SessionToolRunner_onIdle, _SessionToolRunner_idleClock, _SessionToolRunner_requestOptions, _SessionToolRunner_streamLoop, _SessionToolRunner_reconcile, _SessionToolRunner_ingestHistory, _SessionToolRunner_handleStreamEvent, _SessionToolRunner_routeToolEvent, _SessionToolRunner_noteConfirmation, _SessionToolRunner_applyVerdict, _SessionToolRunner_surfaceCall, _SessionToolRunner_execute, _SessionToolRunner_sendResult, _SessionToolRunner_drain;
+var _IdleClock_maxIdleMs, _IdleClock_onExpire, _IdleClock_blockers, _IdleClock_armPending, _IdleClock_timer, _SessionToolRunner_instances, _SessionToolRunner_consumed, _SessionToolRunner_controller, _SessionToolRunner_detachExternal, _SessionToolRunner_requestOpts, _SessionToolRunner_toolByName, _SessionToolRunner_logger, _SessionToolRunner_seen, _SessionToolRunner_answered, _SessionToolRunner_confirmationVerdicts, _SessionToolRunner_awaitingConfirmation, _SessionToolRunner_results, _SessionToolRunner_inFlightCount, _SessionToolRunner_sendRetryWindowMs, _SessionToolRunner_onIdle, _SessionToolRunner_idleClock, _SessionToolRunner_otelContext, _SessionToolRunner_primaryThreadId, _SessionToolRunner_historyRead, _SessionToolRunner_requestOptions, _SessionToolRunner_streamLoop, _SessionToolRunner_reconcile, _SessionToolRunner_ingestHistory, _SessionToolRunner_notePrimaryThread, _SessionToolRunner_handleStreamEvent, _SessionToolRunner_routeToolEvent, _SessionToolRunner_noteConfirmation, _SessionToolRunner_applyVerdict, _SessionToolRunner_surfaceCall, _SessionToolRunner_execute, _SessionToolRunner_sendResult, _SessionToolRunner_drain;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.SessionToolRunner = exports.DEFAULT_MAX_IDLE_MS = exports.MANAGED_AGENTS_BETA = void 0;
 const tslib_1 = __nccwpck_require__(14839);
+const api_1 = __nccwpck_require__(84028);
 const error_1 = __nccwpck_require__(69955);
 const log_1 = __nccwpck_require__(88991);
 const sleep_1 = __nccwpck_require__(17742);
@@ -45694,6 +50574,7 @@ const async_queue_1 = __nccwpck_require__(51555);
 const headers_1 = __nccwpck_require__(60017);
 const stainless_helper_header_1 = __nccwpck_require__(50324);
 const BetaRunnableTool_1 = __nccwpck_require__(35280);
+const tracing_1 = __nccwpck_require__(38225);
 /** Beta header for the managed-agents API. */
 exports.MANAGED_AGENTS_BETA = 'managed-agents-2026-04-01';
 const STREAM_BACKOFF_START_MS = 500;
@@ -45884,6 +50765,15 @@ var SessionToolRunner = /* @__PURE__ */ (() => {
             _SessionToolRunner_sendRetryWindowMs.set(this, SEND_RETRY_WINDOW_MS);
             _SessionToolRunner_onIdle.set(this, null);
             _SessionToolRunner_idleClock.set(this, void 0);
+            /** The OpenTelemetry `Context` that was active where the loop started, the parent of each tool span. */
+            _SessionToolRunner_otelContext.set(this, void 0);
+            /**
+             * The ID of the Session's primary thread, whose tool call events have no thread ID. It is the thread
+             * of the Session's first thread status event: a child thread starts after the primary thread has.
+             */
+            _SessionToolRunner_primaryThreadId.set(this, void 0);
+            /** Whether the last read of the history succeeded, so that the stream's events continue it. */
+            _SessionToolRunner_historyRead.set(this, false);
             this.client = opts.client;
             this.sessionId = sessionId;
             this.tools = opts.tools;
@@ -45918,11 +50808,12 @@ var SessionToolRunner = /* @__PURE__ */ (() => {
         _setSendRetryWindow(ms) {
             tslib_1.__classPrivateFieldSet(this, _SessionToolRunner_sendRetryWindowMs, ms, "f");
         }
-        async *[(_SessionToolRunner_consumed = new WeakMap(), _SessionToolRunner_controller = new WeakMap(), _SessionToolRunner_detachExternal = new WeakMap(), _SessionToolRunner_requestOpts = new WeakMap(), _SessionToolRunner_toolByName = new WeakMap(), _SessionToolRunner_logger = new WeakMap(), _SessionToolRunner_seen = new WeakMap(), _SessionToolRunner_answered = new WeakMap(), _SessionToolRunner_confirmationVerdicts = new WeakMap(), _SessionToolRunner_awaitingConfirmation = new WeakMap(), _SessionToolRunner_results = new WeakMap(), _SessionToolRunner_inFlightCount = new WeakMap(), _SessionToolRunner_sendRetryWindowMs = new WeakMap(), _SessionToolRunner_onIdle = new WeakMap(), _SessionToolRunner_idleClock = new WeakMap(), _SessionToolRunner_instances = new WeakSet(), Symbol.asyncIterator)]() {
+        async *[(_SessionToolRunner_consumed = new WeakMap(), _SessionToolRunner_controller = new WeakMap(), _SessionToolRunner_detachExternal = new WeakMap(), _SessionToolRunner_requestOpts = new WeakMap(), _SessionToolRunner_toolByName = new WeakMap(), _SessionToolRunner_logger = new WeakMap(), _SessionToolRunner_seen = new WeakMap(), _SessionToolRunner_answered = new WeakMap(), _SessionToolRunner_confirmationVerdicts = new WeakMap(), _SessionToolRunner_awaitingConfirmation = new WeakMap(), _SessionToolRunner_results = new WeakMap(), _SessionToolRunner_inFlightCount = new WeakMap(), _SessionToolRunner_sendRetryWindowMs = new WeakMap(), _SessionToolRunner_onIdle = new WeakMap(), _SessionToolRunner_idleClock = new WeakMap(), _SessionToolRunner_otelContext = new WeakMap(), _SessionToolRunner_primaryThreadId = new WeakMap(), _SessionToolRunner_historyRead = new WeakMap(), _SessionToolRunner_instances = new WeakSet(), Symbol.asyncIterator)]() {
             if (tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_consumed, "f")) {
                 throw new error_1.AnthropicError('Cannot iterate over a consumed SessionToolRunner');
             }
             tslib_1.__classPrivateFieldSet(this, _SessionToolRunner_consumed, true, "f");
+            tslib_1.__classPrivateFieldSet(this, _SessionToolRunner_otelContext, this.client._tracer ? api_1.context.active() : undefined, "f");
             tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_logger, "f").info('session tool runner starting', {
                 component: 'session-tool-runner',
                 session_id: this.sessionId,
@@ -46035,6 +50926,7 @@ var SessionToolRunner = /* @__PURE__ */ (() => {
         const ctrl = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_controller, "f");
         const pending = [];
         let lastEndedTurn = false;
+        tslib_1.__classPrivateFieldSet(this, _SessionToolRunner_historyRead, false, "f");
         try {
             for await (const ev of this.client.beta.sessions.events.list(this.sessionId, { limit: 1000 }, tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_requestOptions).call(this))) {
                 tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_ingestHistory).call(this, ev, pending);
@@ -46057,6 +50949,7 @@ var SessionToolRunner = /* @__PURE__ */ (() => {
                 tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_seen, "f").delete(ev.id);
             return;
         }
+        tslib_1.__classPrivateFieldSet(this, _SessionToolRunner_historyRead, true, "f");
         const unanswered = pending.filter((ev) => !tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").has(ev.id));
         // Disarm before routing: `#execute` runs inline here, so a timer left armed
         // from before the reconnect could fire over an in-flight tool.
@@ -46084,6 +50977,8 @@ var SessionToolRunner = /* @__PURE__ */ (() => {
         else
             tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_idleClock, "f").disarm();
     }, _SessionToolRunner_ingestHistory = function _SessionToolRunner_ingestHistory(ev, pending) {
+        // The history starts with the Session's first event.
+        tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_notePrimaryThread).call(this, ev);
         if (ev.type === 'agent.tool_use' || ev.type === 'agent.custom_tool_use') {
             // Mark the event seen so a replay on the live stream is not dispatched
             // twice, but decide whether it still needs executing from `answered`, not
@@ -46107,10 +51002,24 @@ var SessionToolRunner = /* @__PURE__ */ (() => {
             if (!tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").has(ev.tool_use_id))
                 tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_confirmationVerdicts, "f").set(ev.tool_use_id, ev.result);
         }
+    }, _SessionToolRunner_notePrimaryThread = function _SessionToolRunner_notePrimaryThread(ev) {
+        // Only the spans have a use for it.
+        if (!this.client._tracer || tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_primaryThreadId, "f") !== undefined)
+            return;
+        switch (ev.type) {
+            case 'session.thread_status_running':
+            case 'session.thread_status_idle':
+            case 'session.thread_status_rescheduled':
+            case 'session.thread_status_terminated':
+                tslib_1.__classPrivateFieldSet(this, _SessionToolRunner_primaryThreadId, ev.session_thread_id, "f");
+        }
     }, _SessionToolRunner_handleStreamEvent = 
     /** Returns true when the runner should exit. */
     async function _SessionToolRunner_handleStreamEvent(ev) {
         tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_idleClock, "f").noteEvent(ev);
+        // Without the history, the stream may have begun after the Session's first thread status event.
+        if (tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_historyRead, "f"))
+            tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_notePrimaryThread).call(this, ev);
         switch (ev.type) {
             case 'agent.tool_use':
             case 'agent.custom_tool_use':
@@ -46287,6 +51196,9 @@ var SessionToolRunner = /* @__PURE__ */ (() => {
             }
             let content;
             let isError;
+            // The default is the Session thread ID, which is the conversation ID of the platform's spans.
+            // Only a child thread's call event has it, so a call without one is the primary thread's.
+            const conversationId = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_requestOpts, "f")?.openTelemetry?.conversationId ?? (ev.session_thread_id || tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_primaryThreadId, "f"));
             // Per-tool controller: aborts on the runner's own signal *or* the
             // per-tool timeout, so an in-flight tool stops promptly when the runner
             // is aborted instead of running until the timeout.
@@ -46297,12 +51209,29 @@ var SessionToolRunner = /* @__PURE__ */ (() => {
                 // Pass the source `agent.tool_use` / `agent.custom_tool_use` event
                 // straight through as the run context's `toolUse` — it is a union
                 // member of `BetaToolUse`, no Messages-block adapter needed.
-                const outcome = await (0, BetaRunnableTool_1.runRunnableTool)(tool, ev.input, {
-                    toolUse: ev,
-                    toolUseBlock: ev,
-                    signal: toolCtrl.signal,
+                const spanOptions = {
+                    signal: tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_controller, "f").signal,
+                    conversationId,
+                    sessionID: this.sessionId,
+                    parentContext: tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_otelContext, "f"),
+                };
+                const outcome = await (0, tracing_1.withToolUseSpan)(this.client, tool, ev, spanOptions, async () => {
+                    const toolOutcome = await (0, BetaRunnableTool_1.runRunnableTool)(tool, ev.input, {
+                        toolUse: ev,
+                        toolUseBlock: ev,
+                        signal: toolCtrl.signal,
+                    });
+                    const sent = toSessionContent(toolOutcome.content);
+                    // A span keeps a text block whole, so it gets a block that is sent as its JSON as the block itself.
+                    const recorded = !this.client._tracer ?
+                        sent
+                        : sent.map((block, i) => {
+                            const original = typeof toolOutcome.content === 'string' ? undefined : toolOutcome.content[i];
+                            return original && original.type !== 'text' && block.type === 'text' ? original : block;
+                        });
+                    return { sent, content: recorded, isError: toolOutcome.isError };
                 });
-                content = outcome.content;
+                content = outcome.sent;
                 isError = outcome.isError;
             }
             finally {
@@ -46313,8 +51242,8 @@ var SessionToolRunner = /* @__PURE__ */ (() => {
             // `user.tool_result` for an `agent.tool_use`, a `user.custom_tool_result`
             // for an `agent.custom_tool_use`. Posting the wrong one leaves the call
             // unanswered and the session stuck.
-            const result = buildResultEvent(ev, isError, toSessionContent(content));
-            const posted = await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_sendResult).call(this, result, ev.id);
+            const result = buildResultEvent(ev, isError, content);
+            const posted = await tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_sendResult).call(this, result, ev.id, conversationId);
             tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_surfaceCall).call(this, {
                 event: ev,
                 result,
@@ -46330,7 +51259,7 @@ var SessionToolRunner = /* @__PURE__ */ (() => {
             if (tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_inFlightCount, "f") === 0)
                 tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_onIdle, "f")?.call(this);
         }
-    }, _SessionToolRunner_sendResult = async function _SessionToolRunner_sendResult(result, toolUseId) {
+    }, _SessionToolRunner_sendResult = async function _SessionToolRunner_sendResult(result, toolUseId, conversationId) {
         const ctrl = tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_controller, "f");
         const start = Date.now();
         let lastErr;
@@ -46341,7 +51270,7 @@ var SessionToolRunner = /* @__PURE__ */ (() => {
             // `posted: false` result the iterator would carry on past.
             ctrl.signal.throwIfAborted();
             try {
-                await this.client.beta.sessions.events.send(this.sessionId, { events: [result] }, tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_requestOptions).call(this));
+                await this.client.beta.sessions.events.send(this.sessionId, { events: [result] }, { ...tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_instances, "m", _SessionToolRunner_requestOptions).call(this), openTelemetry: { conversationId } });
                 tslib_1.__classPrivateFieldGet(this, _SessionToolRunner_answered, "f").add(toolUseId);
                 return true;
             }
@@ -46631,6 +51560,7 @@ const VersionsAPI = tslib_1.__importStar(__nccwpck_require__(96464));
 const versions_1 = __nccwpck_require__(96464);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 var Agents = /* @__PURE__ */ (() => {
     class Agents extends resource_1.APIResource {
@@ -46645,7 +51575,7 @@ var Agents = /* @__PURE__ */ (() => {
          * ```ts
          * const betaManagedAgentsAgent =
          *   await client.beta.agents.create({
-         *     model: 'claude-opus-5',
+         *     model: 'claude-opus-5-5',
          *     name: 'My First Agent',
          *   });
          * ```
@@ -46662,6 +51592,10 @@ var Agents = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.agents.create', options, {
+                    route: '/v1/agents',
+                    createdIDAttribute: 'gen_ai.agent.id',
+                }),
             });
         }
         /**
@@ -46687,6 +51621,11 @@ var Agents = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.agents.retrieve', options, {
+                    route: '/v1/agents/{agent_id}',
+                    queryParams: ['version'],
+                    attributes: { 'gen_ai.agent.id': agentID },
+                }),
             });
         }
         /**
@@ -46713,6 +51652,10 @@ var Agents = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.agents.update', options, {
+                    route: '/v1/agents/{agent_id}',
+                    attributes: { 'gen_ai.agent.id': agentID },
+                }),
             });
         }
         /**
@@ -46738,6 +51681,10 @@ var Agents = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.agents.list', options, {
+                    route: '/v1/agents',
+                    queryParams: ['created_at[gte]', 'created_at[lte]', 'include_archived', 'limit', 'page'],
+                }),
             });
         }
         /**
@@ -46762,6 +51709,10 @@ var Agents = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.agents.archive', options, {
+                    route: '/v1/agents/{agent_id}/archive',
+                    attributes: { 'gen_ai.agent.id': agentID },
+                }),
             });
         }
     }
@@ -46798,6 +51749,7 @@ exports.Versions = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Versions extends resource_1.APIResource {
     /**
@@ -46825,6 +51777,11 @@ class Versions extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.agents.versions.list', options, {
+                route: '/v1/agents/{agent_id}/versions',
+                queryParams: ['limit', 'page'],
+                attributes: { 'gen_ai.agent.id': agentID },
+            }),
         });
     }
 }
@@ -46929,6 +51886,7 @@ exports.DeploymentRuns = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class DeploymentRuns extends resource_1.APIResource {
     /**
@@ -46953,6 +51911,10 @@ class DeploymentRuns extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.deployment_runs.retrieve', options, {
+                route: '/v1/deployment_runs/{deployment_run_id}',
+                attributes: { 'anthropic.deployment_run.id': deploymentRunID },
+            }),
         });
     }
     /**
@@ -46978,6 +51940,20 @@ class DeploymentRuns extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.deployment_runs.list', options, {
+                route: '/v1/deployment_runs',
+                queryParams: [
+                    'created_at[gt]',
+                    'created_at[gte]',
+                    'created_at[lt]',
+                    'created_at[lte]',
+                    'deployment_id',
+                    'has_error',
+                    'limit',
+                    'page',
+                    'trigger_type',
+                ],
+            }),
         });
     }
 }
@@ -46996,6 +51972,7 @@ exports.Deployments = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Deployments extends resource_1.APIResource {
     /**
@@ -47034,6 +52011,10 @@ class Deployments extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.deployments.create', options, {
+                route: '/v1/deployments',
+                createdIDAttribute: 'anthropic.deployment.id',
+            }),
         });
     }
     /**
@@ -47058,6 +52039,10 @@ class Deployments extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.deployments.retrieve', options, {
+                route: '/v1/deployments/{deployment_id}',
+                attributes: { 'anthropic.deployment.id': deploymentID },
+            }),
         });
     }
     /**
@@ -47083,6 +52068,10 @@ class Deployments extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.deployments.update', options, {
+                route: '/v1/deployments/{deployment_id}',
+                attributes: { 'anthropic.deployment.id': deploymentID },
+            }),
         });
     }
     /**
@@ -47108,6 +52097,18 @@ class Deployments extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.deployments.list', options, {
+                route: '/v1/deployments',
+                queryParams: [
+                    'agent_id',
+                    'created_at[gte]',
+                    'created_at[lte]',
+                    'include_archived',
+                    'limit',
+                    'page',
+                    'status',
+                ],
+            }),
         });
     }
     /**
@@ -47132,6 +52133,10 @@ class Deployments extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.deployments.archive', options, {
+                route: '/v1/deployments/{deployment_id}/archive',
+                attributes: { 'anthropic.deployment.id': deploymentID },
+            }),
         });
     }
     /**
@@ -47156,6 +52161,10 @@ class Deployments extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.deployments.pause', options, {
+                route: '/v1/deployments/{deployment_id}/pause',
+                attributes: { 'anthropic.deployment.id': deploymentID },
+            }),
         });
     }
     /**
@@ -47180,6 +52189,10 @@ class Deployments extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.deployments.run', options, {
+                route: '/v1/deployments/{deployment_id}/run',
+                attributes: { 'anthropic.deployment.id': deploymentID },
+            }),
         });
     }
     /**
@@ -47204,6 +52217,10 @@ class Deployments extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.deployments.unpause', options, {
+                route: '/v1/deployments/{deployment_id}/unpause',
+                attributes: { 'anthropic.deployment.id': deploymentID },
+            }),
         });
     }
 }
@@ -47222,6 +52239,7 @@ exports.Dreams = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Dreams extends resource_1.APIResource {
     /**
@@ -47257,6 +52275,10 @@ class Dreams extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.dreams.create', options, {
+                route: '/v1/dreams',
+                createdIDAttribute: 'anthropic.dream.id',
+            }),
         });
     }
     /**
@@ -47286,6 +52308,10 @@ class Dreams extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.dreams.retrieve', options, {
+                route: '/v1/dreams/{dream_id}',
+                attributes: { 'anthropic.dream.id': dreamID },
+            }),
         });
     }
     /**
@@ -47317,6 +52343,10 @@ class Dreams extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.dreams.list', options, {
+                route: '/v1/dreams',
+                queryParams: ['created_at[gt]', 'created_at[lt]', 'include_archived', 'limit', 'page', 'statuses'],
+            }),
         });
     }
     /**
@@ -47349,6 +52379,10 @@ class Dreams extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.dreams.archive', options, {
+                route: '/v1/dreams/{dream_id}/archive',
+                attributes: { 'anthropic.dream.id': dreamID },
+            }),
         });
     }
     /**
@@ -47381,6 +52415,10 @@ class Dreams extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.dreams.cancel', options, {
+                route: '/v1/dreams/{dream_id}/cancel',
+                attributes: { 'anthropic.dream.id': dreamID },
+            }),
         });
     }
 }
@@ -47402,6 +52440,7 @@ const WorkAPI = tslib_1.__importStar(__nccwpck_require__(24732));
 const work_1 = __nccwpck_require__(24732);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 var Environments = /* @__PURE__ */ (() => {
     class Environments extends resource_1.APIResource {
@@ -47432,6 +52471,10 @@ var Environments = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.environments.create', options, {
+                    route: '/v1/environments',
+                    createdIDAttribute: 'anthropic.environment.id',
+                }),
             });
         }
         /**
@@ -47456,6 +52499,10 @@ var Environments = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.environments.retrieve', options, {
+                    route: '/v1/environments/{environment_id}',
+                    attributes: { 'anthropic.environment.id': environmentID },
+                }),
             });
         }
         /**
@@ -47481,6 +52528,10 @@ var Environments = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.environments.update', options, {
+                    route: '/v1/environments/{environment_id}',
+                    attributes: { 'anthropic.environment.id': environmentID },
+                }),
             });
         }
         /**
@@ -47506,6 +52557,10 @@ var Environments = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.environments.list', options, {
+                    route: '/v1/environments',
+                    queryParams: ['include_archived', 'limit', 'page'],
+                }),
             });
         }
         /**
@@ -47530,6 +52585,10 @@ var Environments = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.environments.delete', options, {
+                    route: '/v1/environments/{environment_id}',
+                    attributes: { 'anthropic.environment.id': environmentID },
+                }),
             });
         }
         /**
@@ -47555,6 +52614,10 @@ var Environments = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.environments.archive', options, {
+                    route: '/v1/environments/{environment_id}/archive',
+                    attributes: { 'anthropic.environment.id': environmentID },
+                }),
             });
         }
     }
@@ -47591,6 +52654,7 @@ exports.EnvironmentWorker = exports.WorkPoller = exports.Work = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 const poller_1 = __nccwpck_require__(97412);
 const worker_1 = __nccwpck_require__(77300);
@@ -47623,6 +52687,10 @@ var Work = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.environments.work.retrieve', options, {
+                    route: '/v1/environments/{environment_id}/work/{work_id}',
+                    attributes: { 'anthropic.environment.id': environment_id, 'anthropic.environment.work.id': workID },
+                }),
             });
         }
         /**
@@ -47654,6 +52722,10 @@ var Work = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.environments.work.update', options, {
+                    route: '/v1/environments/{environment_id}/work/{work_id}',
+                    attributes: { 'anthropic.environment.id': environment_id, 'anthropic.environment.work.id': workID },
+                }),
             });
         }
         /**
@@ -47683,6 +52755,11 @@ var Work = /* @__PURE__ */ (() => {
                     { 'anthropic-beta': [...(betas ?? []), 'managed-agents-2026-04-01'].toString() },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.environments.work.list', options, {
+                    route: '/v1/environments/{environment_id}/work',
+                    queryParams: ['limit', 'page'],
+                    attributes: { 'anthropic.environment.id': environmentID },
+                }),
             });
         }
         /**
@@ -47710,6 +52787,10 @@ var Work = /* @__PURE__ */ (() => {
                     { 'anthropic-beta': [...(betas ?? []), 'managed-agents-2026-04-01'].toString() },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.environments.work.ack', options, {
+                    route: '/v1/environments/{environment_id}/work/{work_id}/ack',
+                    attributes: { 'anthropic.environment.id': environment_id, 'anthropic.environment.work.id': workID },
+                }),
             });
         }
         /**
@@ -47737,6 +52818,11 @@ var Work = /* @__PURE__ */ (() => {
                     { 'anthropic-beta': [...(betas ?? []), 'managed-agents-2026-04-01'].toString() },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.environments.work.heartbeat', options, {
+                    route: '/v1/environments/{environment_id}/work/{work_id}/heartbeat',
+                    queryParams: ['desired_ttl_seconds', 'expected_last_heartbeat'],
+                    attributes: { 'anthropic.environment.id': environment_id, 'anthropic.environment.work.id': workID },
+                }),
             });
         }
         /**
@@ -47767,6 +52853,11 @@ var Work = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.environments.work.poll', options, {
+                    route: '/v1/environments/{environment_id}/work/poll',
+                    queryParams: ['block_ms', 'reclaim_older_than_ms'],
+                    attributes: { 'anthropic.environment.id': environmentID },
+                }),
             });
         }
         /**
@@ -47791,6 +52882,10 @@ var Work = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.environments.work.stats', options, {
+                    route: '/v1/environments/{environment_id}/work/stats',
+                    attributes: { 'anthropic.environment.id': environmentID },
+                }),
             });
         }
         /**
@@ -47821,6 +52916,10 @@ var Work = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.environments.work.stop', options, {
+                    route: '/v1/environments/{environment_id}/work/{work_id}/stop',
+                    attributes: { 'anthropic.environment.id': environment_id, 'anthropic.environment.work.id': workID },
+                }),
             });
         }
         /**
@@ -47869,6 +52968,7 @@ exports.Files = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const stainless_helper_header_1 = __nccwpck_require__(50324);
 const uploads_1 = __nccwpck_require__(59629);
 const path_1 = __nccwpck_require__(43002);
@@ -47896,6 +52996,10 @@ class Files extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.files.list', options, {
+                route: '/v1/files',
+                queryParams: ['ids', 'limit', 'page', 'scope_id'],
+            }),
         });
     }
     /**
@@ -47919,6 +53023,10 @@ class Files extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.files.delete', options, {
+                route: '/v1/files/{file_id}',
+                attributes: { 'anthropic.file.id': fileID },
+            }),
         });
     }
     /**
@@ -47947,6 +53055,10 @@ class Files extends resource_1.APIResource {
                 options?.headers,
             ]),
             __binaryResponse: true,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.files.download', options, {
+                route: '/v1/files/{file_id}/content',
+                attributes: { 'anthropic.file.id': fileID },
+            }),
         });
     }
     /**
@@ -47969,6 +53081,10 @@ class Files extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.files.retrieve_metadata', options, {
+                route: '/v1/files/{file_id}',
+                attributes: { 'anthropic.file.id': fileID },
+            }),
         });
     }
     /**
@@ -47994,6 +53110,10 @@ class Files extends resource_1.APIResource {
                 (0, stainless_helper_header_1.stainlessHelperHeaderFromFile)(body.file),
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.files.upload', options, {
+                route: '/v1/files',
+                createdIDAttribute: 'anthropic.file.id',
+            }),
         }, this._client));
     }
 }
@@ -48008,11 +53128,13 @@ exports.Files = Files;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.Webhooks = exports.Vaults = exports.UserProfiles = exports.Tunnels = exports.Skills = exports.Sessions = exports.Organization = exports.Models = exports.MemoryStores = exports.Files = exports.Environments = exports.Dreams = exports.Deployments = exports.DeploymentRuns = exports.Beta = exports.Messages = exports.BETA_CLIENT_TOOL_UNION_KEYS = exports.Agents = void 0;
+exports.Webhooks = exports.Vaults = exports.UserProfiles = exports.Tunnels = exports.Skills = exports.Sessions = exports.Organization = exports.Models = exports.MemoryStores = exports.Files = exports.Environments = exports.Dreams = exports.Deployments = exports.DeploymentRuns = exports.Beta = exports.Messages = exports.BETA_COMPUTER_MEMBER_NAME_VALUES = exports.BETA_CLIENT_TOOL_UNION_KEYS = exports.BETA_BROWSER_MEMBER_NAME_VALUES = exports.Agents = void 0;
 var index_1 = __nccwpck_require__(81677);
 Object.defineProperty(exports, "Agents", ({ enumerable: true, get: function () { return index_1.Agents; } }));
 var index_2 = __nccwpck_require__(72723);
+Object.defineProperty(exports, "BETA_BROWSER_MEMBER_NAME_VALUES", ({ enumerable: true, get: function () { return index_2.BETA_BROWSER_MEMBER_NAME_VALUES; } }));
 Object.defineProperty(exports, "BETA_CLIENT_TOOL_UNION_KEYS", ({ enumerable: true, get: function () { return index_2.BETA_CLIENT_TOOL_UNION_KEYS; } }));
+Object.defineProperty(exports, "BETA_COMPUTER_MEMBER_NAME_VALUES", ({ enumerable: true, get: function () { return index_2.BETA_COMPUTER_MEMBER_NAME_VALUES; } }));
 Object.defineProperty(exports, "Messages", ({ enumerable: true, get: function () { return index_2.Messages; } }));
 var beta_1 = __nccwpck_require__(90846);
 Object.defineProperty(exports, "Beta", ({ enumerable: true, get: function () { return beta_1.Beta; } }));
@@ -48075,6 +53197,7 @@ exports.Memories = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Memories extends resource_1.APIResource {
     /**
@@ -48102,6 +53225,12 @@ class Memories extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.memory_stores.memories.create', options, {
+                route: '/v1/memory_stores/{memory_store_id}/memories',
+                queryParams: ['view'],
+                attributes: { 'gen_ai.memory.store.id': memoryStoreID },
+                createdIDAttribute: 'gen_ai.memory.record.id',
+            }),
         });
     }
     /**
@@ -48128,6 +53257,11 @@ class Memories extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.memory_stores.memories.retrieve', options, {
+                route: '/v1/memory_stores/{memory_store_id}/memories/{memory_id}',
+                queryParams: ['view'],
+                attributes: { 'gen_ai.memory.store.id': memory_store_id, 'gen_ai.memory.record.id': memoryID },
+            }),
         });
     }
     /**
@@ -48155,6 +53289,11 @@ class Memories extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.memory_stores.memories.update', options, {
+                route: '/v1/memory_stores/{memory_store_id}/memories/{memory_id}',
+                queryParams: ['view'],
+                attributes: { 'gen_ai.memory.store.id': memory_store_id, 'gen_ai.memory.record.id': memoryID },
+            }),
         });
     }
     /**
@@ -48182,6 +53321,12 @@ class Memories extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.memory_stores.memories.list', options, {
+                route: '/v1/memory_stores/{memory_store_id}/memories',
+                queryParams: ['depth', 'limit', 'page', 'path_prefix', 'view'],
+                contentQueryParams: ['page'],
+                attributes: { 'gen_ai.memory.store.id': memoryStoreID },
+            }),
         });
     }
     /**
@@ -48208,6 +53353,11 @@ class Memories extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.memory_stores.memories.delete', options, {
+                route: '/v1/memory_stores/{memory_store_id}/memories/{memory_id}',
+                queryParams: ['expected_content_sha256'],
+                attributes: { 'gen_ai.memory.store.id': memory_store_id, 'gen_ai.memory.record.id': memoryID },
+            }),
         });
     }
 }
@@ -48231,6 +53381,7 @@ const MemoryVersionsAPI = tslib_1.__importStar(__nccwpck_require__(198));
 const memory_versions_1 = __nccwpck_require__(198);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 var MemoryStores = /* @__PURE__ */ (() => {
     class MemoryStores extends resource_1.APIResource {
@@ -48260,6 +53411,10 @@ var MemoryStores = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.memory_stores.create', options, {
+                    route: '/v1/memory_stores',
+                    createdIDAttribute: 'gen_ai.memory.store.id',
+                }),
             });
         }
         /**
@@ -48284,6 +53439,10 @@ var MemoryStores = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.memory_stores.retrieve', options, {
+                    route: '/v1/memory_stores/{memory_store_id}',
+                    attributes: { 'gen_ai.memory.store.id': memoryStoreID },
+                }),
             });
         }
         /**
@@ -48307,6 +53466,10 @@ var MemoryStores = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.memory_stores.update', options, {
+                    route: '/v1/memory_stores/{memory_store_id}',
+                    attributes: { 'gen_ai.memory.store.id': memoryStoreID },
+                }),
             });
         }
         /**
@@ -48332,6 +53495,10 @@ var MemoryStores = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.memory_stores.list', options, {
+                    route: '/v1/memory_stores',
+                    queryParams: ['created_at[gte]', 'created_at[lte]', 'include_archived', 'limit', 'page'],
+                }),
             });
         }
         /**
@@ -48354,6 +53521,10 @@ var MemoryStores = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.memory_stores.delete', options, {
+                    route: '/v1/memory_stores/{memory_store_id}',
+                    attributes: { 'gen_ai.memory.store.id': memoryStoreID },
+                }),
             });
         }
         /**
@@ -48376,6 +53547,10 @@ var MemoryStores = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.memory_stores.archive', options, {
+                    route: '/v1/memory_stores/{memory_store_id}/archive',
+                    attributes: { 'gen_ai.memory.store.id': memoryStoreID },
+                }),
             });
         }
     }
@@ -48398,6 +53573,7 @@ exports.MemoryVersions = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class MemoryVersions extends resource_1.APIResource {
     /**
@@ -48424,6 +53600,14 @@ class MemoryVersions extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.memory_stores.memory_versions.retrieve', options, {
+                route: '/v1/memory_stores/{memory_store_id}/memory_versions/{memory_version_id}',
+                queryParams: ['view'],
+                attributes: {
+                    'gen_ai.memory.store.id': memory_store_id,
+                    'anthropic.memory_store.memory_version.id': memoryVersionID,
+                },
+            }),
         });
     }
     /**
@@ -48451,6 +53635,22 @@ class MemoryVersions extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.memory_stores.memory_versions.list', options, {
+                route: '/v1/memory_stores/{memory_store_id}/memory_versions',
+                queryParams: [
+                    'api_key_id',
+                    'created_at[gte]',
+                    'created_at[lte]',
+                    'limit',
+                    'memory_id',
+                    'operation',
+                    'page',
+                    'service_account_id',
+                    'session_id',
+                    'view',
+                ],
+                attributes: { 'gen_ai.memory.store.id': memoryStoreID },
+            }),
         });
     }
     /**
@@ -48476,6 +53676,13 @@ class MemoryVersions extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.memory_stores.memory_versions.redact', options, {
+                route: '/v1/memory_stores/{memory_store_id}/memory_versions/{memory_version_id}/redact',
+                attributes: {
+                    'gen_ai.memory.store.id': memory_store_id,
+                    'anthropic.memory_store.memory_version.id': memoryVersionID,
+                },
+            }),
         });
     }
 }
@@ -48494,6 +53701,7 @@ exports.Batches = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const jsonl_1 = __nccwpck_require__(80811);
 const error_1 = __nccwpck_require__(97735);
 const path_1 = __nccwpck_require__(43002);
@@ -48520,7 +53728,7 @@ class Batches extends resource_1.APIResource {
      *           messages: [
      *             { content: 'Hello, world', role: 'user' },
      *           ],
-     *           model: 'claude-opus-5',
+     *           model: 'claude-opus-5-5',
      *         },
      *       },
      *     ],
@@ -48540,6 +53748,12 @@ class Batches extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.messages.batches.create', options, {
+                route: '/v1/messages/batches',
+                // A request without `requests` is for the API to refuse, not for this line to throw on.
+                attributes: { 'anthropic.message.batch.request_count': body.requests?.length },
+                createdIDAttribute: 'anthropic.message.batch.id',
+            }),
         });
     }
     /**
@@ -48569,6 +53783,10 @@ class Batches extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.messages.batches.retrieve', options, {
+                route: '/v1/messages/batches/{message_batch_id}',
+                attributes: { 'anthropic.message.batch.id': messageBatchID },
+            }),
         });
     }
     /**
@@ -48598,6 +53816,10 @@ class Batches extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.messages.batches.list', options, {
+                route: '/v1/messages/batches',
+                queryParams: ['after_id', 'before_id', 'limit'],
+            }),
         });
     }
     /**
@@ -48628,6 +53850,10 @@ class Batches extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.messages.batches.delete', options, {
+                route: '/v1/messages/batches/{message_batch_id}',
+                attributes: { 'anthropic.message.batch.id': messageBatchID },
+            }),
         });
     }
     /**
@@ -48663,6 +53889,10 @@ class Batches extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.messages.batches.cancel', options, {
+                route: '/v1/messages/batches/{message_batch_id}/cancel',
+                attributes: { 'anthropic.message.batch.id': messageBatchID },
+            }),
         });
     }
     /**
@@ -48677,10 +53907,12 @@ class Batches extends resource_1.APIResource {
      *
      * @example
      * ```ts
-     * const betaMessageBatchIndividualResponse =
-     *   await client.beta.messages.batches.results(
-     *     'message_batch_id',
-     *   );
+     * const stream = await client.beta.messages.batches.results(
+     *   'message_batch_id',
+     * );
+     * for await (const betaMessageBatchIndividualResponse of stream) {
+     *   // ...
+     * }
      * ```
      */
     async results(messageBatchID, params = {}, options) {
@@ -48702,6 +53934,10 @@ class Batches extends resource_1.APIResource {
             ]),
             stream: true,
             __binaryResponse: true,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.messages.batches.results', options, {
+                route: '/v1/messages/batches/{message_batch_id}/results',
+                attributes: { 'anthropic.message.batch.id': messageBatchID },
+            }),
         })
             ._thenUnwrap((_, props) => jsonl_1.JSONLDecoder.fromResponse(props.response, props.controller));
     }
@@ -48717,9 +53953,11 @@ exports.Batches = Batches;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.Batches = exports.ToolError = exports.BetaToolRunner = exports.Messages = exports.BETA_CLIENT_TOOL_UNION_KEYS = void 0;
+exports.Batches = exports.ToolError = exports.BetaToolRunner = exports.Messages = exports.BETA_COMPUTER_MEMBER_NAME_VALUES = exports.BETA_CLIENT_TOOL_UNION_KEYS = exports.BETA_BROWSER_MEMBER_NAME_VALUES = void 0;
 var messages_1 = __nccwpck_require__(44115);
+Object.defineProperty(exports, "BETA_BROWSER_MEMBER_NAME_VALUES", ({ enumerable: true, get: function () { return messages_1.BETA_BROWSER_MEMBER_NAME_VALUES; } }));
 Object.defineProperty(exports, "BETA_CLIENT_TOOL_UNION_KEYS", ({ enumerable: true, get: function () { return messages_1.BETA_CLIENT_TOOL_UNION_KEYS; } }));
+Object.defineProperty(exports, "BETA_COMPUTER_MEMBER_NAME_VALUES", ({ enumerable: true, get: function () { return messages_1.BETA_COMPUTER_MEMBER_NAME_VALUES; } }));
 Object.defineProperty(exports, "Messages", ({ enumerable: true, get: function () { return messages_1.Messages; } }));
 var messages_2 = __nccwpck_require__(44115);
 Object.defineProperty(exports, "BetaToolRunner", ({ enumerable: true, get: function () { return messages_2.BetaToolRunner; } }));
@@ -48736,16 +53974,18 @@ Object.defineProperty(exports, "Batches", ({ enumerable: true, get: function () 
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.ToolError = exports.BetaToolRunner = exports.BETA_CLIENT_TOOL_UNION_KEYS = exports.Messages = void 0;
+exports.ToolError = exports.BetaToolRunner = exports.BETA_COMPUTER_MEMBER_NAME_VALUES = exports.BETA_CLIENT_TOOL_UNION_KEYS = exports.BETA_BROWSER_MEMBER_NAME_VALUES = exports.Messages = void 0;
 const tslib_1 = __nccwpck_require__(14839);
-const error_1 = __nccwpck_require__(97735);
 const BatchesAPI = tslib_1.__importStar(__nccwpck_require__(24251));
 const resource_1 = __nccwpck_require__(82941);
 const constants_1 = __nccwpck_require__(15298);
 const headers_1 = __nccwpck_require__(60017);
-const stainless_helper_header_1 = __nccwpck_require__(50324);
+const tracing_1 = __nccwpck_require__(91705);
+const tracing_2 = __nccwpck_require__(38225);
+const attributes_1 = __nccwpck_require__(37161);
 const beta_parser_1 = __nccwpck_require__(30571);
 const BetaMessageStream_1 = __nccwpck_require__(27816);
+const beta_messages_request_1 = __nccwpck_require__(6222);
 const BetaToolRunner_1 = __nccwpck_require__(16891);
 const ToolError_1 = __nccwpck_require__(81429);
 const batches_1 = __nccwpck_require__(24251);
@@ -48762,7 +54002,7 @@ var Messages = /* @__PURE__ */ (() => {
         }
         create(params, options) {
             // Transform deprecated output_format to output_config.format
-            const modifiedParams = transformOutputFormat(params);
+            const modifiedParams = (0, beta_messages_request_1.transformOutputFormat)(params);
             const { betas, user_profile_id, workspace_id, ...body } = modifiedParams;
             if (body.model in DEPRECATED_MODELS) {
                 console.warn(`The model '${body.model}' is deprecated and will reach end-of-life on ${DEPRECATED_MODELS[body.model]}\nPlease migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resources/model-deprecations for more information.`);
@@ -48777,23 +54017,25 @@ var Messages = /* @__PURE__ */ (() => {
                 const maxNonstreamingTokens = constants_1.MODEL_NONSTREAMING_TOKENS[body.model] ?? undefined;
                 timeout = this._client.calculateNonstreamingTimeout(body.max_tokens, maxNonstreamingTokens);
             }
-            // Collect helper info from tools and messages
-            const helperHeader = (0, stainless_helper_header_1.stainlessHelperHeader)(body.tools, body.messages);
-            return this._client.post('/v1/messages?beta=true', {
+            const headers = (0, beta_messages_request_1.messagesCreateHeaders)(modifiedParams, options);
+            // A client whose spans are disabled computes nothing for one, and returns its request as it is.
+            const call = this._client._tracer &&
+                (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.messages.create', options, (0, tracing_2.messagesCreateSpanSettings)(this._client, body, headers));
+            (0, tracing_2.recordMessagesCreateRequest)(this._client, call, body);
+            const request = this._client.post('/v1/messages?beta=true', {
                 body,
                 timeout: timeout ?? 600000,
                 ...options,
-                headers: (0, headers_1.buildHeaders)([
-                    {
-                        ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined),
-                        ...(user_profile_id != null ? { 'anthropic-user-profile-id': user_profile_id } : undefined),
-                        ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined),
-                    },
-                    helperHeader,
-                    options?.headers,
-                ]),
+                __span: call,
+                headers,
                 stream: modifiedParams.stream ?? false,
             });
+            return (call ?
+                request._thenUnwrap((data) => {
+                    (0, tracing_2.recordMessagesCreateResponse)(this._client, call, body, data);
+                    return data;
+                })
+                : request);
         }
         /**
          * Send a structured list of input messages with text and/or image content, along with an expected `output_format` and
@@ -48825,7 +54067,7 @@ var Messages = /* @__PURE__ */ (() => {
          * Create a Message stream
          */
         stream(body, options) {
-            return BetaMessageStream_1.BetaMessageStream.createMessage(this, body, options);
+            return BetaMessageStream_1.BetaMessageStream.createMessage(this, body, options, { client: this._client });
         }
         /**
          * Count the number of tokens in a Message.
@@ -48841,26 +54083,39 @@ var Messages = /* @__PURE__ */ (() => {
          * const betaMessageTokensCount =
          *   await client.beta.messages.countTokens({
          *     messages: [{ content: 'Hello, world', role: 'user' }],
-         *     model: 'claude-opus-5',
+         *     model: 'claude-opus-5-5',
          *   });
          * ```
          */
         countTokens(params, options) {
             // Transform deprecated output_format to output_config.format
-            const modifiedParams = transformOutputFormat(params);
+            const modifiedParams = (0, beta_messages_request_1.transformOutputFormat)(params);
             const { betas, user_profile_id, workspace_id, ...body } = modifiedParams;
-            return this._client.post('/v1/messages/count_tokens?beta=true', {
+            const headers = (0, headers_1.buildHeaders)([
+                {
+                    'anthropic-beta': [...(betas ?? []), 'token-counting-2024-11-01'].toString(),
+                    ...(user_profile_id != null ? { 'anthropic-user-profile-id': user_profile_id } : undefined),
+                    ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined),
+                },
+                options?.headers,
+            ]);
+            const call = (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.messages.count_tokens', options, {
+                route: '/v1/messages/count_tokens',
+                attributes: { [attributes_1.ATTR_GEN_AI_REQUEST_MODEL]: body.model },
+            });
+            const request = this._client.post('/v1/messages/count_tokens?beta=true', {
                 body,
                 ...options,
-                headers: (0, headers_1.buildHeaders)([
-                    {
-                        'anthropic-beta': [...(betas ?? []), 'token-counting-2024-11-01'].toString(),
-                        ...(user_profile_id != null ? { 'anthropic-user-profile-id': user_profile_id } : undefined),
-                        ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined),
-                    },
-                    options?.headers,
-                ]),
+                __span: call,
+                headers,
             });
+            // Only a request with a span has a response to record.
+            return call ?
+                request._thenUnwrap((count) => {
+                    (0, tracing_2.recordCountTokensResponse)(this._client, call, count);
+                    return count;
+                })
+                : request;
         }
         toolRunner(body, options) {
             return new BetaToolRunner_1.BetaToolRunner(this._client, body, options);
@@ -48872,27 +54127,39 @@ var Messages = /* @__PURE__ */ (() => {
     return Messages;
 })();
 exports.Messages = Messages;
-/**
- * Transform deprecated output_format to output_config.format
- * Returns a modified copy of the params without mutating the original
- */
-function transformOutputFormat(params) {
-    if (!params.output_format) {
-        return params;
-    }
-    if (params.output_config?.format) {
-        throw new error_1.AnthropicError('Both output_format and output_config.format were provided. ' +
-            'Please use only output_config.format (output_format is deprecated).');
-    }
-    const { output_format, ...rest } = params;
-    return {
-        ...rest,
-        output_config: {
-            ...params.output_config,
-            format: output_format,
-        },
-    };
-}
+exports.BETA_BROWSER_MEMBER_NAME_VALUES = [
+    'navigate',
+    'list_tabs',
+    'new_tab',
+    'switch_tab',
+    'close_tab',
+    'read_page',
+    'get_page_text',
+    'read_console',
+    'read_network',
+    'find',
+    'form_input',
+    'file_upload',
+    'scroll_to',
+    'screenshot',
+    'zoom',
+    'left_click',
+    'right_click',
+    'middle_click',
+    'double_click',
+    'triple_click',
+    'hover',
+    'left_click_drag',
+    'left_mouse_down',
+    'left_mouse_up',
+    'mouse_move',
+    'scroll',
+    'type',
+    'key',
+    'hold_key',
+    'wait',
+    'javascript_exec',
+];
 exports.BETA_CLIENT_TOOL_UNION_KEYS = [
     'input_schema',
     'name',
@@ -48910,6 +54177,25 @@ exports.BETA_CLIENT_TOOL_UNION_KEYS = [
     'display_number',
     'enable_zoom',
     'max_characters',
+];
+exports.BETA_COMPUTER_MEMBER_NAME_VALUES = [
+    'key',
+    'hold_key',
+    'type',
+    'cursor_position',
+    'mouse_move',
+    'left_mouse_down',
+    'left_mouse_up',
+    'left_click',
+    'left_click_drag',
+    'right_click',
+    'middle_click',
+    'double_click',
+    'triple_click',
+    'scroll',
+    'wait',
+    'screenshot',
+    'zoom',
 ];
 var BetaToolRunner_2 = __nccwpck_require__(16891);
 Object.defineProperty(exports, "BetaToolRunner", ({ enumerable: true, get: function () { return BetaToolRunner_2.BetaToolRunner; } }));
@@ -48929,6 +54215,7 @@ exports.Models = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Models extends resource_1.APIResource {
     /**
@@ -48955,6 +54242,10 @@ class Models extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.models.retrieve', options, {
+                route: '/v1/models/{model_id}',
+                attributes: { 'anthropic.model.id': modelID },
+            }),
         });
     }
     /**
@@ -48983,6 +54274,10 @@ class Models extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.models.list', options, {
+                route: '/v1/models',
+                queryParams: ['after_id', 'before_id', 'lifecycle', 'limit'],
+            }),
         });
     }
 }
@@ -49133,6 +54428,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Projects = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 class Projects extends resource_1.APIResource {
     /**
      * Get per-project activity for a given day, with cursor-based pagination.
@@ -49152,7 +54448,24 @@ class Projects extends resource_1.APIResource {
      * ```
      */
     list(query = {}, options) {
-        return this._client.getAPIList('/v1/organizations/analytics/apps/chat/projects?beta=true', (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList('/v1/organizations/analytics/apps/chat/projects?beta=true', (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.analytics.apps.chat.projects.list', options, {
+                route: '/v1/organizations/analytics/apps/chat/projects',
+                queryParams: [
+                    'date',
+                    'ending_date',
+                    'filter',
+                    'group_by',
+                    'limit',
+                    'order',
+                    'order_by',
+                    'page',
+                    'starting_date',
+                ],
+            }),
+        });
     }
 }
 exports.Projects = Projects;
@@ -49184,6 +54497,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Artifacts = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 class Artifacts extends resource_1.APIResource {
     /**
      * Get artifact-creation activity for a given day, broken out by MIME type.
@@ -49204,7 +54518,14 @@ class Artifacts extends resource_1.APIResource {
      * ```
      */
     list(query, options) {
-        return this._client.getAPIList('/v1/organizations/analytics/artifacts?beta=true', (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList('/v1/organizations/analytics/artifacts?beta=true', (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.analytics.artifacts.list', options, {
+                route: '/v1/organizations/analytics/artifacts',
+                queryParams: ['date', 'filter', 'group_by', 'limit', 'page'],
+            }),
+        });
     }
 }
 exports.Artifacts = Artifacts;
@@ -49221,6 +54542,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Connectors = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 class Connectors extends resource_1.APIResource {
     /**
      * Get per-connector usage for a given day, with cursor-based pagination.
@@ -49242,7 +54564,25 @@ class Connectors extends resource_1.APIResource {
      * ```
      */
     list(query = {}, options) {
-        return this._client.getAPIList('/v1/organizations/analytics/connectors?beta=true', (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList('/v1/organizations/analytics/connectors?beta=true', (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.analytics.connectors.list', options, {
+                route: '/v1/organizations/analytics/connectors',
+                queryParams: [
+                    'date',
+                    'ending_date',
+                    'filter',
+                    'group_by',
+                    'limit',
+                    'order',
+                    'order_by',
+                    'page',
+                    'starting_date',
+                ],
+                contentQueryParams: ['filter'],
+            }),
+        });
     }
 }
 exports.Connectors = Connectors;
@@ -49259,6 +54599,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.CostReport = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 class CostReport extends resource_1.APIResource {
     /**
      * Get cost in USD over time across a date range.
@@ -49279,7 +54620,31 @@ class CostReport extends resource_1.APIResource {
      * ```
      */
     list(query, options) {
-        return this._client.getAPIList('/v1/organizations/analytics/cost_report?beta=true', (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList('/v1/organizations/analytics/cost_report?beta=true', (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.analytics.cost_report.list', options, {
+                route: '/v1/organizations/analytics/cost_report',
+                queryParams: [
+                    'bucket_width',
+                    'claude_tag_categories',
+                    'claude_tag_user_ids',
+                    'context_windows',
+                    'ending_at',
+                    'group_by',
+                    'inference_geos',
+                    'limit',
+                    'models',
+                    'page',
+                    'products',
+                    'rbac_group_ids',
+                    'slack_channel_ids',
+                    'speeds',
+                    'starting_at',
+                    'user_ids',
+                ],
+            }),
+        });
     }
 }
 exports.CostReport = CostReport;
@@ -49331,6 +54696,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Plugins = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 class Plugins extends resource_1.APIResource {
     /**
      * Get per-plugin install + invocation usage for a given day, with pagination.
@@ -49355,7 +54721,25 @@ class Plugins extends resource_1.APIResource {
      * ```
      */
     list(query = {}, options) {
-        return this._client.getAPIList('/v1/organizations/analytics/plugins?beta=true', (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList('/v1/organizations/analytics/plugins?beta=true', (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.analytics.plugins.list', options, {
+                route: '/v1/organizations/analytics/plugins',
+                queryParams: [
+                    'date',
+                    'ending_date',
+                    'filter',
+                    'group_by',
+                    'limit',
+                    'order',
+                    'order_by',
+                    'page',
+                    'starting_date',
+                ],
+                contentQueryParams: ['filter'],
+            }),
+        });
     }
 }
 exports.Plugins = Plugins;
@@ -49372,6 +54756,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Skills = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 class Skills extends resource_1.APIResource {
     /**
      * Get per-skill usage for a given day, with cursor-based pagination.
@@ -49391,7 +54776,25 @@ class Skills extends resource_1.APIResource {
      * ```
      */
     list(query = {}, options) {
-        return this._client.getAPIList('/v1/organizations/analytics/skills?beta=true', (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList('/v1/organizations/analytics/skills?beta=true', (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.analytics.skills.list', options, {
+                route: '/v1/organizations/analytics/skills',
+                queryParams: [
+                    'date',
+                    'ending_date',
+                    'filter',
+                    'group_by',
+                    'limit',
+                    'order',
+                    'order_by',
+                    'page',
+                    'starting_date',
+                ],
+                contentQueryParams: ['filter'],
+            }),
+        });
     }
 }
 exports.Skills = Skills;
@@ -49408,6 +54811,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Summaries = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 class Summaries extends resource_1.APIResource {
     /**
      * Get organization-wide activity summaries for a date range.
@@ -49415,13 +54819,12 @@ class Summaries extends resource_1.APIResource {
      * Returns one entry per day from `starting_date` (inclusive) to `ending_date`
      * (exclusive) in `data`, the same `data` / `next_page` envelope as the other
      * analytics list endpoints; the series is currently returned in full, so
-     * `next_page` is always null (`summaries` is a deprecated alias of `data`). Data
-     * is typically available with a 1-day lag and may be revised by a few percent over
-     * the following days: when `ending_date` is omitted it defaults to the most recent
-     * available day + 1, so the last entry covers the most recent available day. The
-     * series can be scoped to an RBAC group via `filter[]=rbac_group_id:{id}`.
-     * Available to organizations on a Claude Enterprise plan. Requires an API key with
-     * the `read:analytics` scope.
+     * `next_page` is always null. Data is typically available with a 1-day lag and may
+     * be revised by a few percent over the following days: when `ending_date` is
+     * omitted it defaults to the most recent available day + 1, so the last entry
+     * covers the most recent available day. The series can be scoped to an RBAC group
+     * via `filter[]=rbac_group_id:{id}`. Available to organizations on a Claude
+     * Enterprise plan. Requires an API key with the `read:analytics` scope.
      *
      * @example
      * ```ts
@@ -49434,7 +54837,14 @@ class Summaries extends resource_1.APIResource {
      * ```
      */
     list(query, options) {
-        return this._client.getAPIList('/v1/organizations/analytics/summaries?beta=true', (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList('/v1/organizations/analytics/summaries?beta=true', (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.analytics.summaries.list', options, {
+                route: '/v1/organizations/analytics/summaries',
+                queryParams: ['ending_date', 'filter', 'limit', 'page', 'starting_date'],
+            }),
+        });
     }
 }
 exports.Summaries = Summaries;
@@ -49451,6 +54861,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.UsageReport = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 class UsageReport extends resource_1.APIResource {
     /**
      * Get token usage over time across a date range.
@@ -49471,7 +54882,31 @@ class UsageReport extends resource_1.APIResource {
      * ```
      */
     list(query, options) {
-        return this._client.getAPIList('/v1/organizations/analytics/usage_report?beta=true', (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList('/v1/organizations/analytics/usage_report?beta=true', (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.analytics.usage_report.list', options, {
+                route: '/v1/organizations/analytics/usage_report',
+                queryParams: [
+                    'bucket_width',
+                    'claude_tag_categories',
+                    'claude_tag_user_ids',
+                    'context_windows',
+                    'ending_at',
+                    'group_by',
+                    'inference_geos',
+                    'limit',
+                    'models',
+                    'page',
+                    'products',
+                    'rbac_group_ids',
+                    'slack_channel_ids',
+                    'speeds',
+                    'starting_at',
+                    'user_ids',
+                ],
+            }),
+        });
     }
 }
 exports.UsageReport = UsageReport;
@@ -49488,6 +54923,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.UserCostReport = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 class UserCostReport extends resource_1.APIResource {
     /**
      * Get per-user cost in USD across a date range.
@@ -49510,7 +54946,34 @@ class UserCostReport extends resource_1.APIResource {
      * ```
      */
     list(query, options) {
-        return this._client.getAPIList('/v1/organizations/analytics/user_cost_report?beta=true', (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList('/v1/organizations/analytics/user_cost_report?beta=true', (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.analytics.user_cost_report.list', options, {
+                route: '/v1/organizations/analytics/user_cost_report',
+                queryParams: [
+                    'bucket_width',
+                    'claude_tag_categories',
+                    'claude_tag_user_ids',
+                    'context_windows',
+                    'ending_at',
+                    'exclude_deleted_users',
+                    'group_by',
+                    'inference_geos',
+                    'limit',
+                    'models',
+                    'order',
+                    'order_by',
+                    'page',
+                    'products',
+                    'rbac_group_ids',
+                    'slack_channel_ids',
+                    'speeds',
+                    'starting_at',
+                    'user_ids',
+                ],
+            }),
+        });
     }
 }
 exports.UserCostReport = UserCostReport;
@@ -49527,6 +54990,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.UserUsageReport = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 class UserUsageReport extends resource_1.APIResource {
     /**
      * Get per-user token usage across a date range.
@@ -49549,7 +55013,34 @@ class UserUsageReport extends resource_1.APIResource {
      * ```
      */
     list(query, options) {
-        return this._client.getAPIList('/v1/organizations/analytics/user_usage_report?beta=true', (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList('/v1/organizations/analytics/user_usage_report?beta=true', (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.analytics.user_usage_report.list', options, {
+                route: '/v1/organizations/analytics/user_usage_report',
+                queryParams: [
+                    'bucket_width',
+                    'claude_tag_categories',
+                    'claude_tag_user_ids',
+                    'context_windows',
+                    'ending_at',
+                    'exclude_deleted_users',
+                    'group_by',
+                    'inference_geos',
+                    'limit',
+                    'models',
+                    'order',
+                    'order_by',
+                    'page',
+                    'products',
+                    'rbac_group_ids',
+                    'slack_channel_ids',
+                    'speeds',
+                    'starting_at',
+                    'user_ids',
+                ],
+            }),
+        });
     }
 }
 exports.UserUsageReport = UserUsageReport;
@@ -49566,6 +55057,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Users = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 class Users extends resource_1.APIResource {
     /**
      * Get per-user activity for a given day, with cursor-based pagination.
@@ -49585,7 +55077,25 @@ class Users extends resource_1.APIResource {
      * ```
      */
     list(query = {}, options) {
-        return this._client.getAPIList('/v1/organizations/analytics/users?beta=true', (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList('/v1/organizations/analytics/users?beta=true', (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.analytics.users.list', options, {
+                route: '/v1/organizations/analytics/users',
+                queryParams: [
+                    'date',
+                    'ending_date',
+                    'filter',
+                    'group_by',
+                    'limit',
+                    'order',
+                    'order_by',
+                    'page',
+                    'starting_date',
+                ],
+                contentQueryParams: ['page'],
+            }),
+        });
     }
 }
 exports.Users = Users;
@@ -49602,6 +55112,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.APIKeys = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class APIKeys extends resource_1.APIResource {
     /**
@@ -49616,7 +55127,13 @@ class APIKeys extends resource_1.APIResource {
      * ```
      */
     retrieve(apiKeyID, options) {
-        return this._client.get((0, path_1.path) `/v1/organizations/api_keys/${apiKeyID}?beta=true`, options);
+        return this._client.get((0, path_1.path) `/v1/organizations/api_keys/${apiKeyID}?beta=true`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.api_keys.retrieve', options, {
+                route: '/v1/organizations/api_keys/{api_key_id}',
+                attributes: { 'anthropic.organization.api_key.id': apiKeyID },
+            }),
+        });
     }
     /**
      * Update API Key
@@ -49630,7 +55147,14 @@ class APIKeys extends resource_1.APIResource {
      * ```
      */
     update(apiKeyID, body, options) {
-        return this._client.post((0, path_1.path) `/v1/organizations/api_keys/${apiKeyID}?beta=true`, { body, ...options });
+        return this._client.post((0, path_1.path) `/v1/organizations/api_keys/${apiKeyID}?beta=true`, {
+            body,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.api_keys.update', options, {
+                route: '/v1/organizations/api_keys/{api_key_id}',
+                attributes: { 'anthropic.organization.api_key.id': apiKeyID },
+            }),
+        });
     }
     /**
      * List API Keys
@@ -49647,6 +55171,10 @@ class APIKeys extends resource_1.APIResource {
         return this._client.getAPIList('/v1/organizations/api_keys?beta=true', (pagination_1.Page), {
             query,
             ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.api_keys.list', options, {
+                route: '/v1/organizations/api_keys',
+                queryParams: ['after_id', 'before_id', 'created_by_user_id', 'limit', 'status', 'workspace_id'],
+            }),
         });
     }
 }
@@ -49663,6 +55191,7 @@ exports.APIKeys = APIKeys;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.ComplianceSettings = void 0;
 const resource_1 = __nccwpck_require__(82941);
+const tracing_1 = __nccwpck_require__(91705);
 class ComplianceSettings extends resource_1.APIResource {
     /**
      * Retrieve your organization's Compliance Settings.
@@ -49679,7 +55208,12 @@ class ComplianceSettings extends resource_1.APIResource {
      * ```
      */
     retrieve(options) {
-        return this._client.get('/v1/organizations/compliance_settings?beta=true', options);
+        return this._client.get('/v1/organizations/compliance_settings?beta=true', {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.compliance_settings.retrieve', options, {
+                route: '/v1/organizations/compliance_settings',
+            }),
+        });
     }
     /**
      * Update your organization's Compliance Settings.
@@ -49705,7 +55239,13 @@ class ComplianceSettings extends resource_1.APIResource {
      * ```
      */
     update(body, options) {
-        return this._client.post('/v1/organizations/compliance_settings?beta=true', { body, ...options });
+        return this._client.post('/v1/organizations/compliance_settings?beta=true', {
+            body,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.compliance_settings.update', options, {
+                route: '/v1/organizations/compliance_settings',
+            }),
+        });
     }
 }
 exports.ComplianceSettings = ComplianceSettings;
@@ -49722,6 +55262,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.ExternalKeys = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class ExternalKeys extends resource_1.APIResource {
     /**
@@ -49740,7 +55281,14 @@ class ExternalKeys extends resource_1.APIResource {
      * ```
      */
     create(body, options) {
-        return this._client.post('/v1/organizations/external_keys?beta=true', { body, ...options });
+        return this._client.post('/v1/organizations/external_keys?beta=true', {
+            body,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.external_keys.create', options, {
+                route: '/v1/organizations/external_keys',
+                createdIDAttribute: 'anthropic.organization.external_key.id',
+            }),
+        });
     }
     /**
      * Retrieve a single external key config in the caller's organization by ID.
@@ -49754,7 +55302,13 @@ class ExternalKeys extends resource_1.APIResource {
      * ```
      */
     retrieve(externalKeyID, options) {
-        return this._client.get((0, path_1.path) `/v1/organizations/external_keys/${externalKeyID}?beta=true`, options);
+        return this._client.get((0, path_1.path) `/v1/organizations/external_keys/${externalKeyID}?beta=true`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.external_keys.retrieve', options, {
+                route: '/v1/organizations/external_keys/{external_key_id}',
+                attributes: { 'anthropic.organization.external_key.id': externalKeyID },
+            }),
+        });
     }
     /**
      * Partially update an external key config. Omitted fields are left unchanged.
@@ -49775,6 +55329,10 @@ class ExternalKeys extends resource_1.APIResource {
         return this._client.post((0, path_1.path) `/v1/organizations/external_keys/${externalKeyID}?beta=true`, {
             body,
             ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.external_keys.update', options, {
+                route: '/v1/organizations/external_keys/{external_key_id}',
+                attributes: { 'anthropic.organization.external_key.id': externalKeyID },
+            }),
         });
     }
     /**
@@ -49795,6 +55353,10 @@ class ExternalKeys extends resource_1.APIResource {
         return this._client.getAPIList('/v1/organizations/external_keys?beta=true', (pagination_1.PageCursor), {
             query,
             ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.external_keys.list', options, {
+                route: '/v1/organizations/external_keys',
+                queryParams: ['limit', 'page'],
+            }),
         });
     }
     /**
@@ -49811,7 +55373,13 @@ class ExternalKeys extends resource_1.APIResource {
      * ```
      */
     delete(externalKeyID, options) {
-        return this._client.delete((0, path_1.path) `/v1/organizations/external_keys/${externalKeyID}?beta=true`, options);
+        return this._client.delete((0, path_1.path) `/v1/organizations/external_keys/${externalKeyID}?beta=true`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.external_keys.delete', options, {
+                route: '/v1/organizations/external_keys/{external_key_id}',
+                attributes: { 'anthropic.organization.external_key.id': externalKeyID },
+            }),
+        });
     }
     /**
      * Validate an external key config against the customer's KMS.
@@ -49830,7 +55398,13 @@ class ExternalKeys extends resource_1.APIResource {
      * ```
      */
     validate(externalKeyID, options) {
-        return this._client.post((0, path_1.path) `/v1/organizations/external_keys/${externalKeyID}/validate?beta=true`, options);
+        return this._client.post((0, path_1.path) `/v1/organizations/external_keys/${externalKeyID}/validate?beta=true`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.external_keys.validate', options, {
+                route: '/v1/organizations/external_keys/{external_key_id}/validate',
+                attributes: { 'anthropic.organization.external_key.id': externalKeyID },
+            }),
+        });
     }
 }
 exports.ExternalKeys = ExternalKeys;
@@ -49895,6 +55469,7 @@ exports.Issuers = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Issuers extends resource_1.APIResource {
     /**
@@ -49933,6 +55508,10 @@ class Issuers extends resource_1.APIResource {
                 { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.issuers.create', options, {
+                route: '/v1/organizations/federation_issuers',
+                createdIDAttribute: 'anthropic.organization.federation_issuer.id',
+            }),
         });
     }
     /**
@@ -49959,6 +55538,10 @@ class Issuers extends resource_1.APIResource {
                 { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.issuers.retrieve', options, {
+                route: '/v1/organizations/federation_issuers/{federation_issuer_id}',
+                attributes: { 'anthropic.organization.federation_issuer.id': federationIssuerID },
+            }),
         });
     }
     /**
@@ -49992,6 +55575,10 @@ class Issuers extends resource_1.APIResource {
                 { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.issuers.update', options, {
+                route: '/v1/organizations/federation_issuers/{federation_issuer_id}',
+                attributes: { 'anthropic.organization.federation_issuer.id': federationIssuerID },
+            }),
         });
     }
     /**
@@ -50021,6 +55608,10 @@ class Issuers extends resource_1.APIResource {
                 { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.issuers.list', options, {
+                route: '/v1/organizations/federation_issuers',
+                queryParams: ['include_archived', 'limit', 'page'],
+            }),
         });
     }
     /**
@@ -50052,6 +55643,10 @@ class Issuers extends resource_1.APIResource {
                 { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.issuers.archive', options, {
+                route: '/v1/organizations/federation_issuers/{federation_issuer_id}/archive',
+                attributes: { 'anthropic.organization.federation_issuer.id': federationIssuerID },
+            }),
         });
     }
 }
@@ -50088,6 +55683,7 @@ const WorkspacesAPI = tslib_1.__importStar(__nccwpck_require__(81480));
 const workspaces_1 = __nccwpck_require__(81480);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 var Rules = /* @__PURE__ */ (() => {
     class Rules extends resource_1.APIResource {
@@ -50140,6 +55736,10 @@ var Rules = /* @__PURE__ */ (() => {
                     { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.rules.create', options, {
+                    route: '/v1/organizations/federation_rules',
+                    createdIDAttribute: 'anthropic.organization.federation_rule.id',
+                }),
             });
         }
         /**
@@ -50166,6 +55766,10 @@ var Rules = /* @__PURE__ */ (() => {
                     { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.rules.retrieve', options, {
+                    route: '/v1/organizations/federation_rules/{federation_rule_id}',
+                    attributes: { 'anthropic.organization.federation_rule.id': federationRuleID },
+                }),
             });
         }
         /**
@@ -50208,6 +55812,10 @@ var Rules = /* @__PURE__ */ (() => {
                     { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.rules.update', options, {
+                    route: '/v1/organizations/federation_rules/{federation_rule_id}',
+                    attributes: { 'anthropic.organization.federation_rule.id': federationRuleID },
+                }),
             });
         }
         /**
@@ -50238,6 +55846,10 @@ var Rules = /* @__PURE__ */ (() => {
                     { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.rules.list', options, {
+                    route: '/v1/organizations/federation_rules',
+                    queryParams: ['include_archived', 'issuer_id', 'limit', 'page'],
+                }),
             });
         }
         /**
@@ -50271,6 +55883,10 @@ var Rules = /* @__PURE__ */ (() => {
                     { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.rules.archive', options, {
+                    route: '/v1/organizations/federation_rules/{federation_rule_id}/archive',
+                    attributes: { 'anthropic.organization.federation_rule.id': federationRuleID },
+                }),
             });
         }
     }
@@ -50292,6 +55908,7 @@ exports.Workspaces = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Workspaces extends resource_1.APIResource {
     /**
@@ -50327,6 +55944,11 @@ class Workspaces extends resource_1.APIResource {
                 { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.rules.workspaces.list', options, {
+                route: '/v1/organizations/federation_rules/{federation_rule_id}/workspaces',
+                queryParams: ['limit', 'page'],
+                attributes: { 'anthropic.organization.federation_rule.id': federationRuleID },
+            }),
         });
     }
     /**
@@ -50363,6 +55985,12 @@ class Workspaces extends resource_1.APIResource {
                 { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.rules.workspaces.add', options, {
+                route: '/v1/organizations/federation_rules/{federation_rule_id}/workspaces',
+                attributes: { 'anthropic.organization.federation_rule.id': federationRuleID },
+                createdIDAttribute: 'anthropic.organization.federation_rule.workspace.id',
+                createdIDField: 'workspace_id',
+            }),
         });
     }
     /**
@@ -50394,6 +56022,13 @@ class Workspaces extends resource_1.APIResource {
                 { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.rules.workspaces.remove', options, {
+                route: '/v1/organizations/federation_rules/{federation_rule_id}/workspaces/{workspace_id}',
+                attributes: {
+                    'anthropic.organization.federation_rule.id': federation_rule_id,
+                    'anthropic.organization.federation_rule.workspace.id': workspaceID,
+                },
+            }),
         });
     }
 }
@@ -50408,7 +56043,7 @@ exports.Workspaces = Workspaces;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.Workspaces = exports.Users = exports.SpendLimits = exports.ServiceAccounts = exports.RateLimits = exports.RBACRoles = exports.RBACGroups = exports.Plugins = exports.PluginMarketplaces = exports.Organization = exports.Invites = exports.Federation = exports.ExternalKeys = exports.ComplianceSettings = exports.Analytics = exports.APIKeys = void 0;
+exports.Workspaces = exports.Users = exports.TelemetryDestinations = exports.SpendLimits = exports.ServiceAccounts = exports.RateLimits = exports.RBACRoles = exports.RBACGroups = exports.Plugins = exports.PluginMarketplaces = exports.Organization = exports.Invites = exports.Federation = exports.ExternalKeys = exports.ComplianceSettings = exports.Analytics = exports.APIKeys = void 0;
 var api_keys_1 = __nccwpck_require__(1381);
 Object.defineProperty(exports, "APIKeys", ({ enumerable: true, get: function () { return api_keys_1.APIKeys; } }));
 var index_1 = __nccwpck_require__(57383);
@@ -50437,10 +56072,12 @@ var index_6 = __nccwpck_require__(52379);
 Object.defineProperty(exports, "ServiceAccounts", ({ enumerable: true, get: function () { return index_6.ServiceAccounts; } }));
 var index_7 = __nccwpck_require__(91226);
 Object.defineProperty(exports, "SpendLimits", ({ enumerable: true, get: function () { return index_7.SpendLimits; } }));
+var index_8 = __nccwpck_require__(77758);
+Object.defineProperty(exports, "TelemetryDestinations", ({ enumerable: true, get: function () { return index_8.TelemetryDestinations; } }));
 var users_1 = __nccwpck_require__(11184);
 Object.defineProperty(exports, "Users", ({ enumerable: true, get: function () { return users_1.Users; } }));
-var index_8 = __nccwpck_require__(93755);
-Object.defineProperty(exports, "Workspaces", ({ enumerable: true, get: function () { return index_8.Workspaces; } }));
+var index_9 = __nccwpck_require__(93755);
+Object.defineProperty(exports, "Workspaces", ({ enumerable: true, get: function () { return index_9.Workspaces; } }));
 //# sourceMappingURL=index.js.map
 
 /***/ }),
@@ -50454,6 +56091,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Invites = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Invites extends resource_1.APIResource {
     /**
@@ -50474,7 +56112,14 @@ class Invites extends resource_1.APIResource {
      * ```
      */
     create(body, options) {
-        return this._client.post('/v1/organizations/invites?beta=true', { body, ...options });
+        return this._client.post('/v1/organizations/invites?beta=true', {
+            body,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.invites.create', options, {
+                route: '/v1/organizations/invites',
+                createdIDAttribute: 'anthropic.organization.invite.id',
+            }),
+        });
     }
     /**
      * Retrieve an invite by ID.
@@ -50488,7 +56133,13 @@ class Invites extends resource_1.APIResource {
      * ```
      */
     retrieve(inviteID, options) {
-        return this._client.get((0, path_1.path) `/v1/organizations/invites/${inviteID}?beta=true`, options);
+        return this._client.get((0, path_1.path) `/v1/organizations/invites/${inviteID}?beta=true`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.invites.retrieve', options, {
+                route: '/v1/organizations/invites/{invite_id}',
+                attributes: { 'anthropic.organization.invite.id': inviteID },
+            }),
+        });
     }
     /**
      * List the organization's invites.
@@ -50505,6 +56156,10 @@ class Invites extends resource_1.APIResource {
         return this._client.getAPIList('/v1/organizations/invites?beta=true', (pagination_1.Page), {
             query,
             ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.invites.list', options, {
+                route: '/v1/organizations/invites',
+                queryParams: ['after_id', 'before_id', 'email', 'limit', 'roles', 'statuses'],
+            }),
         });
     }
     /**
@@ -50519,7 +56174,13 @@ class Invites extends resource_1.APIResource {
      * ```
      */
     delete(inviteID, options) {
-        return this._client.delete((0, path_1.path) `/v1/organizations/invites/${inviteID}?beta=true`, options);
+        return this._client.delete((0, path_1.path) `/v1/organizations/invites/${inviteID}?beta=true`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.invites.delete', options, {
+                route: '/v1/organizations/invites/{invite_id}',
+                attributes: { 'anthropic.organization.invite.id': inviteID },
+            }),
+        });
     }
 }
 exports.Invites = Invites;
@@ -50564,8 +56225,11 @@ const ServiceAccountsAPI = tslib_1.__importStar(__nccwpck_require__(5693));
 const service_accounts_1 = __nccwpck_require__(5693);
 const SpendLimitsAPI = tslib_1.__importStar(__nccwpck_require__(82359));
 const spend_limits_1 = __nccwpck_require__(82359);
+const TelemetryDestinationsAPI = tslib_1.__importStar(__nccwpck_require__(38211));
+const telemetry_destinations_1 = __nccwpck_require__(38211);
 const WorkspacesAPI = tslib_1.__importStar(__nccwpck_require__(70013));
 const workspaces_1 = __nccwpck_require__(70013);
+const tracing_1 = __nccwpck_require__(91705);
 var Organization = /* @__PURE__ */ (() => {
     class Organization extends resource_1.APIResource {
         constructor() {
@@ -50585,6 +56249,7 @@ var Organization = /* @__PURE__ */ (() => {
             this.rbacRoles = new RBACRolesAPI.RBACRoles(this._client);
             this.plugins = new PluginsAPI.Plugins(this._client);
             this.pluginMarketplaces = new PluginMarketplacesAPI.PluginMarketplaces(this._client);
+            this.telemetryDestinations = new TelemetryDestinationsAPI.TelemetryDestinations(this._client);
         }
         /**
          * Retrieve information about the organization associated with the authenticated
@@ -50597,7 +56262,12 @@ var Organization = /* @__PURE__ */ (() => {
          * ```
          */
         retrieve(options) {
-            return this._client.get('/v1/organizations/me?beta=true', options);
+            return this._client.get('/v1/organizations/me?beta=true', {
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.retrieve', options, {
+                    route: '/v1/organizations/me',
+                }),
+            });
         }
     }
     Organization.APIKeys = api_keys_1.APIKeys;
@@ -50615,6 +56285,7 @@ var Organization = /* @__PURE__ */ (() => {
     Organization.RBACRoles = rbac_roles_1.RBACRoles;
     Organization.Plugins = plugins_1.Plugins;
     Organization.PluginMarketplaces = plugin_marketplaces_1.PluginMarketplaces;
+    Organization.TelemetryDestinations = telemetry_destinations_1.TelemetryDestinations;
     return Organization;
 })();
 exports.Organization = Organization;
@@ -50632,6 +56303,7 @@ exports.PluginMarketplaces = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const uploads_1 = __nccwpck_require__(59629);
 const path_1 = __nccwpck_require__(43002);
 class PluginMarketplaces extends resource_1.APIResource {
@@ -50666,6 +56338,11 @@ class PluginMarketplaces extends resource_1.APIResource {
                 { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.plugin_marketplaces.retrieve', options, {
+                route: '/v1/organizations/plugin_marketplaces/{marketplace_id}',
+                queryParams: ['organization_id'],
+                attributes: { 'anthropic.organization.plugin_marketplace.id': marketplaceID },
+            }),
         });
     }
     /**
@@ -50703,6 +56380,10 @@ class PluginMarketplaces extends resource_1.APIResource {
                 { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.plugin_marketplaces.update', options, {
+                route: '/v1/organizations/plugin_marketplaces/{marketplace_id}',
+                attributes: { 'anthropic.organization.plugin_marketplace.id': marketplaceID },
+            }),
         });
     }
     /**
@@ -50743,6 +56424,10 @@ class PluginMarketplaces extends resource_1.APIResource {
                 { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.plugin_marketplaces.list', options, {
+                route: '/v1/organizations/plugin_marketplaces',
+                queryParams: ['limit', 'organization_id', 'owner_type', 'page', 'source'],
+            }),
         });
     }
     /**
@@ -50795,6 +56480,7 @@ class PluginMarketplaces extends resource_1.APIResource {
                 { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.plugin_marketplaces.validate_archive', options, { route: '/v1/organizations/plugin_marketplaces/validate_archive' }),
         }, this._client));
     }
     /**
@@ -50850,6 +56536,7 @@ class PluginMarketplaces extends resource_1.APIResource {
                 { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.plugin_marketplaces.validate_repository', options, { route: '/v1/organizations/plugin_marketplaces/validate_repository' }),
         });
     }
 }
@@ -50887,6 +56574,7 @@ exports.InstallationSettings = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class InstallationSettings extends resource_1.APIResource {
     /**
@@ -50927,6 +56615,11 @@ class InstallationSettings extends resource_1.APIResource {
                 { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.plugins.installation_settings.list', options, {
+                route: '/v1/organizations/plugins/{plugin_id}/installation_settings',
+                queryParams: ['limit', 'organization_id', 'page', 'target_type'],
+                attributes: { 'anthropic.organization.plugin.id': pluginID },
+            }),
         });
     }
     /**
@@ -50975,6 +56668,13 @@ class InstallationSettings extends resource_1.APIResource {
                 { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.plugins.installation_settings.remove', options, {
+                route: '/v1/organizations/plugins/{plugin_id}/installation_settings/{target}',
+                attributes: {
+                    'anthropic.organization.plugin.id': plugin_id,
+                    'anthropic.organization.plugin.installation_setting.id': target,
+                },
+            }),
         });
     }
     /**
@@ -51022,6 +56722,13 @@ class InstallationSettings extends resource_1.APIResource {
                 { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.plugins.installation_settings.set', options, {
+                route: '/v1/organizations/plugins/{plugin_id}/installation_settings/{target}',
+                attributes: {
+                    'anthropic.organization.plugin.id': plugin_id,
+                    'anthropic.organization.plugin.installation_setting.id': target,
+                },
+            }),
         });
     }
 }
@@ -51047,6 +56754,7 @@ const VersionsAPI = tslib_1.__importStar(__nccwpck_require__(69178));
 const versions_1 = __nccwpck_require__(69178);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const uploads_1 = __nccwpck_require__(59629);
 const path_1 = __nccwpck_require__(43002);
 var Plugins = /* @__PURE__ */ (() => {
@@ -51112,6 +56820,10 @@ var Plugins = /* @__PURE__ */ (() => {
                     { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.plugins.create', options, {
+                    route: '/v1/organizations/plugins',
+                    createdIDAttribute: 'anthropic.organization.plugin.id',
+                }),
             }, this._client));
         }
         /**
@@ -51145,6 +56857,11 @@ var Plugins = /* @__PURE__ */ (() => {
                     { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.plugins.retrieve', options, {
+                    route: '/v1/organizations/plugins/{plugin_id}',
+                    queryParams: ['organization_id'],
+                    attributes: { 'anthropic.organization.plugin.id': pluginID },
+                }),
             });
         }
         /**
@@ -51201,6 +56918,10 @@ var Plugins = /* @__PURE__ */ (() => {
                     { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.plugins.update', options, {
+                    route: '/v1/organizations/plugins/{plugin_id}',
+                    attributes: { 'anthropic.organization.plugin.id': pluginID },
+                }),
             });
         }
         /**
@@ -51241,6 +56962,21 @@ var Plugins = /* @__PURE__ */ (() => {
                     { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.plugins.list', options, {
+                    route: '/v1/organizations/plugins',
+                    queryParams: [
+                        'created_at[gt]',
+                        'created_at[gte]',
+                        'created_at[lt]',
+                        'created_at[lte]',
+                        'limit',
+                        'marketplace_id',
+                        'organization_id',
+                        'owner_type',
+                        'owner_user_id',
+                        'page',
+                    ],
+                }),
             });
         }
         /**
@@ -51282,6 +57018,10 @@ var Plugins = /* @__PURE__ */ (() => {
                     { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.plugins.delete', options, {
+                    route: '/v1/organizations/plugins/{plugin_id}',
+                    attributes: { 'anthropic.organization.plugin.id': pluginID },
+                }),
             });
         }
     }
@@ -51305,6 +57045,7 @@ exports.Shares = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Shares extends resource_1.APIResource {
     /**
@@ -51347,6 +57088,11 @@ class Shares extends resource_1.APIResource {
                 { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.plugins.shares.list', options, {
+                route: '/v1/organizations/plugins/{plugin_id}/shares',
+                queryParams: ['limit', 'organization_id', 'page', 'target_type'],
+                attributes: { 'anthropic.organization.plugin.id': pluginID },
+            }),
         });
     }
 }
@@ -51365,6 +57111,7 @@ exports.Versions = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const uploads_1 = __nccwpck_require__(59629);
 const path_1 = __nccwpck_require__(43002);
 class Versions extends resource_1.APIResource {
@@ -51418,6 +57165,11 @@ class Versions extends resource_1.APIResource {
                 { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.plugins.versions.create', options, {
+                route: '/v1/organizations/plugins/{plugin_id}/versions',
+                attributes: { 'anthropic.organization.plugin.id': pluginID },
+                createdIDAttribute: 'anthropic.organization.plugin.version.id',
+            }),
         }, this._client));
     }
     /**
@@ -51452,6 +57204,14 @@ class Versions extends resource_1.APIResource {
                 { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.plugins.versions.retrieve', options, {
+                route: '/v1/organizations/plugins/{plugin_id}/versions/{version}',
+                queryParams: ['organization_id'],
+                attributes: {
+                    'anthropic.organization.plugin.id': plugin_id,
+                    'anthropic.organization.plugin.version.id': version,
+                },
+            }),
         });
     }
     /**
@@ -51490,6 +57250,11 @@ class Versions extends resource_1.APIResource {
                 { 'anthropic-beta': [...(betas ?? []), 'ce-plugins-2026-09-01'].toString() },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.plugins.versions.list', options, {
+                route: '/v1/organizations/plugins/{plugin_id}/versions',
+                queryParams: ['limit', 'organization_id', 'page'],
+                attributes: { 'anthropic.organization.plugin.id': pluginID },
+            }),
         });
     }
     /**
@@ -51547,6 +57312,14 @@ class Versions extends resource_1.APIResource {
                 options?.headers,
             ]),
             __binaryResponse: true,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.plugins.versions.download', options, {
+                route: '/v1/organizations/plugins/{plugin_id}/versions/{version}/content',
+                queryParams: ['organization_id'],
+                attributes: {
+                    'anthropic.organization.plugin.id': plugin_id,
+                    'anthropic.organization.plugin.version.id': version,
+                },
+            }),
         });
     }
 }
@@ -51564,13 +57337,14 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.RateLimits = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 class RateLimits extends resource_1.APIResource {
     /**
      * List Messages API rate limits for your organization.
      *
      * Each entry corresponds to one rate-limit group (either a model family or an
-     * API-surface category such as the Files API or Message Batches) and contains the
-     * set of limiter values that apply to it.
+     * API-surface category such as the Message Batches API or the web search tool) and
+     * contains the set of limiter values that apply to it.
      *
      * When `limit` is omitted, every matching entry is returned in a single page; when
      * `limit` truncates the result, follow `next_page` to fetch the remaining entries.
@@ -51584,7 +57358,14 @@ class RateLimits extends resource_1.APIResource {
      * ```
      */
     list(query = {}, options) {
-        return this._client.getAPIList('/v1/organizations/rate_limits?beta=true', (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList('/v1/organizations/rate_limits?beta=true', (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.rate_limits.list', options, {
+                route: '/v1/organizations/rate_limits',
+                queryParams: ['group_type', 'limit', 'model', 'page'],
+            }),
+        });
     }
 }
 exports.RateLimits = RateLimits;
@@ -51616,6 +57397,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Members = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Members extends resource_1.APIResource {
     /**
@@ -51634,7 +57416,15 @@ class Members extends resource_1.APIResource {
      * ```
      */
     list(rbacGroupID, query = {}, options) {
-        return this._client.getAPIList((0, path_1.path) `/v1/organizations/rbac_groups/${rbacGroupID}/members?beta=true`, (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/rbac_groups/${rbacGroupID}/members?beta=true`, (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.rbac_groups.members.list', options, {
+                route: '/v1/organizations/rbac_groups/{rbac_group_id}/members',
+                queryParams: ['limit', 'page'],
+                attributes: { 'anthropic.organization.rbac_group.id': rbacGroupID },
+            }),
+        });
     }
     /**
      * Add a User to an RBAC Group. Membership of groups provisioned by an identity
@@ -51656,6 +57446,12 @@ class Members extends resource_1.APIResource {
         return this._client.post((0, path_1.path) `/v1/organizations/rbac_groups/${rbacGroupID}/members?beta=true`, {
             body,
             ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.rbac_groups.members.add', options, {
+                route: '/v1/organizations/rbac_groups/{rbac_group_id}/members',
+                attributes: { 'anthropic.organization.rbac_group.id': rbacGroupID },
+                createdIDAttribute: 'anthropic.organization.rbac_group.member.id',
+                createdIDField: 'user_id',
+            }),
         });
     }
     /**
@@ -51676,7 +57472,16 @@ class Members extends resource_1.APIResource {
      */
     remove(userID, params, options) {
         const { rbac_group_id } = params;
-        return this._client.delete((0, path_1.path) `/v1/organizations/rbac_groups/${rbac_group_id}/members/${userID}?beta=true`, options);
+        return this._client.delete((0, path_1.path) `/v1/organizations/rbac_groups/${rbac_group_id}/members/${userID}?beta=true`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.rbac_groups.members.remove', options, {
+                route: '/v1/organizations/rbac_groups/{rbac_group_id}/members/{user_id}',
+                attributes: {
+                    'anthropic.organization.rbac_group.id': rbac_group_id,
+                    'anthropic.organization.rbac_group.member.id': userID,
+                },
+            }),
+        });
     }
 }
 exports.Members = Members;
@@ -51696,6 +57501,7 @@ const resource_1 = __nccwpck_require__(82941);
 const MembersAPI = tslib_1.__importStar(__nccwpck_require__(32871));
 const members_1 = __nccwpck_require__(32871);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 var RBACGroups = /* @__PURE__ */ (() => {
     class RBACGroups extends resource_1.APIResource {
@@ -51718,7 +57524,14 @@ var RBACGroups = /* @__PURE__ */ (() => {
          * ```
          */
         create(body, options) {
-            return this._client.post('/v1/organizations/rbac_groups?beta=true', { body, ...options });
+            return this._client.post('/v1/organizations/rbac_groups?beta=true', {
+                body,
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.rbac_groups.create', options, {
+                    route: '/v1/organizations/rbac_groups',
+                    createdIDAttribute: 'anthropic.organization.rbac_group.id',
+                }),
+            });
         }
         /**
          * Retrieve an RBAC Group by ID.
@@ -51734,7 +57547,13 @@ var RBACGroups = /* @__PURE__ */ (() => {
          * ```
          */
         retrieve(rbacGroupID, options) {
-            return this._client.get((0, path_1.path) `/v1/organizations/rbac_groups/${rbacGroupID}?beta=true`, options);
+            return this._client.get((0, path_1.path) `/v1/organizations/rbac_groups/${rbacGroupID}?beta=true`, {
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.rbac_groups.retrieve', options, {
+                    route: '/v1/organizations/rbac_groups/{rbac_group_id}',
+                    attributes: { 'anthropic.organization.rbac_group.id': rbacGroupID },
+                }),
+            });
         }
         /**
          * Update an RBAC Group's name. Groups provisioned by an identity provider (source
@@ -51755,6 +57574,10 @@ var RBACGroups = /* @__PURE__ */ (() => {
             return this._client.post((0, path_1.path) `/v1/organizations/rbac_groups/${rbacGroupID}?beta=true`, {
                 body,
                 ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.rbac_groups.update', options, {
+                    route: '/v1/organizations/rbac_groups/{rbac_group_id}',
+                    attributes: { 'anthropic.organization.rbac_group.id': rbacGroupID },
+                }),
             });
         }
         /**
@@ -51774,6 +57597,10 @@ var RBACGroups = /* @__PURE__ */ (() => {
             return this._client.getAPIList('/v1/organizations/rbac_groups?beta=true', (pagination_1.PageCursor), {
                 query,
                 ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.rbac_groups.list', options, {
+                    route: '/v1/organizations/rbac_groups',
+                    queryParams: ['limit', 'page'],
+                }),
             });
         }
         /**
@@ -51792,7 +57619,13 @@ var RBACGroups = /* @__PURE__ */ (() => {
          * ```
          */
         delete(rbacGroupID, options) {
-            return this._client.delete((0, path_1.path) `/v1/organizations/rbac_groups/${rbacGroupID}?beta=true`, options);
+            return this._client.delete((0, path_1.path) `/v1/organizations/rbac_groups/${rbacGroupID}?beta=true`, {
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.rbac_groups.delete', options, {
+                    route: '/v1/organizations/rbac_groups/{rbac_group_id}',
+                    attributes: { 'anthropic.organization.rbac_group.id': rbacGroupID },
+                }),
+            });
         }
     }
     RBACGroups.Members = members_1.Members;
@@ -51827,6 +57660,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Permissions = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Permissions extends resource_1.APIResource {
     /**
@@ -51845,7 +57679,15 @@ class Permissions extends resource_1.APIResource {
      * ```
      */
     list(rbacRoleID, query = {}, options) {
-        return this._client.getAPIList((0, path_1.path) `/v1/organizations/rbac_roles/${rbacRoleID}/permissions?beta=true`, (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/rbac_roles/${rbacRoleID}/permissions?beta=true`, (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.rbac_roles.permissions.list', options, {
+                route: '/v1/organizations/rbac_roles/{rbac_role_id}/permissions',
+                queryParams: ['limit', 'page'],
+                attributes: { 'anthropic.organization.rbac_role.id': rbacRoleID },
+            }),
+        });
     }
 }
 exports.Permissions = Permissions;
@@ -51865,6 +57707,7 @@ const resource_1 = __nccwpck_require__(82941);
 const PermissionsAPI = tslib_1.__importStar(__nccwpck_require__(37629));
 const permissions_1 = __nccwpck_require__(37629);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 var RBACRoles = /* @__PURE__ */ (() => {
     class RBACRoles extends resource_1.APIResource {
@@ -51886,7 +57729,13 @@ var RBACRoles = /* @__PURE__ */ (() => {
          * ```
          */
         retrieve(rbacRoleID, options) {
-            return this._client.get((0, path_1.path) `/v1/organizations/rbac_roles/${rbacRoleID}?beta=true`, options);
+            return this._client.get((0, path_1.path) `/v1/organizations/rbac_roles/${rbacRoleID}?beta=true`, {
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.rbac_roles.retrieve', options, {
+                    route: '/v1/organizations/rbac_roles/{rbac_role_id}',
+                    attributes: { 'anthropic.organization.rbac_role.id': rbacRoleID },
+                }),
+            });
         }
         /**
          * List RBAC Roles in the organization.
@@ -51905,6 +57754,10 @@ var RBACRoles = /* @__PURE__ */ (() => {
             return this._client.getAPIList('/v1/organizations/rbac_roles?beta=true', (pagination_1.PageCursor), {
                 query,
                 ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.rbac_roles.list', options, {
+                    route: '/v1/organizations/rbac_roles',
+                    queryParams: ['limit', 'page'],
+                }),
             });
         }
     }
@@ -51944,6 +57797,7 @@ const WorkspacesAPI = tslib_1.__importStar(__nccwpck_require__(68349));
 const workspaces_1 = __nccwpck_require__(68349);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 var ServiceAccounts = /* @__PURE__ */ (() => {
     class ServiceAccounts extends resource_1.APIResource {
@@ -51983,6 +57837,10 @@ var ServiceAccounts = /* @__PURE__ */ (() => {
                     { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.service_accounts.create', options, {
+                    route: '/v1/organizations/service_accounts',
+                    createdIDAttribute: 'anthropic.organization.service_account.id',
+                }),
             });
         }
         /**
@@ -52009,6 +57867,10 @@ var ServiceAccounts = /* @__PURE__ */ (() => {
                     { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.service_accounts.retrieve', options, {
+                    route: '/v1/organizations/service_accounts/{service_account_id}',
+                    attributes: { 'anthropic.organization.service_account.id': serviceAccountID },
+                }),
             });
         }
         /**
@@ -52041,6 +57903,10 @@ var ServiceAccounts = /* @__PURE__ */ (() => {
                     { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.service_accounts.update', options, {
+                    route: '/v1/organizations/service_accounts/{service_account_id}',
+                    attributes: { 'anthropic.organization.service_account.id': serviceAccountID },
+                }),
             });
         }
         /**
@@ -52072,6 +57938,10 @@ var ServiceAccounts = /* @__PURE__ */ (() => {
                     { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.service_accounts.list', options, {
+                    route: '/v1/organizations/service_accounts',
+                    queryParams: ['include_archived', 'limit', 'page'],
+                }),
             });
         }
         /**
@@ -52103,6 +57973,10 @@ var ServiceAccounts = /* @__PURE__ */ (() => {
                     { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.service_accounts.archive', options, {
+                    route: '/v1/organizations/service_accounts/{service_account_id}/archive',
+                    attributes: { 'anthropic.organization.service_account.id': serviceAccountID },
+                }),
             });
         }
     }
@@ -52124,6 +57998,7 @@ exports.Workspaces = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Workspaces extends resource_1.APIResource {
     /**
@@ -52165,6 +58040,11 @@ class Workspaces extends resource_1.APIResource {
                 { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.service_accounts.workspaces.list', options, {
+                route: '/v1/organizations/service_accounts/{service_account_id}/workspaces',
+                queryParams: ['limit', 'page'],
+                attributes: { 'anthropic.organization.service_account.id': serviceAccountID },
+            }),
         });
     }
     /**
@@ -52202,6 +58082,12 @@ class Workspaces extends resource_1.APIResource {
                 { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.service_accounts.workspaces.add', options, {
+                route: '/v1/organizations/service_accounts/{service_account_id}/workspaces',
+                attributes: { 'anthropic.organization.service_account.id': serviceAccountID },
+                createdIDAttribute: 'anthropic.organization.service_account.workspace.id',
+                createdIDField: 'workspace_id',
+            }),
         });
     }
     /**
@@ -52237,6 +58123,13 @@ class Workspaces extends resource_1.APIResource {
                 { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.service_accounts.workspaces.remove', options, {
+                route: '/v1/organizations/service_accounts/{service_account_id}/workspaces/{workspace_id}',
+                attributes: {
+                    'anthropic.organization.service_account.id': service_account_id,
+                    'anthropic.organization.service_account.workspace.id': workspaceID,
+                },
+            }),
         });
     }
 }
@@ -52254,13 +58147,15 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Effective = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 class Effective extends resource_1.APIResource {
     /**
      * List each member's effective spend limit and period-to-date spend.
      *
      * Returns one row per (member, period) the member resolves a spend limit for, with
      * the `source` scope the spend limit was inherited from. Paginates by member, so a
-     * member's periods never split across pages.
+     * member's periods never split across pages. Supported for Claude Enterprise
+     * organizations only, not for Claude Console organizations.
      *
      * @example
      * ```ts
@@ -52271,7 +58166,14 @@ class Effective extends resource_1.APIResource {
      * ```
      */
     list(query = {}, options) {
-        return this._client.getAPIList('/v1/organizations/spend_limits/effective?beta=true', (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList('/v1/organizations/spend_limits/effective?beta=true', (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.spend_limits.effective.list', options, {
+                route: '/v1/organizations/spend_limits/effective',
+                queryParams: ['limit', 'page', 'period', 'user_ids'],
+            }),
+        });
     }
 }
 exports.Effective = Effective;
@@ -52288,6 +58190,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.IncreaseRequests = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class IncreaseRequests extends resource_1.APIResource {
     /**
@@ -52305,7 +58208,15 @@ class IncreaseRequests extends resource_1.APIResource {
      * ```
      */
     retrieve(spendLimitIncreaseRequestID, options) {
-        return this._client.get((0, path_1.path) `/v1/organizations/spend_limit_increase_requests/${spendLimitIncreaseRequestID}?beta=true`, options);
+        return this._client.get((0, path_1.path) `/v1/organizations/spend_limit_increase_requests/${spendLimitIncreaseRequestID}?beta=true`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.spend_limits.increase_requests.retrieve', options, {
+                route: '/v1/organizations/spend_limit_increase_requests/{spend_limit_increase_request_id}',
+                attributes: {
+                    'anthropic.organization.spend_limit_increase_request.id': spendLimitIncreaseRequestID,
+                },
+            }),
+        });
     }
     /**
      * List spend limit increase requests, most recent first.
@@ -52322,7 +58233,14 @@ class IncreaseRequests extends resource_1.APIResource {
      * ```
      */
     list(query = {}, options) {
-        return this._client.getAPIList('/v1/organizations/spend_limit_increase_requests?beta=true', (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList('/v1/organizations/spend_limit_increase_requests?beta=true', (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.spend_limits.increase_requests.list', options, {
+                route: '/v1/organizations/spend_limit_increase_requests',
+                queryParams: ['actor_ids', 'limit', 'page', 'status'],
+            }),
+        });
     }
     /**
      * Approve a pending spend limit increase request.
@@ -52341,7 +58259,16 @@ class IncreaseRequests extends resource_1.APIResource {
      * ```
      */
     approve(spendLimitIncreaseRequestID, body, options) {
-        return this._client.post((0, path_1.path) `/v1/organizations/spend_limit_increase_requests/${spendLimitIncreaseRequestID}/approve?beta=true`, { body, ...options });
+        return this._client.post((0, path_1.path) `/v1/organizations/spend_limit_increase_requests/${spendLimitIncreaseRequestID}/approve?beta=true`, {
+            body,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.spend_limits.increase_requests.approve', options, {
+                route: '/v1/organizations/spend_limit_increase_requests/{spend_limit_increase_request_id}/approve',
+                attributes: {
+                    'anthropic.organization.spend_limit_increase_request.id': spendLimitIncreaseRequestID,
+                },
+            }),
+        });
     }
     /**
      * Deny a pending spend limit increase request.
@@ -52358,7 +58285,16 @@ class IncreaseRequests extends resource_1.APIResource {
      * ```
      */
     deny(spendLimitIncreaseRequestID, body, options) {
-        return this._client.post((0, path_1.path) `/v1/organizations/spend_limit_increase_requests/${spendLimitIncreaseRequestID}/deny?beta=true`, { body, ...options });
+        return this._client.post((0, path_1.path) `/v1/organizations/spend_limit_increase_requests/${spendLimitIncreaseRequestID}/deny?beta=true`, {
+            body,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.spend_limits.increase_requests.deny', options, {
+                route: '/v1/organizations/spend_limit_increase_requests/{spend_limit_increase_request_id}/deny',
+                attributes: {
+                    'anthropic.organization.spend_limit_increase_request.id': spendLimitIncreaseRequestID,
+                },
+            }),
+        });
     }
 }
 exports.IncreaseRequests = IncreaseRequests;
@@ -52398,6 +58334,7 @@ const IncreaseRequestsAPI = tslib_1.__importStar(__nccwpck_require__(23179));
 const increase_requests_1 = __nccwpck_require__(23179);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 var SpendLimits = /* @__PURE__ */ (() => {
     class SpendLimits extends resource_1.APIResource {
@@ -52418,15 +58355,21 @@ var SpendLimits = /* @__PURE__ */ (() => {
          * ```
          */
         retrieve(spendLimitID, options) {
-            return this._client.get((0, path_1.path) `/v1/organizations/spend_limits/${spendLimitID}?beta=true`, options);
+            return this._client.get((0, path_1.path) `/v1/organizations/spend_limits/${spendLimitID}?beta=true`, {
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.spend_limits.retrieve', options, {
+                    route: '/v1/organizations/spend_limits/{spend_limit_id}',
+                    attributes: { 'anthropic.organization.spend_limit.id': spendLimitID },
+                }),
+            });
         }
         /**
          * List the organization's spend limits.
          *
-         * A Claude Console organization's limits come in an order that is stable across
-         * pages. A Claude Enterprise organization's are grouped by scope type, in the
-         * order `organization`, `seat_tier`, `rbac_group`, `organization_service`, `user`;
-         * within a type they come in a fixed order that is not creation order.
+         * Limits are grouped by scope type, in the order `organization`, `seat_tier`,
+         * `rbac_group`, `organization_service`, `user`; within a type they come in a fixed
+         * order that is not creation order. Supported for Claude Enterprise organizations
+         * only, not for Claude Console organizations.
          *
          * @example
          * ```ts
@@ -52442,9 +58385,13 @@ var SpendLimits = /* @__PURE__ */ (() => {
                 query,
                 ...options,
                 headers: (0, headers_1.buildHeaders)([
-                    { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
+                    { 'anthropic-beta': [...(betas ?? []), 'spend-limit-reads-2026-09-26'].toString() },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.spend_limits.list', options, {
+                    route: '/v1/organizations/spend_limits',
+                    queryParams: ['limit', 'page', 'scope_type'],
+                }),
             });
         }
         /**
@@ -52453,8 +58400,9 @@ var SpendLimits = /* @__PURE__ */ (() => {
          * For a Claude Enterprise organization, this deletes a per-user override, and the
          * member falls back to any inherited spend limit at that period. Its seat-tier,
          * group, and organization-level rows cannot be deleted via this endpoint. A Claude
-         * Console organization deletes its organization and workspace limits. Deleting
-         * them through the API is in an early access preview.
+         * Console organization deletes its organization and workspace limits, but not its
+         * `usage_tier` limit. Deleting organization and workspace limits through the API
+         * is in an early access preview.
          *
          * @example
          * ```ts
@@ -52465,7 +58413,13 @@ var SpendLimits = /* @__PURE__ */ (() => {
          * ```
          */
         delete(spendLimitID, options) {
-            return this._client.delete((0, path_1.path) `/v1/organizations/spend_limits/${spendLimitID}?beta=true`, options);
+            return this._client.delete((0, path_1.path) `/v1/organizations/spend_limits/${spendLimitID}?beta=true`, {
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.spend_limits.delete', options, {
+                    route: '/v1/organizations/spend_limits/{spend_limit_id}',
+                    attributes: { 'anthropic.organization.spend_limit.id': spendLimitID },
+                }),
+            });
         }
         /**
          * Set a spend limit.
@@ -52489,8 +58443,20 @@ var SpendLimits = /* @__PURE__ */ (() => {
          *   });
          * ```
          */
-        set(body, options) {
-            return this._client.post('/v1/organizations/spend_limits?beta=true', { body, ...options });
+        set(params, options) {
+            const { betas, ...body } = params;
+            return this._client.post('/v1/organizations/spend_limits?beta=true', {
+                body,
+                ...options,
+                headers: (0, headers_1.buildHeaders)([
+                    { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
+                    options?.headers,
+                ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.spend_limits.set', options, {
+                    route: '/v1/organizations/spend_limits',
+                    createdIDAttribute: 'anthropic.organization.spend_limit.id',
+                }),
+            });
         }
     }
     SpendLimits.Effective = effective_1.Effective;
@@ -52499,6 +58465,388 @@ var SpendLimits = /* @__PURE__ */ (() => {
 })();
 exports.SpendLimits = SpendLimits;
 //# sourceMappingURL=spend-limits.js.map
+
+/***/ }),
+
+/***/ 77758:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Workspaces = exports.TelemetryDestinations = void 0;
+var telemetry_destinations_1 = __nccwpck_require__(38211);
+Object.defineProperty(exports, "TelemetryDestinations", ({ enumerable: true, get: function () { return telemetry_destinations_1.TelemetryDestinations; } }));
+var workspaces_1 = __nccwpck_require__(82502);
+Object.defineProperty(exports, "Workspaces", ({ enumerable: true, get: function () { return workspaces_1.Workspaces; } }));
+//# sourceMappingURL=index.js.map
+
+/***/ }),
+
+/***/ 38211:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.TelemetryDestinations = void 0;
+const tslib_1 = __nccwpck_require__(14839);
+const resource_1 = __nccwpck_require__(82941);
+const WorkspacesAPI = tslib_1.__importStar(__nccwpck_require__(82502));
+const workspaces_1 = __nccwpck_require__(82502);
+const pagination_1 = __nccwpck_require__(27117);
+const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
+const path_1 = __nccwpck_require__(43002);
+var TelemetryDestinations = /* @__PURE__ */ (() => {
+    class TelemetryDestinations extends resource_1.APIResource {
+        constructor() {
+            super(...arguments);
+            this.workspaces = new WorkspacesAPI.Workspaces(this._client);
+        }
+        /**
+         * Register an OpenTelemetry destination for the organization.
+         *
+         * The destination starts in state `enabled`. An organization can have at most 10
+         * destinations, including disabled ones.
+         *
+         * See the
+         * [OpenTelemetry export guide](https://platform.claude.com/docs/en/manage-claude/opentelemetry#add-a-destination)
+         * to learn more about adding a destination.
+         *
+         * @example
+         * ```ts
+         * const betaTelemetryDestination =
+         *   await client.beta.organization.telemetryDestinations.create(
+         *     {
+         *       endpoint_url: 'x',
+         *       workspaces: { type: 'all' },
+         *     },
+         *   );
+         * ```
+         */
+        create(params, options) {
+            const { betas, ...body } = params;
+            return this._client.post('/v1/organizations/telemetry_destinations?beta=true', {
+                body,
+                ...options,
+                headers: (0, headers_1.buildHeaders)([
+                    { 'anthropic-beta': [...(betas ?? []), 'telemetry-destinations-2026-08-11'].toString() },
+                    options?.headers,
+                ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.telemetry_destinations.create', options, {
+                    route: '/v1/organizations/telemetry_destinations',
+                    createdIDAttribute: 'anthropic.organization.telemetry_destination.id',
+                }),
+            });
+        }
+        /**
+         * Read a destination's configuration, state, and most recent delivery results.
+         *
+         * See the
+         * [OpenTelemetry export guide](https://platform.claude.com/docs/en/manage-claude/opentelemetry#delivery-and-health)
+         * to learn how the API delivers spans and when it disables a destination.
+         *
+         * @example
+         * ```ts
+         * const betaTelemetryDestination =
+         *   await client.beta.organization.telemetryDestinations.retrieve(
+         *     'destination_id',
+         *   );
+         * ```
+         */
+        retrieve(destinationID, params = {}, options) {
+            const { betas } = params ?? {};
+            return this._client.get((0, path_1.path) `/v1/organizations/telemetry_destinations/${destinationID}?beta=true`, {
+                ...options,
+                headers: (0, headers_1.buildHeaders)([
+                    { 'anthropic-beta': [...(betas ?? []), 'telemetry-destinations-2026-08-11'].toString() },
+                    options?.headers,
+                ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.telemetry_destinations.retrieve', options, {
+                    route: '/v1/organizations/telemetry_destinations/{destination_id}',
+                    attributes: { 'anthropic.organization.telemetry_destination.id': destinationID },
+                }),
+            });
+        }
+        /**
+         * Change a telemetry destination's settings, its state, or which workspaces it
+         * covers.
+         *
+         * Send at least one field. Omitted fields keep their stored values, except the
+         * registered headers, which a change of the endpoint's hostname or port removes.
+         * Only `display_name`, `traces`, `traces.endpoint_url`, `traces.content_mode`,
+         * `traces.max_content_bytes`, and individual `headers` values accept `null`.
+         *
+         * If another request changes the destination while the update runs, the API
+         * returns a 409 `conflict_error`. Read the destination again, then retry the
+         * update.
+         *
+         * See the
+         * [OpenTelemetry export guide](https://platform.claude.com/docs/en/manage-claude/opentelemetry#delivery-and-health)
+         * to learn more about changing a destination.
+         *
+         * @example
+         * ```ts
+         * const betaTelemetryDestination =
+         *   await client.beta.organization.telemetryDestinations.update(
+         *     'destination_id',
+         *   );
+         * ```
+         */
+        update(destinationID, params, options) {
+            const { betas, ...body } = params;
+            return this._client.post((0, path_1.path) `/v1/organizations/telemetry_destinations/${destinationID}?beta=true`, {
+                body,
+                ...options,
+                headers: (0, headers_1.buildHeaders)([
+                    { 'anthropic-beta': [...(betas ?? []), 'telemetry-destinations-2026-08-11'].toString() },
+                    options?.headers,
+                ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.telemetry_destinations.update', options, {
+                    route: '/v1/organizations/telemetry_destinations/{destination_id}',
+                    attributes: { 'anthropic.organization.telemetry_destination.id': destinationID },
+                }),
+            });
+        }
+        /**
+         * List the organization's destinations, newest first, optionally only those that
+         * cover given workspaces.
+         *
+         * See the
+         * [OpenTelemetry export guide](https://platform.claude.com/docs/en/manage-claude/opentelemetry#set-up-api-tracing)
+         * to learn more about destinations.
+         *
+         * @example
+         * ```ts
+         * // Automatically fetches more pages as needed.
+         * for await (const betaTelemetryDestination of client.beta.organization.telemetryDestinations.list()) {
+         *   // ...
+         * }
+         * ```
+         */
+        list(params = {}, options) {
+            const { betas, ...query } = params ?? {};
+            return this._client.getAPIList('/v1/organizations/telemetry_destinations?beta=true', (pagination_1.PageCursor), {
+                query,
+                ...options,
+                headers: (0, headers_1.buildHeaders)([
+                    { 'anthropic-beta': [...(betas ?? []), 'telemetry-destinations-2026-08-11'].toString() },
+                    options?.headers,
+                ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.telemetry_destinations.list', options, {
+                    route: '/v1/organizations/telemetry_destinations',
+                    queryParams: ['limit', 'page', 'workspace_ids'],
+                }),
+            });
+        }
+        /**
+         * Delete a destination and its workspace list.
+         *
+         * The API stops sending spans to the destination. The spans of the workspaces it
+         * covered still go to the other destinations that cover them. A deleted
+         * destination can't be read, listed, or restored.
+         *
+         * See the
+         * [OpenTelemetry export guide](https://platform.claude.com/docs/en/manage-claude/opentelemetry#delivery-and-health)
+         * to learn more about managing a destination.
+         *
+         * @example
+         * ```ts
+         * const betaDeletedTelemetryDestination =
+         *   await client.beta.organization.telemetryDestinations.delete(
+         *     'destination_id',
+         *   );
+         * ```
+         */
+        delete(destinationID, params = {}, options) {
+            const { betas } = params ?? {};
+            return this._client.delete((0, path_1.path) `/v1/organizations/telemetry_destinations/${destinationID}?beta=true`, {
+                ...options,
+                headers: (0, headers_1.buildHeaders)([
+                    { 'anthropic-beta': [...(betas ?? []), 'telemetry-destinations-2026-08-11'].toString() },
+                    options?.headers,
+                ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.telemetry_destinations.delete', options, {
+                    route: '/v1/organizations/telemetry_destinations/{destination_id}',
+                    attributes: { 'anthropic.organization.telemetry_destination.id': destinationID },
+                }),
+            });
+        }
+        /**
+         * Send one test span, named `anthropic.test`, to the destination with its
+         * registered headers, once and without retries, and report the destination's
+         * answer. The response is 200 whether or not the destination answered with a 2xx
+         * status: its `result` has the type `success`, or the type `failure` and the
+         * reason in `error`. The destination's configuration, `state` and
+         * `delivery_health` do not change. A disabled destination can be tested too. Wait
+         * 10 seconds between tests of one destination; a request that comes sooner may be
+         * answered with status 429.
+         *
+         * @example
+         * ```ts
+         * const betaTelemetryDestinationTestResponse =
+         *   await client.beta.organization.telemetryDestinations.test(
+         *     'destination_id',
+         *   );
+         * ```
+         */
+        test(destinationID, params = {}, options) {
+            const { betas } = params ?? {};
+            return this._client.post((0, path_1.path) `/v1/organizations/telemetry_destinations/${destinationID}/test?beta=true`, {
+                ...options,
+                headers: (0, headers_1.buildHeaders)([
+                    { 'anthropic-beta': [...(betas ?? []), 'telemetry-destinations-2026-08-11'].toString() },
+                    options?.headers,
+                ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.telemetry_destinations.test', options, {
+                    route: '/v1/organizations/telemetry_destinations/{destination_id}/test',
+                    attributes: { 'anthropic.organization.telemetry_destination.id': destinationID },
+                }),
+            });
+        }
+    }
+    TelemetryDestinations.Workspaces = workspaces_1.Workspaces;
+    return TelemetryDestinations;
+})();
+exports.TelemetryDestinations = TelemetryDestinations;
+//# sourceMappingURL=telemetry-destinations.js.map
+
+/***/ }),
+
+/***/ 82502:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Workspaces = void 0;
+const resource_1 = __nccwpck_require__(82941);
+const pagination_1 = __nccwpck_require__(27117);
+const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
+const path_1 = __nccwpck_require__(43002);
+class Workspaces extends resource_1.APIResource {
+    /**
+     * List the workspaces on a destination's workspace list, newest entry first.
+     *
+     * A destination whose `workspaces.type` is `all` doesn't have a list, so its page
+     * is empty. The list includes archived workspaces.
+     *
+     * See the
+     * [OpenTelemetry export guide](https://platform.claude.com/docs/en/manage-claude/opentelemetry#choose-workspaces-for-a-destination)
+     * to learn more about choosing the workspaces of a destination.
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const betaTelemetryDestinationWorkspace of client.beta.organization.telemetryDestinations.workspaces.list(
+     *   'destination_id',
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(destinationID, params = {}, options) {
+        const { betas, ...query } = params ?? {};
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/telemetry_destinations/${destinationID}/workspaces?beta=true`, (pagination_1.PageCursor), {
+            query,
+            ...options,
+            headers: (0, headers_1.buildHeaders)([
+                { 'anthropic-beta': [...(betas ?? []), 'telemetry-destinations-2026-08-11'].toString() },
+                options?.headers,
+            ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.telemetry_destinations.workspaces.list', options, {
+                route: '/v1/organizations/telemetry_destinations/{destination_id}/workspaces',
+                queryParams: ['limit', 'page'],
+                attributes: { 'anthropic.organization.telemetry_destination.id': destinationID },
+            }),
+        });
+    }
+    /**
+     * Add one workspace to a destination's workspace list.
+     *
+     * Under `include` the workspace's spans start going to the destination. Under
+     * `exclude` they stop. A list holds at most 1,000 workspaces.
+     *
+     * Adding a workspace that is already on the list changes nothing and returns the
+     * existing entry. An archived workspace that isn't on the list yet can't be added.
+     * A destination whose `workspaces.type` is `all` doesn't have a list, so the API
+     * returns 400. To change which workspaces such a destination covers, update its
+     * `workspaces`.
+     *
+     * See the
+     * [OpenTelemetry export guide](https://platform.claude.com/docs/en/manage-claude/opentelemetry#choose-workspaces-for-a-destination)
+     * to learn more about choosing the workspaces of a destination.
+     *
+     * @example
+     * ```ts
+     * const betaTelemetryDestinationWorkspace =
+     *   await client.beta.organization.telemetryDestinations.workspaces.add(
+     *     'workspace_id',
+     *     { destination_id: 'destination_id' },
+     *   );
+     * ```
+     */
+    add(workspaceID, params, options) {
+        const { destination_id, betas } = params;
+        return this._client.post((0, path_1.path) `/v1/organizations/telemetry_destinations/${destination_id}/workspaces/${workspaceID}?beta=true`, {
+            ...options,
+            headers: (0, headers_1.buildHeaders)([
+                { 'anthropic-beta': [...(betas ?? []), 'telemetry-destinations-2026-08-11'].toString() },
+                options?.headers,
+            ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.telemetry_destinations.workspaces.add', options, {
+                route: '/v1/organizations/telemetry_destinations/{destination_id}/workspaces/{workspace_id}',
+                attributes: {
+                    'anthropic.organization.telemetry_destination.id': destination_id,
+                    'anthropic.organization.telemetry_destination.workspace.id': workspaceID,
+                },
+            }),
+        });
+    }
+    /**
+     * Remove one workspace from a destination's workspace list.
+     *
+     * Under `include` the workspace's spans stop going to the destination. Under
+     * `exclude` they start. An archived workspace can be removed too.
+     *
+     * The API returns 404 when the workspace isn't on the list. A destination whose
+     * `workspaces.type` is `all` doesn't have a list, so the API returns 400.
+     *
+     * See the
+     * [OpenTelemetry export guide](https://platform.claude.com/docs/en/manage-claude/opentelemetry#choose-workspaces-for-a-destination)
+     * to learn more about choosing the workspaces of a destination.
+     *
+     * @example
+     * ```ts
+     * const betaDeletedTelemetryDestinationWorkspace =
+     *   await client.beta.organization.telemetryDestinations.workspaces.remove(
+     *     'workspace_id',
+     *     { destination_id: 'destination_id' },
+     *   );
+     * ```
+     */
+    remove(workspaceID, params, options) {
+        const { destination_id, betas } = params;
+        return this._client.delete((0, path_1.path) `/v1/organizations/telemetry_destinations/${destination_id}/workspaces/${workspaceID}?beta=true`, {
+            ...options,
+            headers: (0, headers_1.buildHeaders)([
+                { 'anthropic-beta': [...(betas ?? []), 'telemetry-destinations-2026-08-11'].toString() },
+                options?.headers,
+            ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.telemetry_destinations.workspaces.remove', options, {
+                route: '/v1/organizations/telemetry_destinations/{destination_id}/workspaces/{workspace_id}',
+                attributes: {
+                    'anthropic.organization.telemetry_destination.id': destination_id,
+                    'anthropic.organization.telemetry_destination.workspace.id': workspaceID,
+                },
+            }),
+        });
+    }
+}
+exports.Workspaces = Workspaces;
+//# sourceMappingURL=workspaces.js.map
 
 /***/ }),
 
@@ -52511,6 +58859,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Users = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Users extends resource_1.APIResource {
     /**
@@ -52523,7 +58872,13 @@ class Users extends resource_1.APIResource {
      * ```
      */
     retrieve(userID, options) {
-        return this._client.get((0, path_1.path) `/v1/organizations/users/${userID}?beta=true`, options);
+        return this._client.get((0, path_1.path) `/v1/organizations/users/${userID}?beta=true`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.users.retrieve', options, {
+                route: '/v1/organizations/users/{user_id}',
+                attributes: { 'anthropic.organization.user.id': userID },
+            }),
+        });
     }
     /**
      * Update a member's organization role.
@@ -52537,7 +58892,14 @@ class Users extends resource_1.APIResource {
      * ```
      */
     update(userID, body, options) {
-        return this._client.post((0, path_1.path) `/v1/organizations/users/${userID}?beta=true`, { body, ...options });
+        return this._client.post((0, path_1.path) `/v1/organizations/users/${userID}?beta=true`, {
+            body,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.users.update', options, {
+                route: '/v1/organizations/users/{user_id}',
+                attributes: { 'anthropic.organization.user.id': userID },
+            }),
+        });
     }
     /**
      * List the organization's members.
@@ -52554,6 +58916,10 @@ class Users extends resource_1.APIResource {
         return this._client.getAPIList('/v1/organizations/users?beta=true', (pagination_1.Page), {
             query,
             ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.users.list', options, {
+                route: '/v1/organizations/users',
+                queryParams: ['after_id', 'before_id', 'email', 'limit', 'roles'],
+            }),
         });
     }
     /**
@@ -52567,7 +58933,13 @@ class Users extends resource_1.APIResource {
      * ```
      */
     remove(userID, options) {
-        return this._client.delete((0, path_1.path) `/v1/organizations/users/${userID}?beta=true`, options);
+        return this._client.delete((0, path_1.path) `/v1/organizations/users/${userID}?beta=true`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.users.remove', options, {
+                route: '/v1/organizations/users/{user_id}',
+                attributes: { 'anthropic.organization.user.id': userID },
+            }),
+        });
     }
 }
 exports.Users = Users;
@@ -52603,6 +58975,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Members = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Members extends resource_1.APIResource {
     /**
@@ -52619,7 +58992,16 @@ class Members extends resource_1.APIResource {
      */
     retrieve(userID, params, options) {
         const { workspace_id } = params;
-        return this._client.get((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/members/${userID}?beta=true`, options);
+        return this._client.get((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/members/${userID}?beta=true`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.members.retrieve', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/members/{user_id}',
+                attributes: {
+                    'anthropic.organization.workspace.id': workspace_id,
+                    'anthropic.organization.workspace.member.id': userID,
+                },
+            }),
+        });
     }
     /**
      * Update Workspace Member
@@ -52641,6 +59023,13 @@ class Members extends resource_1.APIResource {
         return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/members/${userID}?beta=true`, {
             body,
             ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.members.update', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/members/{user_id}',
+                attributes: {
+                    'anthropic.organization.workspace.id': workspace_id,
+                    'anthropic.organization.workspace.member.id': userID,
+                },
+            }),
         });
     }
     /**
@@ -52657,7 +59046,15 @@ class Members extends resource_1.APIResource {
      * ```
      */
     list(workspaceID, query = {}, options) {
-        return this._client.getAPIList((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/members?beta=true`, (pagination_1.Page), { query, ...options });
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/members?beta=true`, (pagination_1.Page), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.members.list', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/members',
+                queryParams: ['after_id', 'before_id', 'limit'],
+                attributes: { 'anthropic.organization.workspace.id': workspaceID },
+            }),
+        });
     }
     /**
      * Create Workspace Member
@@ -52678,6 +59075,12 @@ class Members extends resource_1.APIResource {
         return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/members?beta=true`, {
             body,
             ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.members.add', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/members',
+                attributes: { 'anthropic.organization.workspace.id': workspaceID },
+                createdIDAttribute: 'anthropic.organization.workspace.member.id',
+                createdIDField: 'user_id',
+            }),
         });
     }
     /**
@@ -52694,7 +59097,16 @@ class Members extends resource_1.APIResource {
      */
     remove(userID, params, options) {
         const { workspace_id } = params;
-        return this._client.delete((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/members/${userID}?beta=true`, options);
+        return this._client.delete((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/members/${userID}?beta=true`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.members.remove', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/members/{user_id}',
+                attributes: {
+                    'anthropic.organization.workspace.id': workspace_id,
+                    'anthropic.organization.workspace.member.id': userID,
+                },
+            }),
+        });
     }
 }
 exports.Members = Members;
@@ -52711,6 +59123,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.RateLimits = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class RateLimits extends resource_1.APIResource {
     /**
@@ -52736,7 +59149,15 @@ class RateLimits extends resource_1.APIResource {
      * ```
      */
     list(workspaceID, query = {}, options) {
-        return this._client.getAPIList((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/rate_limits?beta=true`, (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/rate_limits?beta=true`, (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.rate_limits.list', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/rate_limits',
+                queryParams: ['group_type', 'include_inherited', 'limit', 'page'],
+                attributes: { 'anthropic.organization.workspace.id': workspaceID },
+            }),
+        });
     }
 }
 exports.RateLimits = RateLimits;
@@ -52754,6 +59175,7 @@ exports.ServiceAccounts = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class ServiceAccounts extends resource_1.APIResource {
     /**
@@ -52787,6 +59209,13 @@ class ServiceAccounts extends resource_1.APIResource {
                 { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.service_accounts.retrieve', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/service_accounts/{service_account_id}',
+                attributes: {
+                    'anthropic.organization.workspace.id': workspace_id,
+                    'anthropic.organization.workspace.service_account.id': serviceAccountID,
+                },
+            }),
         });
     }
     /**
@@ -52824,6 +59253,13 @@ class ServiceAccounts extends resource_1.APIResource {
                 { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.service_accounts.update', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/service_accounts/{service_account_id}',
+                attributes: {
+                    'anthropic.organization.workspace.id': workspace_id,
+                    'anthropic.organization.workspace.service_account.id': serviceAccountID,
+                },
+            }),
         });
     }
     /**
@@ -52859,6 +59295,11 @@ class ServiceAccounts extends resource_1.APIResource {
                 { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.service_accounts.list', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/service_accounts',
+                queryParams: ['limit', 'page'],
+                attributes: { 'anthropic.organization.workspace.id': workspaceID },
+            }),
         });
     }
     /**
@@ -52898,6 +59339,12 @@ class ServiceAccounts extends resource_1.APIResource {
                 { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.service_accounts.add', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/service_accounts',
+                attributes: { 'anthropic.organization.workspace.id': workspaceID },
+                createdIDAttribute: 'anthropic.organization.workspace.service_account.id',
+                createdIDField: 'service_account_id',
+            }),
         });
     }
     /**
@@ -52931,6 +59378,13 @@ class ServiceAccounts extends resource_1.APIResource {
                 { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.service_accounts.remove', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/service_accounts/{service_account_id}',
+                attributes: {
+                    'anthropic.organization.workspace.id': workspace_id,
+                    'anthropic.organization.workspace.service_account.id': serviceAccountID,
+                },
+            }),
         });
     }
 }
@@ -52956,6 +59410,7 @@ const ServiceAccountsAPI = tslib_1.__importStar(__nccwpck_require__(35901));
 const service_accounts_1 = __nccwpck_require__(35901);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 var Workspaces = /* @__PURE__ */ (() => {
     class Workspaces extends resource_1.APIResource {
@@ -52985,6 +59440,10 @@ var Workspaces = /* @__PURE__ */ (() => {
                     { ...(betas?.toString() != null ? { 'anthropic-beta': betas?.toString() } : undefined) },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.create', options, {
+                    route: '/v1/organizations/workspaces',
+                    createdIDAttribute: 'anthropic.organization.workspace.id',
+                }),
             });
         }
         /**
@@ -52999,7 +59458,13 @@ var Workspaces = /* @__PURE__ */ (() => {
          * ```
          */
         retrieve(workspaceID, options) {
-            return this._client.get((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}?beta=true`, options);
+            return this._client.get((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}?beta=true`, {
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.retrieve', options, {
+                    route: '/v1/organizations/workspaces/{workspace_id}',
+                    attributes: { 'anthropic.organization.workspace.id': workspaceID },
+                }),
+            });
         }
         /**
          * Update Workspace
@@ -53016,6 +59481,10 @@ var Workspaces = /* @__PURE__ */ (() => {
             return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}?beta=true`, {
                 body,
                 ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.update', options, {
+                    route: '/v1/organizations/workspaces/{workspace_id}',
+                    attributes: { 'anthropic.organization.workspace.id': workspaceID },
+                }),
             });
         }
         /**
@@ -53033,6 +59502,10 @@ var Workspaces = /* @__PURE__ */ (() => {
             return this._client.getAPIList('/v1/organizations/workspaces?beta=true', (pagination_1.Page), {
                 query,
                 ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.list', options, {
+                    route: '/v1/organizations/workspaces',
+                    queryParams: ['after_id', 'before_id', 'include_archived', 'include_default', 'limit'],
+                }),
             });
         }
         /**
@@ -53047,7 +59520,13 @@ var Workspaces = /* @__PURE__ */ (() => {
          * ```
          */
         archive(workspaceID, options) {
-            return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/archive?beta=true`, options);
+            return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/archive?beta=true`, {
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.archive', options, {
+                    route: '/v1/organizations/workspaces/{workspace_id}/archive',
+                    attributes: { 'anthropic.organization.workspace.id': workspaceID },
+                }),
+            });
         }
     }
     Workspaces.RateLimits = rate_limits_1.RateLimits;
@@ -53070,6 +59549,7 @@ exports.SessionToolRunner = exports.Events = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 const SessionToolRunner_1 = __nccwpck_require__(41757);
 var Events = /* @__PURE__ */ (() => {
@@ -53099,6 +59579,20 @@ var Events = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.sessions.events.list', options, {
+                    route: '/v1/sessions/{session_id}/events',
+                    queryParams: [
+                        'created_at[gt]',
+                        'created_at[gte]',
+                        'created_at[lt]',
+                        'created_at[lte]',
+                        'limit',
+                        'order',
+                        'page',
+                        'types',
+                    ],
+                    attributes: { 'anthropic.session.id': sessionID },
+                }),
             });
         }
         /**
@@ -53137,6 +59631,10 @@ var Events = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.sessions.events.send', options, {
+                    route: '/v1/sessions/{session_id}/events',
+                    attributes: { 'anthropic.session.id': sessionID },
+                }),
             });
         }
         /**
@@ -53144,10 +59642,12 @@ var Events = /* @__PURE__ */ (() => {
          *
          * @example
          * ```ts
-         * const betaManagedAgentsStreamSessionEvents =
-         *   await client.beta.sessions.events.stream(
-         *     'sesn_011CZkZAtmR3yMPDzynEDxu7',
-         *   );
+         * const stream = await client.beta.sessions.events.stream(
+         *   'sesn_011CZkZAtmR3yMPDzynEDxu7',
+         * );
+         * for await (const betaManagedAgentsStreamSessionEvents of stream) {
+         *   // ...
+         * }
          * ```
          */
         stream(sessionID, params = {}, options) {
@@ -53163,6 +59663,11 @@ var Events = /* @__PURE__ */ (() => {
                     options?.headers,
                 ]),
                 stream: true,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.sessions.events.stream', options, {
+                    route: '/v1/sessions/{session_id}/events/stream',
+                    queryParams: ['event_deltas'],
+                    attributes: { 'anthropic.session.id': sessionID },
+                }),
             });
         }
         /**
@@ -53227,6 +59732,7 @@ exports.Resources = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Resources extends resource_1.APIResource {
     /**
@@ -53252,6 +59758,10 @@ class Resources extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.sessions.resources.retrieve', options, {
+                route: '/v1/sessions/{session_id}/resources/{resource_id}',
+                attributes: { 'anthropic.session.id': session_id, 'anthropic.session.resource.id': resourceID },
+            }),
         });
     }
     /**
@@ -53281,6 +59791,10 @@ class Resources extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.sessions.resources.update', options, {
+                route: '/v1/sessions/{session_id}/resources/{resource_id}',
+                attributes: { 'anthropic.session.id': session_id, 'anthropic.session.resource.id': resourceID },
+            }),
         });
     }
     /**
@@ -53308,6 +59822,11 @@ class Resources extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.sessions.resources.list', options, {
+                route: '/v1/sessions/{session_id}/resources',
+                queryParams: ['limit', 'page'],
+                attributes: { 'anthropic.session.id': sessionID },
+            }),
         });
     }
     /**
@@ -53333,6 +59852,10 @@ class Resources extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.sessions.resources.delete', options, {
+                route: '/v1/sessions/{session_id}/resources/{resource_id}',
+                attributes: { 'anthropic.session.id': session_id, 'anthropic.session.resource.id': resourceID },
+            }),
         });
     }
     /**
@@ -53362,6 +59885,11 @@ class Resources extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.sessions.resources.add', options, {
+                route: '/v1/sessions/{session_id}/resources',
+                attributes: { 'anthropic.session.id': sessionID },
+                createdIDAttribute: 'anthropic.session.resource.id',
+            }),
         });
     }
 }
@@ -53387,6 +59915,8 @@ const ThreadsAPI = tslib_1.__importStar(__nccwpck_require__(26017));
 const threads_1 = __nccwpck_require__(26017);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
+const tracing_2 = __nccwpck_require__(38225);
 const path_1 = __nccwpck_require__(43002);
 var Sessions = /* @__PURE__ */ (() => {
     class Sessions extends resource_1.APIResource {
@@ -53405,22 +59935,51 @@ var Sessions = /* @__PURE__ */ (() => {
          *   await client.beta.sessions.create({
          *     agent: 'agent_011CZkYpogX7uDKUyvBTophP',
          *     environment_id: 'env_011CZkZ9X2dpNyB7HsEFoRfW',
+         *     initial_events: [
+         *       {
+         *         type: 'user.message',
+         *         content: [
+         *           {
+         *             type: 'text',
+         *             text: 'Where is my order #1234?',
+         *           },
+         *         ],
+         *       },
+         *     ],
          *   });
          * ```
          */
         create(params, options) {
             const { betas, workspace_id, ...body } = params;
-            return this._client.post('/v1/sessions?beta=true', {
+            const headers = (0, headers_1.buildHeaders)([
+                {
+                    'anthropic-beta': [...(betas ?? []), 'managed-agents-2026-04-01'].toString(),
+                    ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined),
+                },
+                options?.headers,
+            ]);
+            const call = (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.sessions.create', options, {
+                route: '/v1/sessions',
+                attributes: {
+                    // An `agent` that is no agent is for the API to refuse, not for this line to throw on.
+                    'gen_ai.agent.id': typeof body.agent === 'object' ? body.agent?.id : body.agent,
+                    'anthropic.session.environment.id': body.environment_id,
+                },
+                createdIDAttribute: 'anthropic.session.id',
+            });
+            const request = this._client.post('/v1/sessions?beta=true', {
                 body,
                 ...options,
-                headers: (0, headers_1.buildHeaders)([
-                    {
-                        'anthropic-beta': [...(betas ?? []), 'managed-agents-2026-04-01'].toString(),
-                        ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined),
-                    },
-                    options?.headers,
-                ]),
+                headers,
+                __span: call,
             });
+            // Only a request with a span has a response to record.
+            return call ?
+                request._thenUnwrap((session) => {
+                    (0, tracing_2.recordSessionsCreateResponse)(this._client, call, session);
+                    return session;
+                })
+                : request;
         }
         /**
          * Get Session
@@ -53444,6 +60003,10 @@ var Sessions = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.sessions.retrieve', options, {
+                    route: '/v1/sessions/{session_id}',
+                    attributes: { 'anthropic.session.id': sessionID },
+                }),
             });
         }
         /**
@@ -53469,6 +60032,10 @@ var Sessions = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.sessions.update', options, {
+                    route: '/v1/sessions/{session_id}',
+                    attributes: { 'anthropic.session.id': sessionID },
+                }),
             });
         }
         /**
@@ -53494,6 +60061,24 @@ var Sessions = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.sessions.list', options, {
+                    route: '/v1/sessions',
+                    queryParams: [
+                        'agent_id',
+                        'agent_version',
+                        'created_at[gt]',
+                        'created_at[gte]',
+                        'created_at[lt]',
+                        'created_at[lte]',
+                        'deployment_id',
+                        'include_archived',
+                        'limit',
+                        'memory_store_id',
+                        'order',
+                        'page',
+                        'statuses',
+                    ],
+                }),
             });
         }
         /**
@@ -53518,6 +60103,10 @@ var Sessions = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.sessions.delete', options, {
+                    route: '/v1/sessions/{session_id}',
+                    attributes: { 'anthropic.session.id': sessionID },
+                }),
             });
         }
         /**
@@ -53542,6 +60131,10 @@ var Sessions = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.sessions.archive', options, {
+                    route: '/v1/sessions/{session_id}/archive',
+                    attributes: { 'anthropic.session.id': sessionID },
+                }),
             });
         }
     }
@@ -53565,6 +60158,7 @@ exports.Events = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Events extends resource_1.APIResource {
     /**
@@ -53574,7 +60168,7 @@ class Events extends resource_1.APIResource {
      * ```ts
      * // Automatically fetches more pages as needed.
      * for await (const betaManagedAgentsSessionEvent of client.beta.sessions.threads.events.list(
-     *   'sthr_011CZkZVWa6oIjw0rgXZpnBt',
+     *   'sthr_011CZkZVWa6oJjw1rgXZpnBt',
      *   { session_id: 'sesn_011CZkZAtmR3yMPDzynEDxu7' },
      * )) {
      *   // ...
@@ -53593,6 +60187,11 @@ class Events extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.sessions.threads.events.list', options, {
+                route: '/v1/sessions/{session_id}/threads/{thread_id}/events',
+                queryParams: ['limit', 'page'],
+                attributes: { 'anthropic.session.id': session_id, 'anthropic.session.thread.id': threadID },
+            }),
         });
     }
     /**
@@ -53600,11 +60199,14 @@ class Events extends resource_1.APIResource {
      *
      * @example
      * ```ts
-     * const betaManagedAgentsStreamSessionThreadEvents =
+     * const stream =
      *   await client.beta.sessions.threads.events.stream(
-     *     'sthr_011CZkZVWa6oIjw0rgXZpnBt',
+     *     'sthr_011CZkZVWa6oJjw1rgXZpnBt',
      *     { session_id: 'sesn_011CZkZAtmR3yMPDzynEDxu7' },
      *   );
+     * for await (const betaManagedAgentsStreamSessionThreadEvents of stream) {
+     *   // ...
+     * }
      * ```
      */
     stream(threadID, params, options) {
@@ -53620,6 +60222,11 @@ class Events extends resource_1.APIResource {
                 options?.headers,
             ]),
             stream: true,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.sessions.threads.events.stream', options, {
+                route: '/v1/sessions/{session_id}/threads/{thread_id}/stream',
+                queryParams: ['event_deltas'],
+                attributes: { 'anthropic.session.id': session_id, 'anthropic.session.thread.id': threadID },
+            }),
         });
     }
 }
@@ -53656,6 +60263,7 @@ const ThreadsEventsAPI = tslib_1.__importStar(__nccwpck_require__(18147));
 const events_1 = __nccwpck_require__(18147);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 var Threads = /* @__PURE__ */ (() => {
     class Threads extends resource_1.APIResource {
@@ -53670,7 +60278,7 @@ var Threads = /* @__PURE__ */ (() => {
          * ```ts
          * const betaManagedAgentsSessionThread =
          *   await client.beta.sessions.threads.retrieve(
-         *     'sthr_011CZkZVWa6oIjw0rgXZpnBt',
+         *     'sthr_011CZkZVWa6oJjw1rgXZpnBt',
          *     { session_id: 'sesn_011CZkZAtmR3yMPDzynEDxu7' },
          *   );
          * ```
@@ -53686,6 +60294,10 @@ var Threads = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.sessions.threads.retrieve', options, {
+                    route: '/v1/sessions/{session_id}/threads/{thread_id}',
+                    attributes: { 'anthropic.session.id': session_id, 'anthropic.session.thread.id': threadID },
+                }),
             });
         }
         /**
@@ -53713,6 +60325,11 @@ var Threads = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.sessions.threads.list', options, {
+                    route: '/v1/sessions/{session_id}/threads',
+                    queryParams: ['limit', 'page', 'statuses'],
+                    attributes: { 'anthropic.session.id': sessionID },
+                }),
             });
         }
         /**
@@ -53722,7 +60339,7 @@ var Threads = /* @__PURE__ */ (() => {
          * ```ts
          * const betaManagedAgentsSessionThread =
          *   await client.beta.sessions.threads.archive(
-         *     'sthr_011CZkZVWa6oIjw0rgXZpnBt',
+         *     'sthr_011CZkZVWa6oJjw1rgXZpnBt',
          *     { session_id: 'sesn_011CZkZAtmR3yMPDzynEDxu7' },
          *   );
          * ```
@@ -53738,6 +60355,10 @@ var Threads = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.sessions.threads.archive', options, {
+                    route: '/v1/sessions/{session_id}/threads/{thread_id}/archive',
+                    attributes: { 'anthropic.session.id': session_id, 'anthropic.session.thread.id': threadID },
+                }),
             });
         }
     }
@@ -53777,6 +60398,7 @@ const VersionsAPI = tslib_1.__importStar(__nccwpck_require__(79792));
 const versions_1 = __nccwpck_require__(79792);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const uploads_1 = __nccwpck_require__(59629);
 const path_1 = __nccwpck_require__(43002);
 var Skills = /* @__PURE__ */ (() => {
@@ -53807,6 +60429,10 @@ var Skills = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.skills.create', options, {
+                    route: '/v1/skills',
+                    createdIDAttribute: 'anthropic.skill.id',
+                }),
             }, this._client, false));
         }
         /**
@@ -53830,6 +60456,10 @@ var Skills = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.skills.retrieve', options, {
+                    route: '/v1/skills/{skill_id}',
+                    attributes: { 'anthropic.skill.id': skillID },
+                }),
             });
         }
         /**
@@ -53855,6 +60485,10 @@ var Skills = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.skills.list', options, {
+                    route: '/v1/skills',
+                    queryParams: ['limit', 'page', 'source'],
+                }),
             });
         }
         /**
@@ -53878,6 +60512,10 @@ var Skills = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.skills.delete', options, {
+                    route: '/v1/skills/{skill_id}',
+                    attributes: { 'anthropic.skill.id': skillID },
+                }),
             });
         }
     }
@@ -53899,6 +60537,7 @@ exports.Versions = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const uploads_1 = __nccwpck_require__(59629);
 const path_1 = __nccwpck_require__(43002);
 class Versions extends resource_1.APIResource {
@@ -53925,6 +60564,11 @@ class Versions extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.skills.versions.create', options, {
+                route: '/v1/skills/{skill_id}/versions',
+                attributes: { 'anthropic.skill.id': skillID },
+                createdIDAttribute: 'anthropic.skill.version.id',
+            }),
         }, this._client, false));
     }
     /**
@@ -53949,6 +60593,10 @@ class Versions extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.skills.versions.retrieve', options, {
+                route: '/v1/skills/{skill_id}/versions/{version}',
+                attributes: { 'anthropic.skill.id': skill_id, 'anthropic.skill.version.id': version },
+            }),
         });
     }
     /**
@@ -53976,6 +60624,11 @@ class Versions extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.skills.versions.list', options, {
+                route: '/v1/skills/{skill_id}/versions',
+                queryParams: ['limit', 'page'],
+                attributes: { 'anthropic.skill.id': skillID },
+            }),
         });
     }
     /**
@@ -54000,6 +60653,10 @@ class Versions extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.skills.versions.delete', options, {
+                route: '/v1/skills/{skill_id}/versions/{version}',
+                attributes: { 'anthropic.skill.id': skill_id, 'anthropic.skill.version.id': version },
+            }),
         });
     }
     /**
@@ -54029,6 +60686,10 @@ class Versions extends resource_1.APIResource {
                 options?.headers,
             ]),
             __binaryResponse: true,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.skills.versions.download', options, {
+                route: '/v1/skills/{skill_id}/versions/{version}/content',
+                attributes: { 'anthropic.skill.id': skill_id, 'anthropic.skill.version.id': version },
+            }),
         });
     }
 }
@@ -54047,6 +60708,7 @@ exports.Certificates = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Certificates extends resource_1.APIResource {
     /**
@@ -54080,6 +60742,11 @@ class Certificates extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.tunnels.certificates.create', options, {
+                route: '/v1/tunnels/{tunnel_id}/certificates',
+                attributes: { 'anthropic.tunnel.id': tunnelID },
+                createdIDAttribute: 'anthropic.tunnel.certificate.id',
+            }),
         });
     }
     /**
@@ -54110,6 +60777,10 @@ class Certificates extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.tunnels.certificates.retrieve', options, {
+                route: '/v1/tunnels/{tunnel_id}/certificates/{certificate_id}',
+                attributes: { 'anthropic.tunnel.id': tunnel_id, 'anthropic.tunnel.certificate.id': certificateID },
+            }),
         });
     }
     /**
@@ -54143,6 +60814,11 @@ class Certificates extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.tunnels.certificates.list', options, {
+                route: '/v1/tunnels/{tunnel_id}/certificates',
+                queryParams: ['include_archived', 'limit', 'page'],
+                attributes: { 'anthropic.tunnel.id': tunnelID },
+            }),
         });
     }
     /**
@@ -54176,6 +60852,10 @@ class Certificates extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.tunnels.certificates.archive', options, {
+                route: '/v1/tunnels/{tunnel_id}/certificates/{certificate_id}/archive',
+                attributes: { 'anthropic.tunnel.id': tunnel_id, 'anthropic.tunnel.certificate.id': certificateID },
+            }),
         });
     }
 }
@@ -54212,6 +60892,7 @@ const CertificatesAPI = tslib_1.__importStar(__nccwpck_require__(12328));
 const certificates_1 = __nccwpck_require__(12328);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 var Tunnels = /* @__PURE__ */ (() => {
     class Tunnels extends resource_1.APIResource {
@@ -54246,6 +60927,10 @@ var Tunnels = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.tunnels.create', options, {
+                    route: '/v1/tunnels',
+                    createdIDAttribute: 'anthropic.tunnel.id',
+                }),
             });
         }
         /**
@@ -54274,6 +60959,10 @@ var Tunnels = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.tunnels.retrieve', options, {
+                    route: '/v1/tunnels/{tunnel_id}',
+                    attributes: { 'anthropic.tunnel.id': tunnelID },
+                }),
             });
         }
         /**
@@ -54305,6 +60994,10 @@ var Tunnels = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.tunnels.list', options, {
+                    route: '/v1/tunnels',
+                    queryParams: ['include_archived', 'limit', 'page'],
+                }),
             });
         }
         /**
@@ -54336,6 +61029,10 @@ var Tunnels = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.tunnels.archive', options, {
+                    route: '/v1/tunnels/{tunnel_id}/archive',
+                    attributes: { 'anthropic.tunnel.id': tunnelID },
+                }),
             });
         }
         /**
@@ -54366,6 +61063,10 @@ var Tunnels = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.tunnels.reveal_token', options, {
+                    route: '/v1/tunnels/{tunnel_id}/reveal_token',
+                    attributes: { 'anthropic.tunnel.id': tunnelID },
+                }),
             });
         }
         /**
@@ -54396,6 +61097,10 @@ var Tunnels = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.tunnels.rotate_token', options, {
+                    route: '/v1/tunnels/{tunnel_id}/rotate_token',
+                    attributes: { 'anthropic.tunnel.id': tunnelID },
+                }),
             });
         }
     }
@@ -54417,6 +61122,7 @@ exports.UserProfiles = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class UserProfiles extends resource_1.APIResource {
     /**
@@ -54440,6 +61146,10 @@ class UserProfiles extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.user_profiles.create', options, {
+                route: '/v1/user_profiles',
+                createdIDAttribute: 'anthropic.user_profile.id',
+            }),
         });
     }
     /**
@@ -54464,6 +61174,10 @@ class UserProfiles extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.user_profiles.retrieve', options, {
+                route: '/v1/user_profiles/{user_profile_id}',
+                attributes: { 'anthropic.user_profile.id': userProfileID },
+            }),
         });
     }
     /**
@@ -54489,6 +61203,10 @@ class UserProfiles extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.user_profiles.update', options, {
+                route: '/v1/user_profiles/{user_profile_id}',
+                attributes: { 'anthropic.user_profile.id': userProfileID },
+            }),
         });
     }
     /**
@@ -54514,6 +61232,10 @@ class UserProfiles extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.user_profiles.list', options, {
+                route: '/v1/user_profiles',
+                queryParams: ['limit', 'order', 'order_by', 'page'],
+            }),
         });
     }
     /**
@@ -54538,6 +61260,10 @@ class UserProfiles extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.user_profiles.create_enrollment_url', options, {
+                route: '/v1/user_profiles/{user_profile_id}/enrollment_url',
+                attributes: { 'anthropic.user_profile.id': userProfileID },
+            }),
         });
     }
 }
@@ -54556,6 +61282,7 @@ exports.Credentials = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Credentials extends resource_1.APIResource {
     /**
@@ -54589,6 +61316,11 @@ class Credentials extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.vaults.credentials.create', options, {
+                route: '/v1/vaults/{vault_id}/credentials',
+                attributes: { 'anthropic.vault.id': vaultID },
+                createdIDAttribute: 'anthropic.vault.credential.id',
+            }),
         });
     }
     /**
@@ -54598,7 +61330,7 @@ class Credentials extends resource_1.APIResource {
      * ```ts
      * const betaManagedAgentsCredential =
      *   await client.beta.vaults.credentials.retrieve(
-     *     'vcrd_011CZkZEMt8gZan2iYOQfSkw',
+     *     'vcrd_011CZkZEMt8gZan2iYPQfSkw',
      *     { vault_id: 'vlt_011CZkZDLs7fYzm1hXNPeRjv' },
      *   );
      * ```
@@ -54614,6 +61346,10 @@ class Credentials extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.vaults.credentials.retrieve', options, {
+                route: '/v1/vaults/{vault_id}/credentials/{credential_id}',
+                attributes: { 'anthropic.vault.id': vault_id, 'anthropic.vault.credential.id': credentialID },
+            }),
         });
     }
     /**
@@ -54623,7 +61359,7 @@ class Credentials extends resource_1.APIResource {
      * ```ts
      * const betaManagedAgentsCredential =
      *   await client.beta.vaults.credentials.update(
-     *     'vcrd_011CZkZEMt8gZan2iYOQfSkw',
+     *     'vcrd_011CZkZEMt8gZan2iYPQfSkw',
      *     { vault_id: 'vlt_011CZkZDLs7fYzm1hXNPeRjv' },
      *   );
      * ```
@@ -54640,6 +61376,10 @@ class Credentials extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.vaults.credentials.update', options, {
+                route: '/v1/vaults/{vault_id}/credentials/{credential_id}',
+                attributes: { 'anthropic.vault.id': vault_id, 'anthropic.vault.credential.id': credentialID },
+            }),
         });
     }
     /**
@@ -54667,6 +61407,11 @@ class Credentials extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.vaults.credentials.list', options, {
+                route: '/v1/vaults/{vault_id}/credentials',
+                queryParams: ['include_archived', 'limit', 'page'],
+                attributes: { 'anthropic.vault.id': vaultID },
+            }),
         });
     }
     /**
@@ -54676,7 +61421,7 @@ class Credentials extends resource_1.APIResource {
      * ```ts
      * const betaManagedAgentsDeletedCredential =
      *   await client.beta.vaults.credentials.delete(
-     *     'vcrd_011CZkZEMt8gZan2iYOQfSkw',
+     *     'vcrd_011CZkZEMt8gZan2iYPQfSkw',
      *     { vault_id: 'vlt_011CZkZDLs7fYzm1hXNPeRjv' },
      *   );
      * ```
@@ -54692,6 +61437,10 @@ class Credentials extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.vaults.credentials.delete', options, {
+                route: '/v1/vaults/{vault_id}/credentials/{credential_id}',
+                attributes: { 'anthropic.vault.id': vault_id, 'anthropic.vault.credential.id': credentialID },
+            }),
         });
     }
     /**
@@ -54701,7 +61450,7 @@ class Credentials extends resource_1.APIResource {
      * ```ts
      * const betaManagedAgentsCredential =
      *   await client.beta.vaults.credentials.archive(
-     *     'vcrd_011CZkZEMt8gZan2iYOQfSkw',
+     *     'vcrd_011CZkZEMt8gZan2iYPQfSkw',
      *     { vault_id: 'vlt_011CZkZDLs7fYzm1hXNPeRjv' },
      *   );
      * ```
@@ -54717,6 +61466,10 @@ class Credentials extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.vaults.credentials.archive', options, {
+                route: '/v1/vaults/{vault_id}/credentials/{credential_id}/archive',
+                attributes: { 'anthropic.vault.id': vault_id, 'anthropic.vault.credential.id': credentialID },
+            }),
         });
     }
     /**
@@ -54726,7 +61479,7 @@ class Credentials extends resource_1.APIResource {
      * ```ts
      * const betaManagedAgentsCredentialValidation =
      *   await client.beta.vaults.credentials.mcpOAuthValidate(
-     *     'vcrd_011CZkZEMt8gZan2iYOQfSkw',
+     *     'vcrd_011CZkZEMt8gZan2iYPQfSkw',
      *     { vault_id: 'vlt_011CZkZDLs7fYzm1hXNPeRjv' },
      *   );
      * ```
@@ -54742,6 +61495,10 @@ class Credentials extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.vaults.credentials.mcp_oauth_validate', options, {
+                route: '/v1/vaults/{vault_id}/credentials/{credential_id}/mcp_oauth_validate',
+                attributes: { 'anthropic.vault.id': vault_id, 'anthropic.vault.credential.id': credentialID },
+            }),
         });
     }
 }
@@ -54778,6 +61535,7 @@ const CredentialsAPI = tslib_1.__importStar(__nccwpck_require__(37024));
 const credentials_1 = __nccwpck_require__(37024);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 var Vaults = /* @__PURE__ */ (() => {
     class Vaults extends resource_1.APIResource {
@@ -54808,6 +61566,10 @@ var Vaults = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.vaults.create', options, {
+                    route: '/v1/vaults',
+                    createdIDAttribute: 'anthropic.vault.id',
+                }),
             });
         }
         /**
@@ -54832,6 +61594,10 @@ var Vaults = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.vaults.retrieve', options, {
+                    route: '/v1/vaults/{vault_id}',
+                    attributes: { 'anthropic.vault.id': vaultID },
+                }),
             });
         }
         /**
@@ -54857,6 +61623,10 @@ var Vaults = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.vaults.update', options, {
+                    route: '/v1/vaults/{vault_id}',
+                    attributes: { 'anthropic.vault.id': vaultID },
+                }),
             });
         }
         /**
@@ -54882,6 +61652,10 @@ var Vaults = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.vaults.list', options, {
+                    route: '/v1/vaults',
+                    queryParams: ['include_archived', 'limit', 'page'],
+                }),
             });
         }
         /**
@@ -54906,6 +61680,10 @@ var Vaults = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.vaults.delete', options, {
+                    route: '/v1/vaults/{vault_id}',
+                    attributes: { 'anthropic.vault.id': vaultID },
+                }),
             });
         }
         /**
@@ -54930,6 +61708,10 @@ var Vaults = /* @__PURE__ */ (() => {
                     },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.vaults.archive', options, {
+                    route: '/v1/vaults/{vault_id}/archive',
+                    attributes: { 'anthropic.vault.id': vaultID },
+                }),
             });
         }
     }
@@ -54989,6 +61771,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Completions = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 class Completions extends resource_1.APIResource {
     create(params, options) {
         const { betas, workspace_id, ...body } = params;
@@ -55004,6 +61787,9 @@ class Completions extends resource_1.APIResource {
                 options?.headers,
             ]),
             stream: params.stream ?? false,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.completions.create', options, {
+                route: '/v1/complete',
+            }),
         });
     }
 }
@@ -55022,6 +61808,7 @@ exports.Files = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const stainless_helper_header_1 = __nccwpck_require__(50324);
 const uploads_1 = __nccwpck_require__(59629);
 const path_1 = __nccwpck_require__(43002);
@@ -55046,6 +61833,10 @@ class Files extends resource_1.APIResource {
                 { ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.files.list', options, {
+                route: '/v1/files',
+                queryParams: ['ids', 'limit', 'page'],
+            }),
         });
     }
     /**
@@ -55064,6 +61855,10 @@ class Files extends resource_1.APIResource {
                 { ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.files.delete', options, {
+                route: '/v1/files/{file_id}',
+                attributes: { 'anthropic.file.id': fileID },
+            }),
         });
     }
     /**
@@ -55089,6 +61884,10 @@ class Files extends resource_1.APIResource {
                 options?.headers,
             ]),
             __binaryResponse: true,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.files.download', options, {
+                route: '/v1/files/{file_id}/content',
+                attributes: { 'anthropic.file.id': fileID },
+            }),
         });
     }
     /**
@@ -55109,6 +61908,10 @@ class Files extends resource_1.APIResource {
                 { ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.files.retrieve_metadata', options, {
+                route: '/v1/files/{file_id}',
+                attributes: { 'anthropic.file.id': fileID },
+            }),
         });
     }
     /**
@@ -55131,6 +61934,10 @@ class Files extends resource_1.APIResource {
                 (0, stainless_helper_header_1.stainlessHelperHeaderFromFile)(body.file),
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.files.upload', options, {
+                route: '/v1/files',
+                createdIDAttribute: 'anthropic.file.id',
+            }),
         }, this._client));
     }
 }
@@ -55145,17 +61952,19 @@ exports.Files = Files;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.Skills = exports.Organization = exports.Models = exports.Messages = exports.Files = exports.Completions = exports.Beta = void 0;
+exports.Skills = exports.Organization = exports.Models = exports.Files = exports.Completions = exports.Beta = exports.Messages = exports.COMPUTER_MEMBER_NAME_VALUES = exports.BROWSER_MEMBER_NAME_VALUES = void 0;
 const tslib_1 = __nccwpck_require__(14839);
 tslib_1.__exportStar(__nccwpck_require__(44542), exports);
+var messages_1 = __nccwpck_require__(17442);
+Object.defineProperty(exports, "BROWSER_MEMBER_NAME_VALUES", ({ enumerable: true, get: function () { return messages_1.BROWSER_MEMBER_NAME_VALUES; } }));
+Object.defineProperty(exports, "COMPUTER_MEMBER_NAME_VALUES", ({ enumerable: true, get: function () { return messages_1.COMPUTER_MEMBER_NAME_VALUES; } }));
+Object.defineProperty(exports, "Messages", ({ enumerable: true, get: function () { return messages_1.Messages; } }));
 var beta_1 = __nccwpck_require__(90846);
 Object.defineProperty(exports, "Beta", ({ enumerable: true, get: function () { return beta_1.Beta; } }));
 var completions_1 = __nccwpck_require__(54244);
 Object.defineProperty(exports, "Completions", ({ enumerable: true, get: function () { return completions_1.Completions; } }));
 var files_1 = __nccwpck_require__(66188);
 Object.defineProperty(exports, "Files", ({ enumerable: true, get: function () { return files_1.Files; } }));
-var messages_1 = __nccwpck_require__(17442);
-Object.defineProperty(exports, "Messages", ({ enumerable: true, get: function () { return messages_1.Messages; } }));
 var models_1 = __nccwpck_require__(19317);
 Object.defineProperty(exports, "Models", ({ enumerable: true, get: function () { return models_1.Models; } }));
 var organization_1 = __nccwpck_require__(61708);
@@ -55176,6 +61985,7 @@ exports.Batches = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const jsonl_1 = __nccwpck_require__(80811);
 const error_1 = __nccwpck_require__(97735);
 const path_1 = __nccwpck_require__(43002);
@@ -55201,7 +62011,7 @@ class Batches extends resource_1.APIResource {
      *         messages: [
      *           { content: 'Hello, world', role: 'user' },
      *         ],
-     *         model: 'claude-opus-5',
+     *         model: 'claude-opus-5-5',
      *       },
      *     },
      *   ],
@@ -55220,6 +62030,12 @@ class Batches extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.messages.batches.create', options, {
+                route: '/v1/messages/batches',
+                // A request without `requests` is for the API to refuse, not for this line to throw on.
+                attributes: { 'anthropic.message.batch.request_count': body.requests?.length },
+                createdIDAttribute: 'anthropic.message.batch.id',
+            }),
         });
     }
     /**
@@ -55245,6 +62061,10 @@ class Batches extends resource_1.APIResource {
                 { ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.messages.batches.retrieve', options, {
+                route: '/v1/messages/batches/{message_batch_id}',
+                attributes: { 'anthropic.message.batch.id': messageBatchID },
+            }),
         });
     }
     /**
@@ -55271,6 +62091,10 @@ class Batches extends resource_1.APIResource {
                 { ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.messages.batches.list', options, {
+                route: '/v1/messages/batches',
+                queryParams: ['after_id', 'before_id', 'limit'],
+            }),
         });
     }
     /**
@@ -55296,6 +62120,10 @@ class Batches extends resource_1.APIResource {
                 { ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.messages.batches.delete', options, {
+                route: '/v1/messages/batches/{message_batch_id}',
+                attributes: { 'anthropic.message.batch.id': messageBatchID },
+            }),
         });
     }
     /**
@@ -55327,6 +62155,10 @@ class Batches extends resource_1.APIResource {
                 { ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.messages.batches.cancel', options, {
+                route: '/v1/messages/batches/{message_batch_id}/cancel',
+                attributes: { 'anthropic.message.batch.id': messageBatchID },
+            }),
         });
     }
     /**
@@ -55341,8 +62173,12 @@ class Batches extends resource_1.APIResource {
      *
      * @example
      * ```ts
-     * const messageBatchIndividualResponse =
-     *   await client.messages.batches.results('message_batch_id');
+     * const stream = await client.messages.batches.results(
+     *   'message_batch_id',
+     * );
+     * for await (const messageBatchIndividualResponse of stream) {
+     *   // ...
+     * }
      * ```
      */
     async results(messageBatchID, params = {}, options) {
@@ -55363,6 +62199,10 @@ class Batches extends resource_1.APIResource {
             ]),
             stream: true,
             __binaryResponse: true,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.messages.batches.results', options, {
+                route: '/v1/messages/batches/{message_batch_id}/results',
+                attributes: { 'anthropic.message.batch.id': messageBatchID },
+            }),
         })
             ._thenUnwrap((_, props) => jsonl_1.JSONLDecoder.fromResponse(props.response, props.controller));
     }
@@ -55378,11 +62218,14 @@ exports.Batches = Batches;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.Messages = void 0;
+exports.COMPUTER_MEMBER_NAME_VALUES = exports.BROWSER_MEMBER_NAME_VALUES = exports.Messages = void 0;
 const tslib_1 = __nccwpck_require__(14839);
 const resource_1 = __nccwpck_require__(82941);
 const headers_1 = __nccwpck_require__(60017);
-const stainless_helper_header_1 = __nccwpck_require__(50324);
+const tracing_1 = __nccwpck_require__(91705);
+const tracing_2 = __nccwpck_require__(38225);
+const attributes_1 = __nccwpck_require__(37161);
+const messages_request_1 = __nccwpck_require__(74871);
 const MessageStream_1 = __nccwpck_require__(83294);
 const parser_1 = __nccwpck_require__(60314);
 const BatchesAPI = tslib_1.__importStar(__nccwpck_require__(22412));
@@ -55409,22 +62252,25 @@ var Messages = /* @__PURE__ */ (() => {
                 const maxNonstreamingTokens = constants_1.MODEL_NONSTREAMING_TOKENS[body.model] ?? undefined;
                 timeout = this._client.calculateNonstreamingTimeout(body.max_tokens, maxNonstreamingTokens);
             }
-            // Collect helper info from tools and messages
-            const helperHeader = (0, stainless_helper_header_1.stainlessHelperHeader)(body.tools, body.messages);
-            return this._client.post('/v1/messages', {
+            const headers = (0, messages_request_1.messagesCreateHeaders)(params, options);
+            // A client whose spans are disabled computes nothing for one, and returns its request as it is.
+            const call = this._client._tracer &&
+                (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.messages.create', options, (0, tracing_2.messagesCreateSpanSettings)(this._client, body, headers));
+            (0, tracing_2.recordMessagesCreateRequest)(this._client, call, body);
+            const request = this._client.post('/v1/messages', {
                 body,
                 timeout: timeout ?? 600000,
                 ...options,
-                headers: (0, headers_1.buildHeaders)([
-                    {
-                        ...(user_profile_id != null ? { 'anthropic-user-profile-id': user_profile_id } : undefined),
-                        ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined),
-                    },
-                    helperHeader,
-                    options?.headers,
-                ]),
+                __span: call,
+                headers,
                 stream: params.stream ?? false,
             });
+            return (call ?
+                request._thenUnwrap((data) => {
+                    (0, tracing_2.recordMessagesCreateResponse)(this._client, call, body, data);
+                    return data;
+                })
+                : request);
         }
         /**
          * Send a structured list of input messages with text and/or image content, along with an expected `output_config.format` and
@@ -55469,7 +62315,11 @@ var Messages = /* @__PURE__ */ (() => {
          * ```
          */
         stream(body, options) {
-            return MessageStream_1.MessageStream.createMessage(this, body, options, { logger: this._client.logger ?? console });
+            const params = body;
+            return MessageStream_1.MessageStream.createMessage(this, params, options, {
+                logger: this._client.logger ?? console,
+                client: this._client,
+            });
         }
         /**
          * Count the number of tokens in a Message.
@@ -55485,29 +62335,94 @@ var Messages = /* @__PURE__ */ (() => {
          * const messageTokensCount =
          *   await client.messages.countTokens({
          *     messages: [{ content: 'Hello, world', role: 'user' }],
-         *     model: 'claude-opus-5',
+         *     model: 'claude-opus-5-5',
          *   });
          * ```
          */
         countTokens(params, options) {
             const { user_profile_id, workspace_id, ...body } = params;
-            return this._client.post('/v1/messages/count_tokens', {
+            const headers = (0, headers_1.buildHeaders)([
+                {
+                    ...(user_profile_id != null ? { 'anthropic-user-profile-id': user_profile_id } : undefined),
+                    ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined),
+                },
+                options?.headers,
+            ]);
+            const call = (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.messages.count_tokens', options, {
+                route: '/v1/messages/count_tokens',
+                attributes: { [attributes_1.ATTR_GEN_AI_REQUEST_MODEL]: body.model },
+            });
+            const request = this._client.post('/v1/messages/count_tokens', {
                 body,
                 ...options,
-                headers: (0, headers_1.buildHeaders)([
-                    {
-                        ...(user_profile_id != null ? { 'anthropic-user-profile-id': user_profile_id } : undefined),
-                        ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined),
-                    },
-                    options?.headers,
-                ]),
+                __span: call,
+                headers,
             });
+            // Only a request with a span has a response to record.
+            return call ?
+                request._thenUnwrap((count) => {
+                    (0, tracing_2.recordCountTokensResponse)(this._client, call, count);
+                    return count;
+                })
+                : request;
         }
     }
     Messages.Batches = batches_1.Batches;
     return Messages;
 })();
 exports.Messages = Messages;
+exports.BROWSER_MEMBER_NAME_VALUES = [
+    'navigate',
+    'list_tabs',
+    'new_tab',
+    'switch_tab',
+    'close_tab',
+    'read_page',
+    'get_page_text',
+    'read_console',
+    'read_network',
+    'find',
+    'form_input',
+    'file_upload',
+    'scroll_to',
+    'screenshot',
+    'zoom',
+    'left_click',
+    'right_click',
+    'middle_click',
+    'double_click',
+    'triple_click',
+    'hover',
+    'left_click_drag',
+    'left_mouse_down',
+    'left_mouse_up',
+    'mouse_move',
+    'scroll',
+    'type',
+    'key',
+    'hold_key',
+    'wait',
+    'javascript_exec',
+];
+exports.COMPUTER_MEMBER_NAME_VALUES = [
+    'key',
+    'hold_key',
+    'type',
+    'cursor_position',
+    'mouse_move',
+    'left_mouse_down',
+    'left_mouse_up',
+    'left_click',
+    'left_click_drag',
+    'right_click',
+    'middle_click',
+    'double_click',
+    'triple_click',
+    'scroll',
+    'wait',
+    'screenshot',
+    'zoom',
+];
 const DEPRECATED_MODELS = {
     'claude-sonnet-4-5': 'November 30th, 2026',
     'claude-sonnet-4-5-20250929': 'November 30th, 2026',
@@ -55527,6 +62442,7 @@ exports.Models = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Models extends resource_1.APIResource {
     /**
@@ -55551,6 +62467,10 @@ class Models extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.models.retrieve', options, {
+                route: '/v1/models/{model_id}',
+                attributes: { 'anthropic.model.id': modelID },
+            }),
         });
     }
     /**
@@ -55579,6 +62499,10 @@ class Models extends resource_1.APIResource {
                 },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.models.list', options, {
+                route: '/v1/models',
+                queryParams: ['after_id', 'before_id', 'lifecycle', 'limit'],
+            }),
         });
     }
 }
@@ -55596,6 +62520,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.APIKeys = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class APIKeys extends resource_1.APIResource {
     /**
@@ -55609,7 +62534,13 @@ class APIKeys extends resource_1.APIResource {
      * ```
      */
     retrieve(apiKeyID, options) {
-        return this._client.get((0, path_1.path) `/v1/organizations/api_keys/${apiKeyID}`, options);
+        return this._client.get((0, path_1.path) `/v1/organizations/api_keys/${apiKeyID}`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.api_keys.retrieve', options, {
+                route: '/v1/organizations/api_keys/{api_key_id}',
+                attributes: { 'anthropic.organization.api_key.id': apiKeyID },
+            }),
+        });
     }
     /**
      * Update API Key
@@ -55622,7 +62553,14 @@ class APIKeys extends resource_1.APIResource {
      * ```
      */
     update(apiKeyID, body, options) {
-        return this._client.post((0, path_1.path) `/v1/organizations/api_keys/${apiKeyID}`, { body, ...options });
+        return this._client.post((0, path_1.path) `/v1/organizations/api_keys/${apiKeyID}`, {
+            body,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.api_keys.update', options, {
+                route: '/v1/organizations/api_keys/{api_key_id}',
+                attributes: { 'anthropic.organization.api_key.id': apiKeyID },
+            }),
+        });
     }
     /**
      * List API Keys
@@ -55636,7 +62574,14 @@ class APIKeys extends resource_1.APIResource {
      * ```
      */
     list(query = {}, options) {
-        return this._client.getAPIList('/v1/organizations/api_keys', (pagination_1.Page), { query, ...options });
+        return this._client.getAPIList('/v1/organizations/api_keys', (pagination_1.Page), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.api_keys.list', options, {
+                route: '/v1/organizations/api_keys',
+                queryParams: ['after_id', 'before_id', 'created_by_user_id', 'limit', 'status', 'workspace_id'],
+            }),
+        });
     }
 }
 exports.APIKeys = APIKeys;
@@ -55652,6 +62597,7 @@ exports.APIKeys = APIKeys;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.ComplianceSettings = void 0;
 const resource_1 = __nccwpck_require__(82941);
+const tracing_1 = __nccwpck_require__(91705);
 class ComplianceSettings extends resource_1.APIResource {
     /**
      * Retrieve your organization's Compliance Settings.
@@ -55668,7 +62614,12 @@ class ComplianceSettings extends resource_1.APIResource {
      * ```
      */
     retrieve(options) {
-        return this._client.get('/v1/organizations/compliance_settings', options);
+        return this._client.get('/v1/organizations/compliance_settings', {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.compliance_settings.retrieve', options, {
+                route: '/v1/organizations/compliance_settings',
+            }),
+        });
     }
     /**
      * Update your organization's Compliance Settings.
@@ -55694,7 +62645,13 @@ class ComplianceSettings extends resource_1.APIResource {
      * ```
      */
     update(body, options) {
-        return this._client.post('/v1/organizations/compliance_settings', { body, ...options });
+        return this._client.post('/v1/organizations/compliance_settings', {
+            body,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.compliance_settings.update', options, {
+                route: '/v1/organizations/compliance_settings',
+            }),
+        });
     }
 }
 exports.ComplianceSettings = ComplianceSettings;
@@ -55711,6 +62668,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.ExternalKeys = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class ExternalKeys extends resource_1.APIResource {
     /**
@@ -55729,7 +62687,14 @@ class ExternalKeys extends resource_1.APIResource {
      * ```
      */
     create(body, options) {
-        return this._client.post('/v1/organizations/external_keys', { body, ...options });
+        return this._client.post('/v1/organizations/external_keys', {
+            body,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.external_keys.create', options, {
+                route: '/v1/organizations/external_keys',
+                createdIDAttribute: 'anthropic.organization.external_key.id',
+            }),
+        });
     }
     /**
      * Retrieve a single external key config in the caller's organization by ID.
@@ -55743,7 +62708,13 @@ class ExternalKeys extends resource_1.APIResource {
      * ```
      */
     retrieve(externalKeyID, options) {
-        return this._client.get((0, path_1.path) `/v1/organizations/external_keys/${externalKeyID}`, options);
+        return this._client.get((0, path_1.path) `/v1/organizations/external_keys/${externalKeyID}`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.external_keys.retrieve', options, {
+                route: '/v1/organizations/external_keys/{external_key_id}',
+                attributes: { 'anthropic.organization.external_key.id': externalKeyID },
+            }),
+        });
     }
     /**
      * Partially update an external key config. Omitted fields are left unchanged.
@@ -55761,7 +62732,14 @@ class ExternalKeys extends resource_1.APIResource {
      * ```
      */
     update(externalKeyID, body, options) {
-        return this._client.post((0, path_1.path) `/v1/organizations/external_keys/${externalKeyID}`, { body, ...options });
+        return this._client.post((0, path_1.path) `/v1/organizations/external_keys/${externalKeyID}`, {
+            body,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.external_keys.update', options, {
+                route: '/v1/organizations/external_keys/{external_key_id}',
+                attributes: { 'anthropic.organization.external_key.id': externalKeyID },
+            }),
+        });
     }
     /**
      * List external key configs in the caller's organization.
@@ -55781,6 +62759,10 @@ class ExternalKeys extends resource_1.APIResource {
         return this._client.getAPIList('/v1/organizations/external_keys', (pagination_1.PageCursor), {
             query,
             ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.external_keys.list', options, {
+                route: '/v1/organizations/external_keys',
+                queryParams: ['limit', 'page'],
+            }),
         });
     }
     /**
@@ -55797,7 +62779,13 @@ class ExternalKeys extends resource_1.APIResource {
      * ```
      */
     delete(externalKeyID, options) {
-        return this._client.delete((0, path_1.path) `/v1/organizations/external_keys/${externalKeyID}`, options);
+        return this._client.delete((0, path_1.path) `/v1/organizations/external_keys/${externalKeyID}`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.external_keys.delete', options, {
+                route: '/v1/organizations/external_keys/{external_key_id}',
+                attributes: { 'anthropic.organization.external_key.id': externalKeyID },
+            }),
+        });
     }
     /**
      * Validate an external key config against the customer's KMS.
@@ -55816,7 +62804,13 @@ class ExternalKeys extends resource_1.APIResource {
      * ```
      */
     validate(externalKeyID, options) {
-        return this._client.post((0, path_1.path) `/v1/organizations/external_keys/${externalKeyID}/validate`, options);
+        return this._client.post((0, path_1.path) `/v1/organizations/external_keys/${externalKeyID}/validate`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.external_keys.validate', options, {
+                route: '/v1/organizations/external_keys/{external_key_id}/validate',
+                attributes: { 'anthropic.organization.external_key.id': externalKeyID },
+            }),
+        });
     }
 }
 exports.ExternalKeys = ExternalKeys;
@@ -55863,6 +62857,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Issuers = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Issuers extends resource_1.APIResource {
     /**
@@ -55893,7 +62888,14 @@ class Issuers extends resource_1.APIResource {
      * ```
      */
     create(body, options) {
-        return this._client.post('/v1/organizations/federation_issuers', { body, ...options });
+        return this._client.post('/v1/organizations/federation_issuers', {
+            body,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.issuers.create', options, {
+                route: '/v1/organizations/federation_issuers',
+                createdIDAttribute: 'anthropic.organization.federation_issuer.id',
+            }),
+        });
     }
     /**
      * **Requires an OAuth access token with the `org:admin` scope**, from
@@ -55912,7 +62914,13 @@ class Issuers extends resource_1.APIResource {
      * ```
      */
     retrieve(federationIssuerID, options) {
-        return this._client.get((0, path_1.path) `/v1/organizations/federation_issuers/${federationIssuerID}`, options);
+        return this._client.get((0, path_1.path) `/v1/organizations/federation_issuers/${federationIssuerID}`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.issuers.retrieve', options, {
+                route: '/v1/organizations/federation_issuers/{federation_issuer_id}',
+                attributes: { 'anthropic.organization.federation_issuer.id': federationIssuerID },
+            }),
+        });
     }
     /**
      * **Requires an OAuth access token with the `org:admin` scope**, from
@@ -55940,6 +62948,10 @@ class Issuers extends resource_1.APIResource {
         return this._client.post((0, path_1.path) `/v1/organizations/federation_issuers/${federationIssuerID}`, {
             body,
             ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.issuers.update', options, {
+                route: '/v1/organizations/federation_issuers/{federation_issuer_id}',
+                attributes: { 'anthropic.organization.federation_issuer.id': federationIssuerID },
+            }),
         });
     }
     /**
@@ -55964,6 +62976,10 @@ class Issuers extends resource_1.APIResource {
         return this._client.getAPIList('/v1/organizations/federation_issuers', (pagination_1.PageCursor), {
             query,
             ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.issuers.list', options, {
+                route: '/v1/organizations/federation_issuers',
+                queryParams: ['include_archived', 'limit', 'page'],
+            }),
         });
     }
     /**
@@ -55988,7 +63004,13 @@ class Issuers extends resource_1.APIResource {
      * ```
      */
     archive(federationIssuerID, options) {
-        return this._client.post((0, path_1.path) `/v1/organizations/federation_issuers/${federationIssuerID}/archive`, options);
+        return this._client.post((0, path_1.path) `/v1/organizations/federation_issuers/${federationIssuerID}/archive`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.issuers.archive', options, {
+                route: '/v1/organizations/federation_issuers/{federation_issuer_id}/archive',
+                attributes: { 'anthropic.organization.federation_issuer.id': federationIssuerID },
+            }),
+        });
     }
 }
 exports.Issuers = Issuers;
@@ -56008,6 +63030,7 @@ const resource_1 = __nccwpck_require__(82941);
 const WorkspacesAPI = tslib_1.__importStar(__nccwpck_require__(28655));
 const workspaces_1 = __nccwpck_require__(28655);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 var Rules = /* @__PURE__ */ (() => {
     class Rules extends resource_1.APIResource {
@@ -56052,7 +63075,14 @@ var Rules = /* @__PURE__ */ (() => {
          * ```
          */
         create(body, options) {
-            return this._client.post('/v1/organizations/federation_rules', { body, ...options });
+            return this._client.post('/v1/organizations/federation_rules', {
+                body,
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.rules.create', options, {
+                    route: '/v1/organizations/federation_rules',
+                    createdIDAttribute: 'anthropic.organization.federation_rule.id',
+                }),
+            });
         }
         /**
          * **Requires an OAuth access token with the `org:admin` scope**, from
@@ -56071,7 +63101,13 @@ var Rules = /* @__PURE__ */ (() => {
          * ```
          */
         retrieve(federationRuleID, options) {
-            return this._client.get((0, path_1.path) `/v1/organizations/federation_rules/${federationRuleID}`, options);
+            return this._client.get((0, path_1.path) `/v1/organizations/federation_rules/${federationRuleID}`, {
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.rules.retrieve', options, {
+                    route: '/v1/organizations/federation_rules/{federation_rule_id}',
+                    attributes: { 'anthropic.organization.federation_rule.id': federationRuleID },
+                }),
+            });
         }
         /**
          * **Requires an OAuth access token with the `org:admin` scope**, from
@@ -56108,6 +63144,10 @@ var Rules = /* @__PURE__ */ (() => {
             return this._client.post((0, path_1.path) `/v1/organizations/federation_rules/${federationRuleID}`, {
                 body,
                 ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.rules.update', options, {
+                    route: '/v1/organizations/federation_rules/{federation_rule_id}',
+                    attributes: { 'anthropic.organization.federation_rule.id': federationRuleID },
+                }),
             });
         }
         /**
@@ -56133,6 +63173,10 @@ var Rules = /* @__PURE__ */ (() => {
             return this._client.getAPIList('/v1/organizations/federation_rules', (pagination_1.PageCursor), {
                 query,
                 ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.rules.list', options, {
+                    route: '/v1/organizations/federation_rules',
+                    queryParams: ['include_archived', 'issuer_id', 'limit', 'page'],
+                }),
             });
         }
         /**
@@ -56159,7 +63203,13 @@ var Rules = /* @__PURE__ */ (() => {
          * ```
          */
         archive(federationRuleID, options) {
-            return this._client.post((0, path_1.path) `/v1/organizations/federation_rules/${federationRuleID}/archive`, options);
+            return this._client.post((0, path_1.path) `/v1/organizations/federation_rules/${federationRuleID}/archive`, {
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.rules.archive', options, {
+                    route: '/v1/organizations/federation_rules/{federation_rule_id}/archive',
+                    attributes: { 'anthropic.organization.federation_rule.id': federationRuleID },
+                }),
+            });
         }
     }
     Rules.Workspaces = workspaces_1.Workspaces;
@@ -56179,6 +63229,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Workspaces = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Workspaces extends resource_1.APIResource {
     /**
@@ -56206,7 +63257,15 @@ class Workspaces extends resource_1.APIResource {
      * ```
      */
     list(federationRuleID, query = {}, options) {
-        return this._client.getAPIList((0, path_1.path) `/v1/organizations/federation_rules/${federationRuleID}/workspaces`, (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/federation_rules/${federationRuleID}/workspaces`, (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.rules.workspaces.list', options, {
+                route: '/v1/organizations/federation_rules/{federation_rule_id}/workspaces',
+                queryParams: ['limit', 'page'],
+                attributes: { 'anthropic.organization.federation_rule.id': federationRuleID },
+            }),
+        });
     }
     /**
      * **Requires an OAuth access token with the `org:admin` scope**, from
@@ -56237,6 +63296,12 @@ class Workspaces extends resource_1.APIResource {
         return this._client.post((0, path_1.path) `/v1/organizations/federation_rules/${federationRuleID}/workspaces`, {
             body,
             ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.rules.workspaces.add', options, {
+                route: '/v1/organizations/federation_rules/{federation_rule_id}/workspaces',
+                attributes: { 'anthropic.organization.federation_rule.id': federationRuleID },
+                createdIDAttribute: 'anthropic.organization.federation_rule.workspace.id',
+                createdIDField: 'workspace_id',
+            }),
         });
     }
     /**
@@ -56262,7 +63327,16 @@ class Workspaces extends resource_1.APIResource {
      */
     remove(workspaceID, params, options) {
         const { federation_rule_id } = params;
-        return this._client.delete((0, path_1.path) `/v1/organizations/federation_rules/${federation_rule_id}/workspaces/${workspaceID}`, options);
+        return this._client.delete((0, path_1.path) `/v1/organizations/federation_rules/${federation_rule_id}/workspaces/${workspaceID}`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.federation.rules.workspaces.remove', options, {
+                route: '/v1/organizations/federation_rules/{federation_rule_id}/workspaces/{workspace_id}',
+                attributes: {
+                    'anthropic.organization.federation_rule.id': federation_rule_id,
+                    'anthropic.organization.federation_rule.workspace.id': workspaceID,
+                },
+            }),
+        });
     }
 }
 exports.Workspaces = Workspaces;
@@ -56279,6 +63353,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Invites = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Invites extends resource_1.APIResource {
     /**
@@ -56299,7 +63374,14 @@ class Invites extends resource_1.APIResource {
      * ```
      */
     create(body, options) {
-        return this._client.post('/v1/organizations/invites', { body, ...options });
+        return this._client.post('/v1/organizations/invites', {
+            body,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.invites.create', options, {
+                route: '/v1/organizations/invites',
+                createdIDAttribute: 'anthropic.organization.invite.id',
+            }),
+        });
     }
     /**
      * Retrieve an invite by ID.
@@ -56311,7 +63393,13 @@ class Invites extends resource_1.APIResource {
      * ```
      */
     retrieve(inviteID, options) {
-        return this._client.get((0, path_1.path) `/v1/organizations/invites/${inviteID}`, options);
+        return this._client.get((0, path_1.path) `/v1/organizations/invites/${inviteID}`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.invites.retrieve', options, {
+                route: '/v1/organizations/invites/{invite_id}',
+                attributes: { 'anthropic.organization.invite.id': inviteID },
+            }),
+        });
     }
     /**
      * List the organization's invites.
@@ -56328,6 +63416,10 @@ class Invites extends resource_1.APIResource {
         return this._client.getAPIList('/v1/organizations/invites', (pagination_1.Page), {
             query,
             ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.invites.list', options, {
+                route: '/v1/organizations/invites',
+                queryParams: ['after_id', 'before_id', 'email', 'limit', 'roles', 'statuses'],
+            }),
         });
     }
     /**
@@ -56341,7 +63433,13 @@ class Invites extends resource_1.APIResource {
      * ```
      */
     delete(inviteID, options) {
-        return this._client.delete((0, path_1.path) `/v1/organizations/invites/${inviteID}`, options);
+        return this._client.delete((0, path_1.path) `/v1/organizations/invites/${inviteID}`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.invites.delete', options, {
+                route: '/v1/organizations/invites/{invite_id}',
+                attributes: { 'anthropic.organization.invite.id': inviteID },
+            }),
+        });
     }
 }
 exports.Invites = Invites;
@@ -56376,6 +63474,7 @@ const ServiceAccountsAPI = tslib_1.__importStar(__nccwpck_require__(61470));
 const service_accounts_1 = __nccwpck_require__(61470);
 const WorkspacesAPI = tslib_1.__importStar(__nccwpck_require__(46150));
 const workspaces_1 = __nccwpck_require__(46150);
+const tracing_1 = __nccwpck_require__(91705);
 var Organization = /* @__PURE__ */ (() => {
     class Organization extends resource_1.APIResource {
         constructor() {
@@ -56401,7 +63500,12 @@ var Organization = /* @__PURE__ */ (() => {
          * ```
          */
         retrieve(options) {
-            return this._client.get('/v1/organizations/me', options);
+            return this._client.get('/v1/organizations/me', {
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.retrieve', options, {
+                    route: '/v1/organizations/me',
+                }),
+            });
         }
     }
     Organization.APIKeys = api_keys_1.APIKeys;
@@ -56429,13 +63533,14 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.RateLimits = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 class RateLimits extends resource_1.APIResource {
     /**
      * List Messages API rate limits for your organization.
      *
      * Each entry corresponds to one rate-limit group (either a model family or an
-     * API-surface category such as the Files API or Message Batches) and contains the
-     * set of limiter values that apply to it.
+     * API-surface category such as the Message Batches API or the web search tool) and
+     * contains the set of limiter values that apply to it.
      *
      * When `limit` is omitted, every matching entry is returned in a single page; when
      * `limit` truncates the result, follow `next_page` to fetch the remaining entries.
@@ -56452,6 +63557,10 @@ class RateLimits extends resource_1.APIResource {
         return this._client.getAPIList('/v1/organizations/rate_limits', (pagination_1.PageCursor), {
             query,
             ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.rate_limits.list', options, {
+                route: '/v1/organizations/rate_limits',
+                queryParams: ['group_type', 'limit', 'model', 'page'],
+            }),
         });
     }
 }
@@ -56472,6 +63581,7 @@ const resource_1 = __nccwpck_require__(82941);
 const WorkspacesAPI = tslib_1.__importStar(__nccwpck_require__(2886));
 const workspaces_1 = __nccwpck_require__(2886);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 var ServiceAccounts = /* @__PURE__ */ (() => {
     class ServiceAccounts extends resource_1.APIResource {
@@ -56503,7 +63613,14 @@ var ServiceAccounts = /* @__PURE__ */ (() => {
          * ```
          */
         create(body, options) {
-            return this._client.post('/v1/organizations/service_accounts', { body, ...options });
+            return this._client.post('/v1/organizations/service_accounts', {
+                body,
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.service_accounts.create', options, {
+                    route: '/v1/organizations/service_accounts',
+                    createdIDAttribute: 'anthropic.organization.service_account.id',
+                }),
+            });
         }
         /**
          * **Requires an OAuth access token with the `org:admin` scope**, from
@@ -56522,7 +63639,13 @@ var ServiceAccounts = /* @__PURE__ */ (() => {
          * ```
          */
         retrieve(serviceAccountID, options) {
-            return this._client.get((0, path_1.path) `/v1/organizations/service_accounts/${serviceAccountID}`, options);
+            return this._client.get((0, path_1.path) `/v1/organizations/service_accounts/${serviceAccountID}`, {
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.service_accounts.retrieve', options, {
+                    route: '/v1/organizations/service_accounts/{service_account_id}',
+                    attributes: { 'anthropic.organization.service_account.id': serviceAccountID },
+                }),
+            });
         }
         /**
          * **Requires an OAuth access token with the `org:admin` scope**, from
@@ -56549,6 +63672,10 @@ var ServiceAccounts = /* @__PURE__ */ (() => {
             return this._client.post((0, path_1.path) `/v1/organizations/service_accounts/${serviceAccountID}`, {
                 body,
                 ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.service_accounts.update', options, {
+                    route: '/v1/organizations/service_accounts/{service_account_id}',
+                    attributes: { 'anthropic.organization.service_account.id': serviceAccountID },
+                }),
             });
         }
         /**
@@ -56575,6 +63702,10 @@ var ServiceAccounts = /* @__PURE__ */ (() => {
             return this._client.getAPIList('/v1/organizations/service_accounts', (pagination_1.PageCursor), {
                 query,
                 ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.service_accounts.list', options, {
+                    route: '/v1/organizations/service_accounts',
+                    queryParams: ['include_archived', 'limit', 'page'],
+                }),
             });
         }
         /**
@@ -56599,7 +63730,13 @@ var ServiceAccounts = /* @__PURE__ */ (() => {
          * ```
          */
         archive(serviceAccountID, options) {
-            return this._client.post((0, path_1.path) `/v1/organizations/service_accounts/${serviceAccountID}/archive`, options);
+            return this._client.post((0, path_1.path) `/v1/organizations/service_accounts/${serviceAccountID}/archive`, {
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.service_accounts.archive', options, {
+                    route: '/v1/organizations/service_accounts/{service_account_id}/archive',
+                    attributes: { 'anthropic.organization.service_account.id': serviceAccountID },
+                }),
+            });
         }
     }
     ServiceAccounts.Workspaces = workspaces_1.Workspaces;
@@ -56619,6 +63756,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Workspaces = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Workspaces extends resource_1.APIResource {
     /**
@@ -56652,7 +63790,15 @@ class Workspaces extends resource_1.APIResource {
      * ```
      */
     list(serviceAccountID, query = {}, options) {
-        return this._client.getAPIList((0, path_1.path) `/v1/organizations/service_accounts/${serviceAccountID}/workspaces`, (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/service_accounts/${serviceAccountID}/workspaces`, (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.service_accounts.workspaces.list', options, {
+                route: '/v1/organizations/service_accounts/{service_account_id}/workspaces',
+                queryParams: ['limit', 'page'],
+                attributes: { 'anthropic.organization.service_account.id': serviceAccountID },
+            }),
+        });
     }
     /**
      * **Requires an OAuth access token with the `org:admin` scope**, from
@@ -56684,6 +63830,12 @@ class Workspaces extends resource_1.APIResource {
         return this._client.post((0, path_1.path) `/v1/organizations/service_accounts/${serviceAccountID}/workspaces`, {
             body,
             ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.service_accounts.workspaces.add', options, {
+                route: '/v1/organizations/service_accounts/{service_account_id}/workspaces',
+                attributes: { 'anthropic.organization.service_account.id': serviceAccountID },
+                createdIDAttribute: 'anthropic.organization.service_account.workspace.id',
+                createdIDField: 'workspace_id',
+            }),
         });
     }
     /**
@@ -56713,7 +63865,16 @@ class Workspaces extends resource_1.APIResource {
      */
     remove(workspaceID, params, options) {
         const { service_account_id } = params;
-        return this._client.delete((0, path_1.path) `/v1/organizations/service_accounts/${service_account_id}/workspaces/${workspaceID}`, options);
+        return this._client.delete((0, path_1.path) `/v1/organizations/service_accounts/${service_account_id}/workspaces/${workspaceID}`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.service_accounts.workspaces.remove', options, {
+                route: '/v1/organizations/service_accounts/{service_account_id}/workspaces/{workspace_id}',
+                attributes: {
+                    'anthropic.organization.service_account.id': service_account_id,
+                    'anthropic.organization.service_account.workspace.id': workspaceID,
+                },
+            }),
+        });
     }
 }
 exports.Workspaces = Workspaces;
@@ -56730,6 +63891,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Users = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Users extends resource_1.APIResource {
     /**
@@ -56742,7 +63904,13 @@ class Users extends resource_1.APIResource {
      * ```
      */
     retrieve(userID, options) {
-        return this._client.get((0, path_1.path) `/v1/organizations/users/${userID}`, options);
+        return this._client.get((0, path_1.path) `/v1/organizations/users/${userID}`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.users.retrieve', options, {
+                route: '/v1/organizations/users/{user_id}',
+                attributes: { 'anthropic.organization.user.id': userID },
+            }),
+        });
     }
     /**
      * Update a member's organization role.
@@ -56756,7 +63924,14 @@ class Users extends resource_1.APIResource {
      * ```
      */
     update(userID, body, options) {
-        return this._client.post((0, path_1.path) `/v1/organizations/users/${userID}`, { body, ...options });
+        return this._client.post((0, path_1.path) `/v1/organizations/users/${userID}`, {
+            body,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.users.update', options, {
+                route: '/v1/organizations/users/{user_id}',
+                attributes: { 'anthropic.organization.user.id': userID },
+            }),
+        });
     }
     /**
      * List the organization's members.
@@ -56770,7 +63945,14 @@ class Users extends resource_1.APIResource {
      * ```
      */
     list(query = {}, options) {
-        return this._client.getAPIList('/v1/organizations/users', (pagination_1.Page), { query, ...options });
+        return this._client.getAPIList('/v1/organizations/users', (pagination_1.Page), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.users.list', options, {
+                route: '/v1/organizations/users',
+                queryParams: ['after_id', 'before_id', 'email', 'limit', 'roles'],
+            }),
+        });
     }
     /**
      * Remove a member from the organization.
@@ -56783,7 +63965,13 @@ class Users extends resource_1.APIResource {
      * ```
      */
     remove(userID, options) {
-        return this._client.delete((0, path_1.path) `/v1/organizations/users/${userID}`, options);
+        return this._client.delete((0, path_1.path) `/v1/organizations/users/${userID}`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.users.remove', options, {
+                route: '/v1/organizations/users/{user_id}',
+                attributes: { 'anthropic.organization.user.id': userID },
+            }),
+        });
     }
 }
 exports.Users = Users;
@@ -56800,6 +63988,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Members = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class Members extends resource_1.APIResource {
     /**
@@ -56816,7 +64005,16 @@ class Members extends resource_1.APIResource {
      */
     retrieve(userID, params, options) {
         const { workspace_id } = params;
-        return this._client.get((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/members/${userID}`, options);
+        return this._client.get((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/members/${userID}`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.members.retrieve', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/members/{user_id}',
+                attributes: {
+                    'anthropic.organization.workspace.id': workspace_id,
+                    'anthropic.organization.workspace.member.id': userID,
+                },
+            }),
+        });
     }
     /**
      * Update Workspace Member
@@ -56838,6 +64036,13 @@ class Members extends resource_1.APIResource {
         return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/members/${userID}`, {
             body,
             ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.members.update', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/members/{user_id}',
+                attributes: {
+                    'anthropic.organization.workspace.id': workspace_id,
+                    'anthropic.organization.workspace.member.id': userID,
+                },
+            }),
         });
     }
     /**
@@ -56854,7 +64059,15 @@ class Members extends resource_1.APIResource {
      * ```
      */
     list(workspaceID, query = {}, options) {
-        return this._client.getAPIList((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/members`, (pagination_1.Page), { query, ...options });
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/members`, (pagination_1.Page), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.members.list', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/members',
+                queryParams: ['after_id', 'before_id', 'limit'],
+                attributes: { 'anthropic.organization.workspace.id': workspaceID },
+            }),
+        });
     }
     /**
      * Create Workspace Member
@@ -56872,7 +64085,16 @@ class Members extends resource_1.APIResource {
      * ```
      */
     add(workspaceID, body, options) {
-        return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/members`, { body, ...options });
+        return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/members`, {
+            body,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.members.add', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/members',
+                attributes: { 'anthropic.organization.workspace.id': workspaceID },
+                createdIDAttribute: 'anthropic.organization.workspace.member.id',
+                createdIDField: 'user_id',
+            }),
+        });
     }
     /**
      * Delete Workspace Member
@@ -56888,7 +64110,16 @@ class Members extends resource_1.APIResource {
      */
     remove(userID, params, options) {
         const { workspace_id } = params;
-        return this._client.delete((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/members/${userID}`, options);
+        return this._client.delete((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/members/${userID}`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.members.remove', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/members/{user_id}',
+                attributes: {
+                    'anthropic.organization.workspace.id': workspace_id,
+                    'anthropic.organization.workspace.member.id': userID,
+                },
+            }),
+        });
     }
 }
 exports.Members = Members;
@@ -56905,6 +64136,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.RateLimits = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class RateLimits extends resource_1.APIResource {
     /**
@@ -56930,7 +64162,15 @@ class RateLimits extends resource_1.APIResource {
      * ```
      */
     list(workspaceID, query = {}, options) {
-        return this._client.getAPIList((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/rate_limits`, (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/rate_limits`, (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.rate_limits.list', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/rate_limits',
+                queryParams: ['group_type', 'include_inherited', 'limit', 'page'],
+                attributes: { 'anthropic.organization.workspace.id': workspaceID },
+            }),
+        });
     }
 }
 exports.RateLimits = RateLimits;
@@ -56947,6 +64187,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.ServiceAccounts = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 class ServiceAccounts extends resource_1.APIResource {
     /**
@@ -56974,7 +64215,16 @@ class ServiceAccounts extends resource_1.APIResource {
      */
     retrieve(serviceAccountID, params, options) {
         const { workspace_id } = params;
-        return this._client.get((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/service_accounts/${serviceAccountID}`, options);
+        return this._client.get((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/service_accounts/${serviceAccountID}`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.service_accounts.retrieve', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/service_accounts/{service_account_id}',
+                attributes: {
+                    'anthropic.organization.workspace.id': workspace_id,
+                    'anthropic.organization.workspace.service_account.id': serviceAccountID,
+                },
+            }),
+        });
     }
     /**
      * **Requires an OAuth access token with the `org:admin` scope**, from
@@ -57004,7 +64254,17 @@ class ServiceAccounts extends resource_1.APIResource {
      */
     update(serviceAccountID, params, options) {
         const { workspace_id, ...body } = params;
-        return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/service_accounts/${serviceAccountID}`, { body, ...options });
+        return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/service_accounts/${serviceAccountID}`, {
+            body,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.service_accounts.update', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/service_accounts/{service_account_id}',
+                attributes: {
+                    'anthropic.organization.workspace.id': workspace_id,
+                    'anthropic.organization.workspace.service_account.id': serviceAccountID,
+                },
+            }),
+        });
     }
     /**
      * **Requires an OAuth access token with the `org:admin` scope**, from
@@ -57031,7 +64291,15 @@ class ServiceAccounts extends resource_1.APIResource {
      * ```
      */
     list(workspaceID, query = {}, options) {
-        return this._client.getAPIList((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/service_accounts`, (pagination_1.PageCursor), { query, ...options });
+        return this._client.getAPIList((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/service_accounts`, (pagination_1.PageCursor), {
+            query,
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.service_accounts.list', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/service_accounts',
+                queryParams: ['limit', 'page'],
+                attributes: { 'anthropic.organization.workspace.id': workspaceID },
+            }),
+        });
     }
     /**
      * **Requires an OAuth access token with the `org:admin` scope**, from
@@ -57065,6 +64333,12 @@ class ServiceAccounts extends resource_1.APIResource {
         return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/service_accounts`, {
             body,
             ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.service_accounts.add', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/service_accounts',
+                attributes: { 'anthropic.organization.workspace.id': workspaceID },
+                createdIDAttribute: 'anthropic.organization.workspace.service_account.id',
+                createdIDField: 'service_account_id',
+            }),
         });
     }
     /**
@@ -57092,7 +64366,16 @@ class ServiceAccounts extends resource_1.APIResource {
      */
     remove(serviceAccountID, params, options) {
         const { workspace_id } = params;
-        return this._client.delete((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/service_accounts/${serviceAccountID}`, options);
+        return this._client.delete((0, path_1.path) `/v1/organizations/workspaces/${workspace_id}/service_accounts/${serviceAccountID}`, {
+            ...options,
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.service_accounts.remove', options, {
+                route: '/v1/organizations/workspaces/{workspace_id}/service_accounts/{service_account_id}',
+                attributes: {
+                    'anthropic.organization.workspace.id': workspace_id,
+                    'anthropic.organization.workspace.service_account.id': serviceAccountID,
+                },
+            }),
+        });
     }
 }
 exports.ServiceAccounts = ServiceAccounts;
@@ -57116,6 +64399,7 @@ const rate_limits_1 = __nccwpck_require__(37063);
 const ServiceAccountsAPI = tslib_1.__importStar(__nccwpck_require__(7550));
 const service_accounts_1 = __nccwpck_require__(7550);
 const pagination_1 = __nccwpck_require__(27117);
+const tracing_1 = __nccwpck_require__(91705);
 const path_1 = __nccwpck_require__(43002);
 var Workspaces = /* @__PURE__ */ (() => {
     class Workspaces extends resource_1.APIResource {
@@ -57137,7 +64421,14 @@ var Workspaces = /* @__PURE__ */ (() => {
          * ```
          */
         create(body, options) {
-            return this._client.post('/v1/organizations/workspaces', { body, ...options });
+            return this._client.post('/v1/organizations/workspaces', {
+                body,
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.create', options, {
+                    route: '/v1/organizations/workspaces',
+                    createdIDAttribute: 'anthropic.organization.workspace.id',
+                }),
+            });
         }
         /**
          * Get Workspace
@@ -57151,7 +64442,13 @@ var Workspaces = /* @__PURE__ */ (() => {
          * ```
          */
         retrieve(workspaceID, options) {
-            return this._client.get((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}`, options);
+            return this._client.get((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}`, {
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.retrieve', options, {
+                    route: '/v1/organizations/workspaces/{workspace_id}',
+                    attributes: { 'anthropic.organization.workspace.id': workspaceID },
+                }),
+            });
         }
         /**
          * Update Workspace
@@ -57165,7 +64462,14 @@ var Workspaces = /* @__PURE__ */ (() => {
          * ```
          */
         update(workspaceID, body, options) {
-            return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}`, { body, ...options });
+            return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}`, {
+                body,
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.update', options, {
+                    route: '/v1/organizations/workspaces/{workspace_id}',
+                    attributes: { 'anthropic.organization.workspace.id': workspaceID },
+                }),
+            });
         }
         /**
          * List Workspaces
@@ -57179,7 +64483,14 @@ var Workspaces = /* @__PURE__ */ (() => {
          * ```
          */
         list(query = {}, options) {
-            return this._client.getAPIList('/v1/organizations/workspaces', (pagination_1.Page), { query, ...options });
+            return this._client.getAPIList('/v1/organizations/workspaces', (pagination_1.Page), {
+                query,
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.list', options, {
+                    route: '/v1/organizations/workspaces',
+                    queryParams: ['after_id', 'before_id', 'include_archived', 'include_default', 'limit'],
+                }),
+            });
         }
         /**
          * Archive Workspace
@@ -57193,7 +64504,13 @@ var Workspaces = /* @__PURE__ */ (() => {
          * ```
          */
         archive(workspaceID, options) {
-            return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/archive`, options);
+            return this._client.post((0, path_1.path) `/v1/organizations/workspaces/${workspaceID}/archive`, {
+                ...options,
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.organization.workspaces.archive', options, {
+                    route: '/v1/organizations/workspaces/{workspace_id}/archive',
+                    attributes: { 'anthropic.organization.workspace.id': workspaceID },
+                }),
+            });
         }
     }
     Workspaces.RateLimits = rate_limits_1.RateLimits;
@@ -57229,6 +64546,7 @@ const VersionsAPI = tslib_1.__importStar(__nccwpck_require__(31713));
 const versions_1 = __nccwpck_require__(31713);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const uploads_1 = __nccwpck_require__(59629);
 const path_1 = __nccwpck_require__(43002);
 var Skills = /* @__PURE__ */ (() => {
@@ -57256,6 +64574,10 @@ var Skills = /* @__PURE__ */ (() => {
                     { ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined) },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.skills.create', options, {
+                    route: '/v1/skills',
+                    createdIDAttribute: 'anthropic.skill.id',
+                }),
             }, this._client, false));
         }
         /**
@@ -57274,6 +64596,10 @@ var Skills = /* @__PURE__ */ (() => {
                     { ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined) },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.skills.retrieve', options, {
+                    route: '/v1/skills/{skill_id}',
+                    attributes: { 'anthropic.skill.id': skillID },
+                }),
             });
         }
         /**
@@ -57296,6 +64622,10 @@ var Skills = /* @__PURE__ */ (() => {
                     { ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined) },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.skills.list', options, {
+                    route: '/v1/skills',
+                    queryParams: ['limit', 'page', 'source'],
+                }),
             });
         }
         /**
@@ -57314,6 +64644,10 @@ var Skills = /* @__PURE__ */ (() => {
                     { ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined) },
                     options?.headers,
                 ]),
+                __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.skills.delete', options, {
+                    route: '/v1/skills/{skill_id}',
+                    attributes: { 'anthropic.skill.id': skillID },
+                }),
             });
         }
     }
@@ -57335,6 +64669,7 @@ exports.Versions = void 0;
 const resource_1 = __nccwpck_require__(82941);
 const pagination_1 = __nccwpck_require__(27117);
 const headers_1 = __nccwpck_require__(60017);
+const tracing_1 = __nccwpck_require__(91705);
 const uploads_1 = __nccwpck_require__(59629);
 const path_1 = __nccwpck_require__(43002);
 class Versions extends resource_1.APIResource {
@@ -57358,6 +64693,11 @@ class Versions extends resource_1.APIResource {
                 { ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.skills.versions.create', options, {
+                route: '/v1/skills/{skill_id}/versions',
+                attributes: { 'anthropic.skill.id': skillID },
+                createdIDAttribute: 'anthropic.skill.version.id',
+            }),
         }, this._client, false));
     }
     /**
@@ -57379,6 +64719,10 @@ class Versions extends resource_1.APIResource {
                 { ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.skills.versions.retrieve', options, {
+                route: '/v1/skills/{skill_id}/versions/{version}',
+                attributes: { 'anthropic.skill.id': skill_id, 'anthropic.skill.version.id': version },
+            }),
         });
     }
     /**
@@ -57403,6 +64747,11 @@ class Versions extends resource_1.APIResource {
                 { ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.skills.versions.list', options, {
+                route: '/v1/skills/{skill_id}/versions',
+                queryParams: ['limit', 'page'],
+                attributes: { 'anthropic.skill.id': skillID },
+            }),
         });
     }
     /**
@@ -57424,6 +64773,10 @@ class Versions extends resource_1.APIResource {
                 { ...(workspace_id != null ? { 'anthropic-workspace-id': workspace_id } : undefined) },
                 options?.headers,
             ]),
+            __span: (0, tracing_1.startApiCallSpan)(this._client, 'anthropic.skills.versions.delete', options, {
+                route: '/v1/skills/{skill_id}/versions/{version}',
+                attributes: { 'anthropic.skill.id': skill_id, 'anthropic.skill.version.id': version },
+            }),
         });
     }
 }
@@ -57655,7 +65008,7 @@ function fsErrorMessage(err, file) {
 
 "use strict";
 
-var _SessionMemoryStores_instances, _SessionMemoryStores_client, _SessionMemoryStores_workdir, _SessionMemoryStores_syncIntervalMs, _SessionMemoryStores_syncDeletions, _SessionMemoryStores_log, _SessionMemoryStores_lastSyncAt, _SessionMemoryStores_finished, _SessionMemoryStores_stores, _SessionMemoryStores_storeRoot, _SessionMemoryStores_scanMarker, _SessionMemoryStores_syncStore, _SessionMemoryStores_flushStore, _SessionMemoryStores_recover, _SessionMemoryStores_stampAndPull, _SessionMemoryStores_syncPath, _SessionMemoryStores_removeLocal, _SessionMemoryStores_write, _SessionMemoryStores_pullAll, _SessionMemoryStores_uploadAll, _SessionMemoryStores_listMemories, _SessionMemoryStores_upload, _SessionMemoryStores_corroboratedDelete, _SessionMemoryStores_deleteRemote;
+var _SessionMemoryStores_instances, _SessionMemoryStores_client, _SessionMemoryStores_workdir, _SessionMemoryStores_syncIntervalMs, _SessionMemoryStores_syncDeletions, _SessionMemoryStores_log, _SessionMemoryStores_lastSyncAt, _SessionMemoryStores_finished, _SessionMemoryStores_stores, _SessionMemoryStores_storeRoot, _SessionMemoryStores_scanMarker, _SessionMemoryStores_syncStore, _SessionMemoryStores_flushStore, _SessionMemoryStores_recover, _SessionMemoryStores_settleSent, _SessionMemoryStores_stampAndPull, _SessionMemoryStores_syncPath, _SessionMemoryStores_removeLocal, _SessionMemoryStores_write, _SessionMemoryStores_pullAll, _SessionMemoryStores_uploadAll, _SessionMemoryStores_listMemories, _SessionMemoryStores_upload, _SessionMemoryStores_corroboratedDelete, _SessionMemoryStores_deleteRemote;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.SessionMemoryStores = exports.SessionMemoryError = exports.UPLOAD_CONCURRENCY = exports.DELETE_CORROBORATION_MS = exports.MARKER_PATH = exports.MEMORY_FLUSH_TIMEOUT_MS = exports.MIN_MEMORY_SYNC_INTERVAL_MS = exports.DEFAULT_MEMORY_SYNC_INTERVAL_MS = void 0;
 const tslib_1 = __nccwpck_require__(14839);
@@ -57782,6 +65135,10 @@ var SessionMemoryStores = /* @__PURE__ */ (() => {
      * - a file the server refuses (too large, invalid content) is skipped —
      *   warned once and retried only after the file changes; other files keep
      *   syncing;
+     * - an upload whose response never arrives may still have been saved, so the
+     *   sha of the bytes sent is remembered until the next sync has listed the
+     *   server: a memory holding exactly that sha is this sync's own upload, not
+     *   a remote edit, and a newer local edit goes out over it;
      * - a file deleted locally is deleted on the server after a delay and a
      *   re-check — never on the first sync that notices, and only up to a
      *   per-sync cap. `syncDeletions` gates it;
@@ -57878,6 +65235,7 @@ var SessionMemoryStores = /* @__PURE__ */ (() => {
                         baseline: new Map(),
                         refusedShas: new Map(),
                         pendingDeletes: new Map(),
+                        sentShas: new Map(),
                     };
                     // A root `open` did not create is a dead run's leftovers; the first
                     // sync would upload them into the customer's store.
@@ -58035,15 +65393,17 @@ var SessionMemoryStores = /* @__PURE__ */ (() => {
                 await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_recover).call(this, store, 'the folder or its marker is gone');
                 return;
             }
-            // A lone file vanishing is an ordinary deletion; two or more at
-            // once with nothing left is a wiped folder.
-            if (Object.keys(local).length === 0 && store.baseline.size > 1) {
-                await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_recover).call(this, store, 'every memory file is gone at once');
-                return;
-            }
             const remote = new Map();
             for await (const [rel, item] of tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_listMemories).call(this, store.memoryStoreId)) {
                 remote.set(rel, item);
+            }
+            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_settleSent).call(this, store, remote);
+            // A lone file vanishing is an ordinary deletion; two or more at
+            // once with nothing left is a wiped folder — counted after settling,
+            // so an upload that landed unheard counts.
+            if (Object.keys(local).length === 0 && store.baseline.size > 1) {
+                await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_recover).call(this, store, 'every memory file is gone at once');
+                return;
             }
             const deletes = new DeletePass(tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_syncDeletions, "f"), Math.max(DELETE_CAP_FLOOR, Math.min(DELETE_CAP_CEILING, Math.floor(store.baseline.size / 4))), final);
             const pulls = [];
@@ -58099,7 +65459,10 @@ var SessionMemoryStores = /* @__PURE__ */ (() => {
                 return;
             }
             for (const [rel, sha] of Object.entries(scan.files)) {
-                if (sha !== store.baseline.get(rel) && store.refusedShas.get(rel) !== sha) {
+                // A path with an unsettled send counts even at its baseline sha: the
+                // send may have landed, leaving the server ahead of the file.
+                const changed = sha !== store.baseline.get(rel) || store.sentShas.has(rel);
+                if (changed && store.refusedShas.get(rel) !== sha) {
                     dirty.set(rel, sha);
                     unsent.add(rel);
                 }
@@ -58112,11 +65475,18 @@ var SessionMemoryStores = /* @__PURE__ */ (() => {
                     return;
                 remote.set(rel, item);
             }
+            tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_settleSent).call(this, store, remote);
             const uploads = [];
             for (const rel of [...dirty.keys()].sort()) {
                 const localSha = dirty.get(rel);
                 const baseSha = store.baseline.get(rel);
                 const existing = remote.get(rel);
+                if (localSha === baseSha) {
+                    // Listed only for its unsettled send, which never landed: the file
+                    // holds nothing the server lacks.
+                    unsent.delete(rel);
+                    continue;
+                }
                 if (existing !== undefined && existing.content_sha256 === localSha) {
                     store.baseline.set(rel, existing.content_sha256);
                     unsent.delete(rel);
@@ -58152,6 +65522,12 @@ var SessionMemoryStores = /* @__PURE__ */ (() => {
         });
         await store.files.createRoot();
         await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_stampAndPull).call(this, store);
+    }, _SessionMemoryStores_settleSent = function _SessionMemoryStores_settleSent(store, remote) {
+        for (const [rel, sha] of store.sentShas) {
+            if (remote.get(rel)?.content_sha256 === sha)
+                store.baseline.set(rel, sha);
+        }
+        store.sentShas.clear();
     }, _SessionMemoryStores_stampAndPull = 
     /**
      * Write the marker, then pull every remote memory. Baseline is cleared
@@ -58161,6 +65537,7 @@ var SessionMemoryStores = /* @__PURE__ */ (() => {
      */
     async function _SessionMemoryStores_stampAndPull(store) {
         store.baseline = new Map();
+        store.sentShas.clear();
         store.pendingDeletes.clear();
         await store.files.put(exports.MARKER_PATH, `version ${MARKER_VERSION}\n${store.memoryStoreId}`);
         for await (const [rel, item] of tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_instances, "m", _SessionMemoryStores_listMemories).call(this, store.memoryStoreId, 'full')) {
@@ -58410,6 +65787,8 @@ var SessionMemoryStores = /* @__PURE__ */ (() => {
             if (data === null)
                 return undefined;
             const content = (0, bytes_1.decodeUTF8)(data);
+            // Hashed as sent: decoding may have dropped a byte-order mark.
+            store.sentShas.set(rel, node_1.crypto.createHash('sha256').update(content, 'utf-8').digest('hex'));
             const item = existing ?
                 await tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_client, "f").beta.memoryStores.memories.update(existing.id, {
                     memory_store_id: store.memoryStoreId,
@@ -58421,6 +65800,7 @@ var SessionMemoryStores = /* @__PURE__ */ (() => {
                     content,
                 });
             store.refusedShas.delete(rel);
+            store.sentShas.delete(rel);
             return item.content_sha256;
         }
         catch (e) {
@@ -58432,7 +65812,9 @@ var SessionMemoryStores = /* @__PURE__ */ (() => {
             if (existing && (0, backoff_1.isStatus)(e, 409)) {
                 // The precondition lost a race: the remote moved under us, so the push
                 // is dropped. The local file is now stale — the next sync sees
-                // remoteChanged and pulls the winner over it.
+                // remoteChanged and pulls the winner over it. A client retry of an
+                // attempt that was saved ends here too, so the sent sha stays for the
+                // next listing to tell the two apart.
                 tslib_1.__classPrivateFieldGet(this, _SessionMemoryStores_log, "f").warn('memory changed both locally and remotely; the upload was refused and the local edit loses', {
                     path: rel,
                     memory_store_id: store.memoryStoreId,
@@ -59861,7 +67243,7 @@ function checkMemorySyncInterval(ms, option) {
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.VERSION = void 0;
-exports.VERSION = '0.131.0'; // x-release-please-version
+exports.VERSION = '0.135.0'; // x-release-please-version
 //# sourceMappingURL=version.js.map
 
 /***/ }),
@@ -60775,6 +68157,7 @@ const realtime_credentials_1 = __nccwpck_require__(35307);
 const batches_1 = __nccwpck_require__(80885);
 const completions_1 = __nccwpck_require__(27902);
 const content_provenance_checks_1 = __nccwpck_require__(53510);
+const decisions_1 = __nccwpck_require__(11150);
 const embeddings_1 = __nccwpck_require__(26639);
 const files_1 = __nccwpck_require__(36682);
 const images_1 = __nccwpck_require__(51047);
@@ -60856,6 +68239,7 @@ class OpenAI {
         _OpenAI_responseAttempts.set(this, new WeakMap());
         this._apiKeyInvocation = 0;
         this._lastCachedAPIKeyInvocation = 0;
+        this.decisions = new API.Decisions(this);
         /**
          * Given a prompt, the model will return one or more predicted completions, and can also return the probabilities of alternative tokens at each position.
          */
@@ -62430,6 +69814,7 @@ OpenAI.UnprocessableEntityError = Errors.UnprocessableEntityError;
 OpenAI.InvalidWebhookSignatureError = Errors.InvalidWebhookSignatureError;
 OpenAI.toFile = Uploads.toFile;
 OpenAI.toStreamingFile = Uploads.toStreamingFile;
+OpenAI.Decisions = decisions_1.Decisions;
 OpenAI.Completions = completions_1.Completions;
 OpenAI.Chat = chat_1.Chat;
 OpenAI.Embeddings = embeddings_1.Embeddings;
@@ -63707,13 +71092,802 @@ tslib_1.__exportStar(__nccwpck_require__(59889), exports);
 
 /***/ }),
 
+/***/ 20860:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ComputerToolset = void 0;
+const error_1 = __nccwpck_require__(22209);
+const ResponseInputItems_1 = __nccwpck_require__(44781);
+const runner_diagnostics_1 = __nccwpck_require__(5258);
+const runner_lifecycle_1 = __nccwpck_require__(61230);
+const native_response_message_1 = __nccwpck_require__(4918);
+const values_1 = __nccwpck_require__(23049);
+// Modern actions calls may omit the checklist. Legacy single actions still require it.
+function validateComputerSafetyChecks(call) {
+    const checks = (0, runner_lifecycle_1.configuredOption)(call, 'pending_safety_checks');
+    if (!(0, runner_lifecycle_1.configuredOption)(call, 'actions') || checks !== undefined) {
+        if (!Array.isArray(checks)) {
+            throw new error_1.OpenAIError('ComputerToolset requires valid pending safety checks before execution.');
+        }
+        // oxlint-disable-next-line typescript/prefer-for-of -- Validate each JSON slot, including holes that must become invalid nulls.
+        for (let index = 0; index < checks.length; index += 1) {
+            const check = (0, values_1.hasOwn)(checks, index) ? checks[index] : undefined;
+            const code = check ? (0, runner_lifecycle_1.configuredOption)(check, 'code') : undefined;
+            const message = check ? (0, runner_lifecycle_1.configuredOption)(check, 'message') : undefined;
+            if (!check ||
+                !(0, values_1.hasOwn)(check, 'id') ||
+                typeof check.id !== 'string' ||
+                (code !== undefined && code !== null && typeof code !== 'string') ||
+                (message !== undefined && message !== null && typeof message !== 'string')) {
+                throw new error_1.OpenAIError('ComputerToolset requires valid pending safety checks before execution.');
+            }
+        }
+    }
+}
+function validComputerPoint(point) {
+    return ((0, values_1.isObj)(point) &&
+        (0, values_1.hasOwn)(point, 'x') &&
+        (0, values_1.hasOwn)(point, 'y') &&
+        Number.isInteger(point.x) &&
+        Number.isInteger(point.y));
+}
+function isDenseArray(values) {
+    if (!Array.isArray(values)) {
+        return false;
+    }
+    // oxlint-disable-next-line typescript/prefer-for-of -- Iteration alone cannot distinguish an inherited entry from an owned slot.
+    for (let index = 0; index < values.length; index += 1) {
+        if (!(0, values_1.hasOwn)(values, index)) {
+            return false;
+        }
+    }
+    return true;
+}
+function validComputerKeys(keys) {
+    return isDenseArray(keys) && keys.every((key) => typeof key === 'string');
+}
+function validComputerAction(action) {
+    if (!action || !(0, values_1.hasOwn)(action, 'type')) {
+        return false;
+    }
+    const keys = 'keys' in action ? (0, runner_lifecycle_1.configuredOption)(action, 'keys') : undefined;
+    if (keys !== null && keys !== undefined && !validComputerKeys(keys)) {
+        return false;
+    }
+    switch (action.type) {
+        case 'click': {
+            const button = (0, runner_lifecycle_1.configuredOption)(action, 'button');
+            return (validComputerPoint(action) &&
+                ['left', 'right', 'wheel', 'back', 'forward'].some((value) => value === button));
+        }
+        case 'double_click':
+        case 'move': {
+            return validComputerPoint(action);
+        }
+        case 'scroll': {
+            return (validComputerPoint(action) &&
+                Number.isInteger((0, runner_lifecycle_1.configuredOption)(action, 'scroll_x')) &&
+                Number.isInteger((0, runner_lifecycle_1.configuredOption)(action, 'scroll_y')));
+        }
+        case 'drag': {
+            const path = (0, runner_lifecycle_1.configuredOption)(action, 'path');
+            return isDenseArray(path) && path.every(validComputerPoint);
+        }
+        case 'keypress': {
+            return validComputerKeys((0, runner_lifecycle_1.configuredOption)(action, 'keys'));
+        }
+        case 'type': {
+            return typeof (0, runner_lifecycle_1.configuredOption)(action, 'text') === 'string';
+        }
+        case 'screenshot':
+        case 'wait': {
+            return true;
+        }
+        default: {
+            return false;
+        }
+    }
+}
+function computerActions(call) {
+    const singleAction = (0, runner_lifecycle_1.configuredOption)(call, 'action');
+    const batch = (0, runner_lifecycle_1.configuredOption)(call, 'actions');
+    if (!(0, values_1.hasOwn)(call, 'type') ||
+        !(0, values_1.hasOwn)(call, 'status') ||
+        !(0, values_1.hasOwn)(call, 'id') ||
+        !(0, values_1.hasOwn)(call, 'call_id') ||
+        call.type !== 'computer_call' ||
+        call.status !== 'completed' ||
+        typeof call.id !== 'string' ||
+        typeof call.call_id !== 'string' ||
+        singleAction === null ||
+        batch === null ||
+        (singleAction !== undefined) === (batch !== undefined)) {
+        throw new error_1.OpenAIError('ComputerToolset requires a completed call with exactly one of action or actions.');
+    }
+    validateComputerSafetyChecks(call);
+    // SAFETY: The guard above established exactly one of action/actions is present.
+    const actions = batch ?? [singleAction];
+    if (!Array.isArray(actions) || actions.length === 0) {
+        throw new error_1.OpenAIError('ComputerToolset requires at least one computer action.');
+    }
+    if (!isDenseArray(actions)) {
+        throw new error_1.OpenAIError('ComputerToolset received an invalid computer action.');
+    }
+    for (const action of actions) {
+        if (Array.isArray(action) || !validComputerAction(action)) {
+            throw new error_1.OpenAIError('ComputerToolset received an invalid computer action.');
+        }
+    }
+    return actions;
+}
+function snapshotComputerPolicy(options) {
+    return {
+        signal: (0, runner_lifecycle_1.configuredOption)(options, 'signal'),
+        approveSafetyChecks: (0, runner_lifecycle_1.configuredOption)(options, 'approveSafetyChecks')?.bind(options),
+        beforeAction: (0, runner_lifecycle_1.configuredOption)(options, 'beforeAction')?.bind(options),
+        onDiagnostic: (0, runner_lifecycle_1.configuredOption)(options, 'onDiagnostic')?.bind(options),
+    };
+}
+function computerRunTools(params, maxSteps) {
+    if (!Number.isSafeInteger(maxSteps) || maxSteps < 1) {
+        throw new TypeError('ComputerToolset maxSteps must be a positive safe integer.');
+    }
+    const suppliedTools = (0, runner_lifecycle_1.configuredOption)(params, 'tools');
+    const tools = suppliedTools === undefined ? [{ type: 'computer' }] : suppliedTools;
+    const conversation = (0, runner_lifecycle_1.configuredOption)(params, 'conversation');
+    const previousResponse = (0, runner_lifecycle_1.configuredOption)(params, 'previous_response_id');
+    if ((0, runner_lifecycle_1.configuredOption)(params, 'stream') ||
+        (0, runner_lifecycle_1.configuredOption)(params, 'background') ||
+        (conversation !== undefined && conversation !== null) ||
+        (previousResponse !== undefined && previousResponse !== null) ||
+        !Array.isArray(tools) ||
+        tools.length !== 1 ||
+        tools.some((tool) => {
+            const type = tool && (0, runner_lifecycle_1.configuredOption)(tool, 'type');
+            return type !== 'computer' && type !== 'computer_use_preview';
+        })) {
+        throw new TypeError('ComputerToolset.run requires non-streaming, foreground, one computer tool and explicit input history.');
+    }
+    return tools;
+}
+function releaseForcedComputerChoice(choice) {
+    if (choice === 'required' ||
+        (typeof choice === 'object' &&
+            (0, values_1.hasOwn)(choice, 'type') &&
+            ['computer', 'computer_use_preview', 'computer_use'].includes(choice.type))) {
+        return 'auto';
+    }
+    if (typeof choice === 'object' &&
+        (0, values_1.hasOwn)(choice, 'type') &&
+        choice.type === 'allowed_tools' &&
+        (0, values_1.hasOwn)(choice, 'mode') &&
+        choice.mode === 'required') {
+        return { ...choice, mode: 'auto' };
+    }
+    return choice;
+}
+function validateComputerChecklistOwner(call) {
+    // Match configured options' owner boundary without invoking a checklist getter.
+    let owner = call;
+    while (owner !== null && !(0, runner_lifecycle_1.isObjectPrototype)(owner)) {
+        const descriptor = Object.getOwnPropertyDescriptor(owner, 'pending_safety_checks');
+        if (descriptor) {
+            if (owner !== call || !descriptor.enumerable || !('value' in descriptor)) {
+                throw new error_1.OpenAIError('ComputerToolset requires own enumerable data for safety checks.');
+            }
+            break;
+        }
+        // SAFETY: Object.getPrototypeOf returns the object's prototype or null.
+        owner = Object.getPrototypeOf(owner);
+    }
+}
+function snapshotComputerCall(call) {
+    if (Array.isArray(call)) {
+        throw new error_1.OpenAIError('ComputerToolset requires a call object.');
+    }
+    validateComputerChecklistOwner(call);
+    const snapshot = structuredClone(call);
+    for (const action of computerActions(snapshot)) {
+        if (action.type === 'double_click' && (0, runner_lifecycle_1.configuredOption)(action, 'keys') === undefined) {
+            action.keys = null;
+        }
+    }
+    return snapshot;
+}
+function actionApprovalCall(call) {
+    const checks = (0, runner_lifecycle_1.configuredOption)(call, 'pending_safety_checks') ?? [];
+    const actions = (0, runner_lifecycle_1.configuredOption)(call, 'actions');
+    if (!Array.isArray(actions)) {
+        const view = structuredClone({ ...call, pending_safety_checks: checks });
+        (0, runner_lifecycle_1.protectRunnerJSON)(view);
+        return view;
+    }
+    const sources = { actions, pending_safety_checks: checks };
+    const view = structuredClone({
+        ...call,
+        actions: [],
+        pending_safety_checks: [],
+    });
+    // Protect the base before installing accessors so unused batch views stay lazy.
+    (0, runner_lifecycle_1.protectRunnerJSON)(view);
+    for (const key of ['actions', 'pending_safety_checks']) {
+        const source = sources[key];
+        let materialized = false;
+        let value;
+        const save = (replacement) => {
+            value = replacement;
+            materialized = true;
+            if (Object.getOwnPropertyDescriptor(view, key)?.configurable) {
+                Object.defineProperty(view, key, {
+                    value,
+                    writable: true,
+                    enumerable: true,
+                    configurable: true,
+                });
+            }
+            return value;
+        };
+        Object.defineProperty(view, key, {
+            configurable: true,
+            enumerable: true,
+            get() {
+                if (materialized) {
+                    return value;
+                }
+                const captured = structuredClone(source);
+                (0, runner_lifecycle_1.protectRunnerJSON)(captured);
+                return save(captured);
+            },
+            set(replacement) {
+                if (Object.isFrozen(view)) {
+                    throw new TypeError('Cannot assign to frozen computer approval call.');
+                }
+                save(replacement);
+            },
+        });
+    }
+    return view;
+}
+// oxlint-disable-next-line complexity -- Validate every supported native output before any computer effect.
+function computerCalls(response, earlierIdentities, earlierCallIds) {
+    if ((0, runner_lifecycle_1.configuredOption)(response, 'status') !== 'completed') {
+        throw new error_1.OpenAIError('ComputerToolset.run received a response that is not completed.');
+    }
+    // Preflight the entire response before any effects, even when unsupported items follow a valid call.
+    const calls = [];
+    const output = [];
+    const source = (0, runner_lifecycle_1.configuredOption)(response, 'output');
+    if (!Array.isArray(source)) {
+        throw new error_1.OpenAIError('ComputerToolset.run received an invalid output array.');
+    }
+    const { length } = source;
+    if (!Number.isSafeInteger(length) || length < 0) {
+        throw new error_1.OpenAIError('ComputerToolset.run received an invalid output array.');
+    }
+    let hasFinalMessage = false;
+    const identities = new Set();
+    const callIds = new Set();
+    for (let index = 0; index < length; index += 1) {
+        const raw = (0, values_1.hasOwn)(source, index) ? source[index] : undefined;
+        if (!raw) {
+            throw new error_1.OpenAIError('ComputerToolset.run received an absent output item.');
+        }
+        const descriptors = Object.getOwnPropertyDescriptors(raw);
+        for (const [name, descriptor] of Object.entries(descriptors)) {
+            if (descriptor.get) {
+                if (name === 'type') {
+                    descriptors.type = {
+                        value: descriptor.get.call(raw),
+                        enumerable: Boolean(descriptor.enumerable),
+                        configurable: Boolean(descriptor.configurable),
+                    };
+                }
+                else {
+                    descriptor.get = descriptor.get.bind(raw);
+                }
+            }
+        }
+        // SAFETY: This shadow has exactly the provider's own descriptors and prototype, with type captured once.
+        const captured = Object.create(Object.getPrototypeOf(raw), descriptors);
+        const item = (0, values_1.hasOwn)(captured, 'type') && captured.type === 'computer_call'
+            ? snapshotComputerCall(captured)
+            : structuredClone(captured);
+        if (!(0, values_1.hasOwn)(item, 'type') || !(0, values_1.hasOwn)(item, 'id') || typeof item.id !== 'string') {
+            throw new error_1.OpenAIError('ComputerToolset.run requires emitted output type and id fields.');
+        }
+        if (item.type === 'computer_call') {
+            if (callIds.has(item.call_id) || earlierCallIds.has(item.call_id)) {
+                throw new error_1.OpenAIError('ComputerToolset.run received a duplicate computer call identity.');
+            }
+            callIds.add(item.call_id);
+            calls.push(item);
+        }
+        else if (item.type === 'message') {
+            if (!(0, native_response_message_1.isNativeResponseMessage)(item)) {
+                throw new error_1.OpenAIError('ComputerToolset.run requires native assistant content before replay.');
+            }
+            hasFinalMessage || (hasFinalMessage = item.status === 'completed' && (!(0, values_1.hasOwn)(item, 'phase') || item.phase !== 'commentary'));
+        }
+        else if (item.type === 'reasoning') {
+            if (!(0, native_response_message_1.isNativeResponseReasoning)(item)) {
+                throw new error_1.OpenAIError('ComputerToolset.run requires native reasoning content before replay.');
+            }
+        }
+        else if (item.type === 'compaction') {
+            if (!(0, values_1.hasOwn)(item, 'encrypted_content') || typeof item.encrypted_content !== 'string') {
+                throw new error_1.OpenAIError('ComputerToolset.run requires native compaction content before replay.');
+            }
+        }
+        else {
+            throw new error_1.OpenAIError('ComputerToolset.run cannot handle a non-computer output item.');
+        }
+        output.push(item);
+        if (identities.has(item.id) || (item.id !== '' && earlierIdentities.has(item.id))) {
+            throw new error_1.OpenAIError('ComputerToolset.run received a duplicate output item identity.');
+        }
+        identities.add(item.id);
+    }
+    if (calls.length === 0 && !hasFinalMessage) {
+        throw new error_1.OpenAIError('ComputerToolset.run received no completed final message.');
+    }
+    for (const id of identities) {
+        if (id !== '') {
+            earlierIdentities.add(id);
+        }
+    }
+    for (const id of callIds) {
+        earlierCallIds.add(id);
+    }
+    return { calls, output };
+}
+function computerDriverMethod(driver, name) {
+    const method = (0, runner_lifecycle_1.configuredOption)(driver, name);
+    if (typeof method !== 'function') {
+        throw new error_1.OpenAIError('ComputerToolset requires callable computer driver methods.');
+    }
+    return method;
+}
+/**
+ * Dispatches existing computer actions for a caller-owned browser or computer.
+ * run() handles computer-only conversations; execute() supports caller-managed loops.
+ */
+class ComputerToolset {
+    /** The environment remains owned by the caller and is never opened or closed by the helper. */
+    constructor(driver) {
+        this.lifecycle = new runner_lifecycle_1.RunnerLifecycle();
+        const methods = {
+            click: computerDriverMethod(driver, 'click'),
+            double_click: computerDriverMethod(driver, 'double_click'),
+            drag: computerDriverMethod(driver, 'drag'),
+            keypress: computerDriverMethod(driver, 'keypress'),
+            move: computerDriverMethod(driver, 'move'),
+            screenshot: computerDriverMethod(driver, 'screenshot'),
+            scroll: computerDriverMethod(driver, 'scroll'),
+            type: computerDriverMethod(driver, 'type'),
+            wait: computerDriverMethod(driver, 'wait'),
+        };
+        this.driver = {
+            click: methods.click.bind(driver),
+            double_click: methods.double_click.bind(driver),
+            drag: methods.drag.bind(driver),
+            keypress: methods.keypress.bind(driver),
+            move: methods.move.bind(driver),
+            screenshot: methods.screenshot.bind(driver),
+            scroll: methods.scroll.bind(driver),
+            type: methods.type.bind(driver),
+            wait: methods.wait.bind(driver),
+        };
+    }
+    /** Stop new work. If draining, await the current operation before closing your driver. */
+    close() {
+        return this.lifecycle.close();
+    }
+    /** Snapshot and check a complete call before a runner dispatches any effects from its response.
+     * @internal
+     */
+    static validate(call) {
+        return snapshotComputerCall(call);
+    }
+    /**
+     * Run until a completed response contains no computer calls.
+     * Defaults to the computer tool when tools is omitted. Other tools, streams,
+     * background work, conversation, and previous_response_id are rejected.
+     * Replays history (including encrypted reasoning for store:false).
+     *
+     * @throws {OpenAIError} If a response is incomplete, unsupported, declined, or exceeds maxSteps.
+     */
+    async run(client, params, options = {}) {
+        this.lifecycle.enter();
+        try {
+            return await this.runOwned(client, params, options);
+        }
+        finally {
+            this.lifecycle.leave();
+        }
+    }
+    // oxlint-disable-next-line complexity -- Ordered requests share cancellation and continuation policy.
+    async runOwned(client, params, options) {
+        const suppliedMaxSteps = (0, runner_lifecycle_1.configuredOption)(options, 'maxSteps');
+        const maxSteps = suppliedMaxSteps === undefined ? 20 : suppliedMaxSteps;
+        // Match the ordinary SDK JSON encoder once, then validate and reuse the resulting body.
+        const encoded = JSON.stringify(params);
+        const decoded = JSON.parse(encoded);
+        if (!(0, values_1.isObj)(decoded)) {
+            throw new TypeError('ComputerToolset request must be an object.');
+        }
+        // SAFETY: computerRunTools validates the serialized modes/tools before the request can reach the API.
+        const request = decoded;
+        const tools = computerRunTools(request, maxSteps);
+        const suppliedInput = (0, runner_lifecycle_1.configuredOption)(request, 'input');
+        const input = typeof suppliedInput === 'string'
+            ? [{ role: 'user', content: suppliedInput }]
+            : [...(suppliedInput === undefined ? [] : suppliedInput)];
+        const include = [...((0, runner_lifecycle_1.configuredOption)(request, 'include') ?? [])];
+        if (!include.includes('reasoning.encrypted_content')) {
+            include.push('reasoning.encrypted_content');
+        }
+        const body = { ...request, tools, include, input };
+        (0, runner_lifecycle_1.protectRunnerJSON)(body);
+        const policy = snapshotComputerPolicy(options);
+        let supplied = (0, runner_lifecycle_1.configuredOption)(options, 'requestOptions');
+        const ownSignal = supplied && Object.getOwnPropertyDescriptor(supplied, 'signal');
+        const signal = policy.signal ?? (supplied && (0, runner_lifecycle_1.configuredOption)(supplied, 'signal')) ?? undefined;
+        if (policy.signal || (ownSignal && !('value' in ownSignal)) || (signal && !ownSignal?.enumerable)) {
+            // Capture accessors once and expose hidden signals to the native request spread.
+            supplied = (0, runner_lifecycle_1.overlayRequestOptions)(supplied, { signal });
+        }
+        const executionOptions = { ...policy, signal };
+        const earlierIdentities = new Set();
+        const earlierCallIds = new Set();
+        for (const item of input) {
+            if (!(0, values_1.isObj)(item)) {
+                continue;
+            }
+            const id = (0, values_1.hasOwn)(item, 'id') ? item['id'] : undefined;
+            const callId = (0, values_1.hasOwn)(item, 'call_id') ? item['call_id'] : undefined;
+            if (typeof id === 'string' && id !== '') {
+                earlierIdentities.add(id);
+            }
+            if (typeof callId === 'string') {
+                earlierCallIds.add(callId);
+            }
+        }
+        for (let step = 0;; step += 1) {
+            signal?.throwIfAborted();
+            const nextOptions = step === 0 ? supplied : (0, runner_lifecycle_1.continuationRequestOptions)(client, supplied, signal);
+            if (nextOptions && Object.getOwnPropertyDescriptor(nextOptions, 'body')?.enumerable) {
+                throw new TypeError('ComputerToolset.run requestOptions.body is not supported.');
+            }
+            let response;
+            try {
+                // Each response depends on observations from the preceding one.
+                // oxlint-disable-next-line no-await-in-loop
+                response = await client.responses.create(body, nextOptions);
+            }
+            catch (error) {
+                signal?.throwIfAborted();
+                throw error;
+            }
+            signal?.throwIfAborted();
+            const { calls, output } = computerCalls(response, earlierIdentities, earlierCallIds);
+            if (calls.length === 0) {
+                return response;
+            }
+            if (step >= maxSteps - 1) {
+                throw new error_1.OpenAIError('ComputerToolset.run reached maxSteps before executing another computer call.');
+            }
+            // Capture the native replay as it will be sent, before an action can change the environment.
+            const projected = (0, ResponseInputItems_1.toResponseInputItems)(output);
+            (0, runner_lifecycle_1.protectRunnerJSON)(projected);
+            // SAFETY: computerCalls validated every supported item; toResponseInputItems strips output-only fields.
+            // oxlint-disable-next-line unicorn/prefer-structured-clone -- Replay must satisfy the native JSON encoder, not just be cloneable.
+            const replay = JSON.parse(JSON.stringify(projected));
+            (0, runner_lifecycle_1.protectRunnerJSON)(replay);
+            for (const item of replay) {
+                body.input.push(item);
+            }
+            for (const call of calls) {
+                // Calls share one environment and must run in server order.
+                // oxlint-disable-next-line no-await-in-loop
+                const observation = await this.executeOwned(call, executionOptions);
+                body.input.push(observation);
+            }
+            const choice = (0, runner_lifecycle_1.configuredOption)(body, 'tool_choice');
+            if (choice !== undefined && choice !== null) {
+                body.tool_choice = releaseForcedComputerChoice(choice);
+                if (typeof body.tool_choice === 'object') {
+                    (0, runner_lifecycle_1.protectRunnerJSON)(body.tool_choice);
+                }
+            }
+        }
+    }
+    /**
+     * Execute one completed call for a caller-managed Responses loop.
+     * Returns exactly one observation captured after all actions in the call.
+     * Screenshot actions still pass through beforeAction; intermediate captures
+     * are omitted because Responses accepts only the final observation.
+     * Approval, policy rejection, abort, and driver failures stop immediately.
+     */
+    async execute(call, options = {}) {
+        this.lifecycle.enter();
+        try {
+            return await this.executeOwned(call, snapshotComputerPolicy(options));
+        }
+        finally {
+            this.lifecycle.leave();
+        }
+    }
+    // oxlint-disable-next-line eslint/complexity -- Keep the execution snapshot shared by safety approval, action approval and dispatch.
+    async executeOwned(call, policy) {
+        const snapshot = ComputerToolset.validate(call);
+        // Use the same native projection as run(), before any callback or effect.
+        // SAFETY: Validation permits modern calls to omit only the legacy checklist required by the output type.
+        const projected = (0, ResponseInputItems_1.toResponseInputItems)([snapshot]);
+        (0, runner_lifecycle_1.protectRunnerJSON)(projected);
+        // SAFETY: The validated single computer call retains its native fields after projection.
+        // oxlint-disable-next-line unicorn/prefer-structured-clone -- Direct replay must satisfy the native JSON encoder too.
+        const replay = JSON.parse(JSON.stringify(projected));
+        const actions = computerActions(snapshot);
+        for (const action of actions) {
+            if ((action.type === 'click' ||
+                action.type === 'drag' ||
+                action.type === 'move' ||
+                action.type === 'scroll') &&
+                (0, runner_lifecycle_1.configuredOption)(action, 'keys') === undefined) {
+                // Shadow omitted modifiers only in execution copies; wire snapshots must remain JSON values.
+                Object.defineProperty(action, 'keys', {
+                    value: undefined,
+                    enumerable: true,
+                    writable: true,
+                    configurable: true,
+                });
+            }
+        }
+        // The final capture still requires approval when a driver mutates its action.
+        // The SDK compiles against ES2020, which does not include Array.at.
+        // oxlint-disable-next-line prefer-at
+        const needsScreenshot = actions[actions.length - 1]?.type !== 'screenshot';
+        policy.signal?.throwIfAborted();
+        const checks = (0, runner_lifecycle_1.configuredOption)(snapshot, 'pending_safety_checks') ?? [];
+        const nativeChecks = checks.map((check) => ({
+            id: check.id,
+            code: (0, values_1.hasOwn)(check, 'code') ? check.code : undefined,
+            message: (0, values_1.hasOwn)(check, 'message') ? check.message : undefined,
+        }));
+        // Native fields in the captured replay must still describe the same checks.
+        const captured = replay[0]?.pending_safety_checks ?? [];
+        if (!Array.isArray(captured) ||
+            captured.length !== nativeChecks.length ||
+            !captured.every((value, index) => (0, values_1.isObj)(value) &&
+                (0, values_1.hasOwn)(value, 'id') &&
+                value['id'] === nativeChecks[index]?.id &&
+                ((0, values_1.hasOwn)(value, 'code') ? value['code'] : undefined) === nativeChecks[index]?.code &&
+                ((0, values_1.hasOwn)(value, 'message') ? value['message'] : undefined) === nativeChecks[index]?.message)) {
+            throw new error_1.OpenAIError('ComputerToolset serialization changed the pending safety checks.');
+        }
+        // SAFETY: Every captured native field matches its already validated check; optional extensions are JSON values.
+        const acknowledged = captured;
+        if (checks.length > 0) {
+            // Preserve omissions in replay/acknowledgement; callbacks own absent fields in execution copies.
+            for (const check of checks) {
+                for (const key of ['code', 'message']) {
+                    if (!(0, values_1.hasOwn)(check, key)) {
+                        Object.defineProperty(check, key, {
+                            value: undefined,
+                            enumerable: true,
+                            writable: true,
+                            configurable: true,
+                        });
+                    }
+                }
+            }
+            const started = performance.now();
+            try {
+                const view = structuredClone({ ...snapshot, pending_safety_checks: checks });
+                (0, runner_lifecycle_1.protectRunnerJSON)(view);
+                const approved = await policy.approveSafetyChecks?.(view, { signal: policy.signal });
+                policy.signal?.throwIfAborted();
+                if (approved !== true) {
+                    throw new error_1.OpenAIError('ComputerToolset requires explicit approval of pending safety checks.');
+                }
+                (0, runner_diagnostics_1.reportDiagnostic)(policy.onDiagnostic, { api: 'computer', stage: 'approval', reason: 'completed', call_id: snapshot.call_id }, started);
+            }
+            catch (error) {
+                (0, runner_diagnostics_1.reportDiagnostic)(policy.onDiagnostic, {
+                    api: 'computer',
+                    stage: 'approval',
+                    reason: policy.signal?.aborted ? 'cancelled' : 'policy_failed',
+                    call_id: snapshot.call_id,
+                }, started);
+                policy.signal?.throwIfAborted();
+                throw error;
+            }
+        }
+        for (const action of actions) {
+            // Computer effects are ordered and must never execute concurrently.
+            // oxlint-disable-next-line no-await-in-loop
+            await this.perform(action, snapshot, policy);
+        }
+        if (needsScreenshot) {
+            await this.perform({ type: 'screenshot' }, snapshot, policy);
+        }
+        policy.signal?.throwIfAborted();
+        const output = await this.captureScreenshot(snapshot, policy);
+        const observation = {
+            type: 'computer_call_output',
+            call_id: snapshot.call_id,
+            output,
+            ...(checks.length > 0 ? { acknowledged_safety_checks: acknowledged } : {}),
+        };
+        (0, runner_lifecycle_1.protectRunnerJSON)(observation);
+        return observation;
+    }
+    async captureScreenshot(snapshot, policy) {
+        const started = performance.now();
+        let output;
+        try {
+            const supplied = await this.driver.screenshot({ signal: policy.signal });
+            policy.signal?.throwIfAborted();
+            if (!(0, values_1.isObj)(supplied)) {
+                throw new error_1.OpenAIError('ComputerToolset screenshot must return a computer_screenshot with image_url or file_id.');
+            }
+            const type = (0, runner_lifecycle_1.configuredOption)(supplied, 'type');
+            const image_url = (0, runner_lifecycle_1.configuredOption)(supplied, 'image_url');
+            const file_id = (0, runner_lifecycle_1.configuredOption)(supplied, 'file_id');
+            if (type !== 'computer_screenshot' ||
+                (image_url !== undefined && (typeof image_url !== 'string' || !image_url.trim())) ||
+                (file_id !== undefined && (typeof file_id !== 'string' || !file_id.trim())) ||
+                (image_url === undefined && file_id === undefined)) {
+                throw new error_1.OpenAIError('ComputerToolset screenshot must return a computer_screenshot with image_url or file_id.');
+            }
+            output = {
+                type,
+                ...(image_url === undefined ? {} : { image_url }),
+                ...(file_id === undefined ? {} : { file_id }),
+            };
+            (0, runner_diagnostics_1.reportDiagnostic)(policy.onDiagnostic, {
+                api: 'computer',
+                stage: 'action',
+                reason: 'completed',
+                call_id: snapshot.call_id,
+                member: 'screenshot',
+            }, started);
+        }
+        catch (error) {
+            (0, runner_diagnostics_1.reportDiagnostic)(policy.onDiagnostic, {
+                api: 'computer',
+                stage: 'action',
+                reason: policy.signal?.aborted ? 'cancelled' : 'driver_failed',
+                call_id: snapshot.call_id,
+                member: 'screenshot',
+            }, started);
+            policy.signal?.throwIfAborted();
+            throw error;
+        }
+        policy.signal?.throwIfAborted();
+        return output;
+    }
+    async perform(action, call, options) {
+        options.signal?.throwIfAborted();
+        if (options.beforeAction) {
+            await ComputerToolset.approveAction(action, call, options.beforeAction, options);
+        }
+        options.signal?.throwIfAborted();
+        const started = performance.now();
+        try {
+            const dispatched = structuredClone(action);
+            switch (dispatched.type) {
+                case 'click': {
+                    await this.driver.click(dispatched, { signal: options.signal });
+                    break;
+                }
+                case 'double_click': {
+                    await this.driver.double_click(dispatched, { signal: options.signal });
+                    break;
+                }
+                case 'drag': {
+                    await this.driver.drag(dispatched, { signal: options.signal });
+                    break;
+                }
+                case 'keypress': {
+                    await this.driver.keypress(dispatched, { signal: options.signal });
+                    break;
+                }
+                case 'move': {
+                    await this.driver.move(dispatched, { signal: options.signal });
+                    break;
+                }
+                case 'screenshot': {
+                    break;
+                }
+                case 'scroll': {
+                    await this.driver.scroll(dispatched, { signal: options.signal });
+                    break;
+                }
+                case 'type': {
+                    await this.driver.type(dispatched, { signal: options.signal });
+                    break;
+                }
+                case 'wait': {
+                    await this.driver.wait(dispatched, { signal: options.signal });
+                    break;
+                }
+                default: {
+                    throw new error_1.OpenAIError('ComputerToolset received an unsupported computer action.');
+                }
+            }
+            options.signal?.throwIfAborted();
+            if (action.type !== 'screenshot') {
+                (0, runner_diagnostics_1.reportDiagnostic)(options.onDiagnostic, {
+                    api: 'computer',
+                    stage: 'action',
+                    reason: 'completed',
+                    call_id: call.call_id,
+                    member: action.type,
+                }, started);
+            }
+        }
+        catch (error) {
+            (0, runner_diagnostics_1.reportDiagnostic)(options.onDiagnostic, {
+                api: 'computer',
+                stage: 'action',
+                reason: options.signal?.aborted ? 'cancelled' : 'driver_failed',
+                call_id: call.call_id,
+                member: action.type,
+            }, started);
+            options.signal?.throwIfAborted();
+            throw error;
+        }
+        options.signal?.throwIfAborted();
+    }
+    static async approveAction(action, call, beforeAction, options) {
+        const started = performance.now();
+        try {
+            const view = structuredClone(action);
+            (0, runner_lifecycle_1.protectRunnerJSON)(view);
+            const approved = await beforeAction(view, actionApprovalCall(call), {
+                signal: options.signal,
+            });
+            options.signal?.throwIfAborted();
+            if (approved !== true) {
+                throw new error_1.OpenAIError('ComputerToolset action declined by beforeAction.');
+            }
+            (0, runner_diagnostics_1.reportDiagnostic)(options.onDiagnostic, {
+                api: 'computer',
+                stage: 'approval',
+                reason: 'completed',
+                call_id: call.call_id,
+                member: action.type,
+            }, started);
+        }
+        catch (error) {
+            (0, runner_diagnostics_1.reportDiagnostic)(options.onDiagnostic, {
+                api: 'computer',
+                stage: 'approval',
+                reason: options.signal?.aborted ? 'cancelled' : 'policy_failed',
+                call_id: call.call_id,
+                member: action.type,
+            }, started);
+            options.signal?.throwIfAborted();
+            throw error;
+        }
+    }
+}
+exports.ComputerToolset = ComputerToolset;
+//# sourceMappingURL=computer.js.map
+
+/***/ }),
+
 /***/ 82011:
 /***/ ((module, exports, __nccwpck_require__) => {
 
 "use strict";
 
 exports = module.exports = function (...args) { return Reflect.construct(exports.default, args, new.target || exports.default); }; Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.BedrockOpenAI = exports.AzureOpenAI = exports.SubjectTokenProviderError = exports.OAuthError = exports.InvalidWebhookSignatureError = exports.UnprocessableEntityError = exports.PermissionDeniedError = exports.InternalServerError = exports.AuthenticationError = exports.BadRequestError = exports.RateLimitError = exports.ConflictError = exports.NotFoundError = exports.APIUserAbortError = exports.APIConnectionTimeoutError = exports.APIConnectionError = exports.APIError = exports.OpenAIError = exports.PagePromise = exports.OpenAI = exports.APIPromise = exports.toStreamingFile = exports.toFile = exports["default"] = void 0;
+exports.BedrockOpenAI = exports.AzureOpenAI = exports.SubjectTokenProviderError = exports.OAuthError = exports.InvalidWebhookSignatureError = exports.UnprocessableEntityError = exports.PermissionDeniedError = exports.InternalServerError = exports.AuthenticationError = exports.BadRequestError = exports.RateLimitError = exports.ConflictError = exports.NotFoundError = exports.APIUserAbortError = exports.APIConnectionTimeoutError = exports.APIConnectionError = exports.APIError = exports.OpenAIError = exports.ComputerToolset = exports.PagePromise = exports.OpenAI = exports.APIPromise = exports.toStreamingFile = exports.toFile = exports["default"] = void 0;
 var client_1 = __nccwpck_require__(92436);
 Object.defineProperty(exports, "default", ({ enumerable: true, get: function () { return client_1.OpenAI; } }));
 var uploads_1 = __nccwpck_require__(32001);
@@ -63725,6 +71899,8 @@ var client_2 = __nccwpck_require__(92436);
 Object.defineProperty(exports, "OpenAI", ({ enumerable: true, get: function () { return client_2.OpenAI; } }));
 var pagination_1 = __nccwpck_require__(59847);
 Object.defineProperty(exports, "PagePromise", ({ enumerable: true, get: function () { return pagination_1.PagePromise; } }));
+var computer_1 = __nccwpck_require__(20860);
+Object.defineProperty(exports, "ComputerToolset", ({ enumerable: true, get: function () { return computer_1.ComputerToolset; } }));
 var error_1 = __nccwpck_require__(59889);
 Object.defineProperty(exports, "OpenAIError", ({ enumerable: true, get: function () { return error_1.OpenAIError; } }));
 Object.defineProperty(exports, "APIError", ({ enumerable: true, get: function () { return error_1.APIError; } }));
@@ -66195,6 +74371,192 @@ async function encodedMultipartFormRequestOptions(options, client, encodings, ra
 
 /***/ }),
 
+/***/ 4918:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.isNativeResponseMessage = isNativeResponseMessage;
+exports.isNativeResponseMessageInput = isNativeResponseMessageInput;
+exports.isNativeResponseReasoning = isNativeResponseReasoning;
+// oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-runtime-typeof -- This validates captured provider data at the native replay boundary.
+const values_1 = __nccwpck_require__(23049);
+// Native replay values have already been cloned from provider output.
+// oxlint-disable-next-line anti-slop/no-unknown-returns, anti-slop/no-unsafe-dictionary-type -- The existing variant checks immediately validate this one captured, untrusted field.
+function emitted(value, key) {
+    return (0, values_1.hasOwn)(value, key) ? value[key] : undefined;
+}
+// Inspect every captured slot; sparse arrays serialize holes as null.
+function allEntries(value, accepts) {
+    if (!Array.isArray(value)) {
+        return false;
+    }
+    for (let index = 0; index < value.length; index += 1) {
+        const entry = Object.getOwnPropertyDescriptor(value, index);
+        if (!entry?.enumerable || !('value' in entry) || !accepts(entry.value)) {
+            return false;
+        }
+    }
+    return true;
+}
+function annotation(value) {
+    if (!(0, values_1.isObj)(value)) {
+        return false;
+    }
+    switch (emitted(value, 'type')) {
+        case 'file_citation': {
+            return (typeof emitted(value, 'file_id') === 'string' &&
+                typeof emitted(value, 'filename') === 'string' &&
+                Number.isInteger(emitted(value, 'index')));
+        }
+        case 'url_citation': {
+            return (typeof emitted(value, 'url') === 'string' &&
+                typeof emitted(value, 'title') === 'string' &&
+                Number.isInteger(emitted(value, 'start_index')) &&
+                Number.isInteger(emitted(value, 'end_index')));
+        }
+        case 'container_file_citation': {
+            return (typeof emitted(value, 'container_id') === 'string' &&
+                typeof emitted(value, 'file_id') === 'string' &&
+                typeof emitted(value, 'filename') === 'string' &&
+                Number.isInteger(emitted(value, 'start_index')) &&
+                Number.isInteger(emitted(value, 'end_index')));
+        }
+        case 'file_path': {
+            return typeof emitted(value, 'file_id') === 'string' && Number.isInteger(emitted(value, 'index'));
+        }
+        default: {
+            return false;
+        }
+    }
+}
+function topLogprob(value) {
+    return ((0, values_1.isObj)(value) &&
+        typeof emitted(value, 'token') === 'string' &&
+        typeof emitted(value, 'logprob') === 'number' &&
+        Number.isFinite(emitted(value, 'logprob')) &&
+        allEntries(emitted(value, 'bytes'), Number.isInteger));
+}
+function logprob(value) {
+    return (0, values_1.isObj)(value) && topLogprob(value) && allEntries(emitted(value, 'top_logprobs'), topLogprob);
+}
+function contentPart(value) {
+    if (!(0, values_1.isObj)(value)) {
+        return false;
+    }
+    if (emitted(value, 'type') === 'refusal') {
+        return typeof emitted(value, 'refusal') === 'string';
+    }
+    const logprobs = emitted(value, 'logprobs');
+    return (emitted(value, 'type') === 'output_text' &&
+        typeof emitted(value, 'text') === 'string' &&
+        allEntries(emitted(value, 'annotations'), annotation) &&
+        // Native Python output may serialize an absent optional logprobs list as null.
+        (logprobs === undefined || logprobs === null || allEntries(logprobs, logprob)));
+}
+function inputCacheBreakpoint(value) {
+    return value === undefined || ((0, values_1.isObj)(value) && emitted(value, 'mode') === 'explicit');
+}
+// Validate native replay fields without discarding provider extension fields.
+// Runners impose any stronger completion rule at their own execution boundary.
+function isNativeResponseMessage(value) {
+    if (!(0, values_1.isObj)(value)) {
+        return false;
+    }
+    const status = emitted(value, 'status');
+    const phase = emitted(value, 'phase');
+    return (emitted(value, 'type') === 'message' &&
+        typeof emitted(value, 'id') === 'string' &&
+        emitted(value, 'role') === 'assistant' &&
+        (status === 'completed' || status === 'incomplete' || status === 'in_progress') &&
+        (phase === undefined || phase === null || phase === 'commentary' || phase === 'final_answer') &&
+        allEntries(emitted(value, 'content'), contentPart));
+}
+// Message input also includes earlier assistant output, but assistant easy inputs remain valid.
+function isNativeResponseMessageInput(value) {
+    if (!(0, values_1.isObj)(value)) {
+        return false;
+    }
+    const role = emitted(value, 'role');
+    const content = emitted(value, 'content');
+    if (role !== 'user' && role !== 'assistant' && role !== 'system' && role !== 'developer') {
+        return false;
+    }
+    const phase = emitted(value, 'phase');
+    if ((typeof content === 'string' || role === 'assistant') &&
+        phase !== undefined &&
+        phase !== null &&
+        phase !== 'commentary' &&
+        phase !== 'final_answer') {
+        return false;
+    }
+    if (typeof content === 'string') {
+        return true;
+    }
+    if (Array.isArray(content) &&
+        content.some((part) => (0, values_1.isObj)(part) && (emitted(part, 'type') === 'output_text' || emitted(part, 'type') === 'refusal'))) {
+        return isNativeResponseMessage(value);
+    }
+    return allEntries(content, (part) => {
+        if (!(0, values_1.isObj)(part)) {
+            return false;
+        }
+        switch (emitted(part, 'type')) {
+            case 'input_text': {
+                return (typeof emitted(part, 'text') === 'string' &&
+                    inputCacheBreakpoint(emitted(part, 'prompt_cache_breakpoint')));
+            }
+            case 'input_image': {
+                const detail = emitted(part, 'detail');
+                return ((detail === 'auto' || detail === 'low' || detail === 'high' || detail === 'original') &&
+                    ['image_url', 'file_id'].every((name) => {
+                        const field = emitted(part, name);
+                        return field === undefined || field === null || typeof field === 'string';
+                    }) &&
+                    inputCacheBreakpoint(emitted(part, 'prompt_cache_breakpoint')));
+            }
+            case 'input_file': {
+                const detail = emitted(part, 'detail');
+                const fileId = emitted(part, 'file_id');
+                return ((detail === undefined || detail === 'auto' || detail === 'low' || detail === 'high') &&
+                    (fileId === undefined || fileId === null || typeof fileId === 'string') &&
+                    ['file_data', 'file_url', 'filename'].every((name) => {
+                        const field = emitted(part, name);
+                        return field === undefined || typeof field === 'string';
+                    }) &&
+                    inputCacheBreakpoint(emitted(part, 'prompt_cache_breakpoint')));
+            }
+            default: {
+                return false;
+            }
+        }
+    });
+}
+// Accept only native reasoning fields that can be replayed as Responses input.
+function isNativeResponseReasoning(value) {
+    if (!(0, values_1.isObj)(value)) {
+        return false;
+    }
+    const status = emitted(value, 'status');
+    const content = emitted(value, 'content');
+    const encrypted_content = emitted(value, 'encrypted_content');
+    return (emitted(value, 'type') === 'reasoning' &&
+        typeof emitted(value, 'id') === 'string' &&
+        allEntries(emitted(value, 'summary'), (part) => (0, values_1.isObj)(part) && emitted(part, 'type') === 'summary_text' && typeof emitted(part, 'text') === 'string') &&
+        (content === undefined ||
+            allEntries(content, (part) => (0, values_1.isObj)(part) &&
+                emitted(part, 'type') === 'reasoning_text' &&
+                typeof emitted(part, 'text') === 'string')) &&
+        (encrypted_content === undefined ||
+            encrypted_content === null ||
+            typeof encrypted_content === 'string') &&
+        (status === undefined || status === 'completed' || status === 'incomplete' || status === 'in_progress'));
+}
+//# sourceMappingURL=native-response-message.js.map
+
+/***/ }),
+
 /***/ 91326:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -67577,7 +75939,11 @@ exports.OutputTextIndex = OutputTextIndex;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.responseEventRoutingFields = void 0;
+exports.hasRoutedOutputCallIdentity = hasRoutedOutputCallIdentity;
 exports.cloneValidatedResponse = cloneValidatedResponse;
+exports.validateResponseOutputItemIdentity = validateResponseOutputItemIdentity;
+exports.replaceResponseOutputItem = replaceResponseOutputItem;
 exports.createResponseContext = createResponseContext;
 exports.isResponseOutputEvent = isResponseOutputEvent;
 exports.accumulateWebSocketOutput = accumulateWebSocketOutput;
@@ -67625,7 +75991,7 @@ function getOutputItemIdentityKeys(output, eventType) {
     const identities = [];
     if ((0, utils_1.hasOwn)(output, 'id')) {
         // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Validate untrusted streamed item identifiers and discriminators before mutating the response snapshot.
-        if (typeof output.id !== 'string' || output.id.length === 0) {
+        if (typeof output.id !== 'string' || (output.id.length === 0 && output.type !== 'computer_call')) {
             throw new error_1.OpenAIError(`expected a non-empty output item id for ${eventType}`);
         }
         identities.push(`id:${output.id}`);
@@ -67634,8 +76000,10 @@ function getOutputItemIdentityKeys(output, eventType) {
         throw new error_1.OpenAIError(`expected a non-empty output item id for ${eventType}`);
     }
     if (hasRoutedOutputCallIdentity(output)) {
-        // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Validate untrusted streamed item identifiers and discriminators before mutating the response snapshot.
-        if (!(0, utils_1.hasOwn)(output, 'call_id') || typeof output.call_id !== 'string' || output.call_id.length === 0) {
+        if (!(0, utils_1.hasOwn)(output, 'call_id') ||
+            // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Validate untrusted streamed call identifiers before mutating the response snapshot.
+            typeof output.call_id !== 'string' ||
+            (output.call_id.length === 0 && output.type !== 'function_call')) {
             throw new error_1.OpenAIError(`expected a non-empty output item call_id for ${eventType}`);
         }
         identities.push(`call:${output.type}:${output.call_id}`);
@@ -67739,17 +76107,16 @@ function getExpectedOutputItemType(event) {
     }
     return expectedOutputItemTypes[event.type];
 }
-function validateCompletedOutputItemIdentity(event, snapshot) {
-    const output = getOutput(snapshot, event.output_index);
-    const replacement = event.item;
-    getOutputItemIdentityKeys(output, event.type);
-    getOutputItemIdentityKeys(replacement, event.type);
+function validateResponseOutputItemIdentity(output, replacement, eventType) {
+    getOutputItemIdentityKeys(output, eventType);
+    getOutputItemIdentityKeys(replacement, eventType);
     if (!(0, utils_1.hasOwn)(replacement, 'type') || output.type !== replacement.type) {
         throw new error_1.OpenAIError(`expected output item type '${output.type}', got '${replacement.type}'`);
     }
     const outputID = (0, utils_1.hasOwn)(output, 'id') ? output.id : undefined;
     const replacementID = (0, utils_1.hasOwn)(replacement, 'id') ? replacement.id : undefined;
-    if (outputID !== replacementID) {
+    const addsOptionalID = outputID === undefined && (output.type === 'function_call' || output.type === 'custom_tool_call');
+    if (outputID !== replacementID && !addsOptionalID) {
         throw new error_1.OpenAIError(`expected output item id '${outputID}', got '${replacementID}'`);
     }
     if (hasRoutedOutputCallIdentity(output) &&
@@ -67760,7 +76127,7 @@ function validateCompletedOutputItemIdentity(event, snapshot) {
 }
 function validateOutputItemIdentity(event, snapshot, rejectInvalidShellTargets) {
     if (event.type === 'response.output_item.done') {
-        validateCompletedOutputItemIdentity(event, snapshot);
+        // Item identity is validated at the shared replacement owner before any update.
         return;
     }
     if (rejectInvalidShellTargets &&
@@ -67887,7 +76254,7 @@ const supportedResponseEventTypes = createSupportedResponseEventTypes([
 function assertNever(_value) {
     throw new error_1.OpenAIError('Unhandled response stream event: unknown');
 }
-const responseEventRoutingFields = [
+exports.responseEventRoutingFields = [
     'item_id',
     'output_index',
     'content_index',
@@ -67924,11 +76291,11 @@ function sanitizeResponseEvent(event) {
         (0, utils_1.hasOwn)(expectedOutputItemTypes, type);
     if (itemScoped) {
         try {
-            for (const field of responseEventRoutingFields) {
+            for (const field of exports.responseEventRoutingFields) {
                 const routingDescriptor = Object.getOwnPropertyDescriptor(event, field);
                 stableValues.set(field, routingDescriptor ? event[field] : undefined);
             }
-            if (type === 'response.output_item.done') {
+            if (type === 'response.output_item.added' || type === 'response.output_item.done') {
                 stableValues.set('item', structuredClone(event.item));
             }
             else if (type === 'response.content_part.added' || type === 'response.content_part.done') {
@@ -67947,12 +76314,35 @@ function sanitizeResponseEvent(event) {
         },
     });
 }
+/** Replace one existing native item, preserving its routing identity and aggregate-text index. */
+function replaceResponseOutputItem(context, snapshot, outputIndex, replacement, updateText = true) {
+    const output = getOutput(snapshot, outputIndex);
+    validateResponseOutputItemIdentity(output, replacement, 'response.output_item.done');
+    if (!(0, utils_1.hasOwn)(output, 'id') && (0, utils_1.hasOwn)(replacement, 'id')) {
+        const { identities } = getResponseOutputIdentityIndex(context, snapshot);
+        addOutputItemIdentities(identities, [`id:${replacement.id}`]);
+    }
+    if (!updateText) {
+        snapshot.output[outputIndex] = replacement;
+        return;
+    }
+    const previousText = (0, canonical_output_text_1.getOutputText)(context, output);
+    if (output.type === 'message' || replacement.type === 'message') {
+        (0, canonical_output_text_1.ensureCanonicalOutputText)(context, snapshot);
+    }
+    snapshot.output[outputIndex] = replacement;
+    const nextText = (0, canonical_output_text_1.getOutputText)(context, replacement);
+    if (context.canonicalSnapshot === snapshot) {
+        context.outputTextIndex.update(outputIndex, nextText.length);
+    }
+    (0, canonical_output_text_1.updateOutputText)(context, snapshot, outputIndex, previousText, nextText);
+}
 function accumulateOutputItemEvent(event, snapshot, context) {
     switch (event.type) {
         case 'response.output_item.added': {
             validateArrayAppend(snapshot.output, event.output_index, 'output');
             const identityIndex = getResponseOutputIdentityIndex(context, snapshot);
-            const output = structuredClone(event.item);
+            const output = event.item;
             const identities = getOutputItemIdentityKeys(output, event.type);
             assertOutputItemIdentitiesAvailable(identityIndex.identities, identities);
             if (output.type === 'message') {
@@ -67976,18 +76366,7 @@ function accumulateOutputItemEvent(event, snapshot, context) {
             return true;
         }
         case 'response.output_item.done': {
-            const output = getOutput(snapshot, event.output_index);
-            const previousText = (0, canonical_output_text_1.getOutputText)(context, output);
-            const replacement = event.item;
-            if (output.type === 'message' || replacement.type === 'message') {
-                (0, canonical_output_text_1.ensureCanonicalOutputText)(context, snapshot);
-            }
-            snapshot.output[event.output_index] = replacement;
-            const nextText = (0, canonical_output_text_1.getOutputText)(context, replacement);
-            if (context.canonicalSnapshot === snapshot) {
-                context.outputTextIndex.update(event.output_index, nextText.length);
-            }
-            (0, canonical_output_text_1.updateOutputText)(context, snapshot, event.output_index, previousText, nextText);
+            replaceResponseOutputItem(context, snapshot, event.output_index, event.item);
             return true;
         }
         default: {
@@ -68571,10 +76950,17 @@ function accumulateWebSocketOutput(event, snapshot, context) {
         throw new error_1.OpenAIError('Unsupported WebSocket output event');
     }
 }
-function accumulateResponseWithContext(event, snapshot, context, rejectInvalidShellTargets = false, onSanitizedEvent) {
-    const dispatchEvent = sanitizeResponseEvent(event);
-    if (onSanitizedEvent && dispatchEvent.type !== 'keepalive') {
-        onSanitizedEvent(dispatchEvent);
+function accumulateResponseWithContext(event, snapshot, context, rejectInvalidShellTargets = false, prepareSanitizedEvent) {
+    let dispatchEvent = sanitizeResponseEvent(event);
+    if (prepareSanitizedEvent && dispatchEvent.type !== 'keepalive') {
+        const prepared = prepareSanitizedEvent(dispatchEvent);
+        if (prepared === null) {
+            if (!snapshot) {
+                throw new error_1.OpenAIError('Cannot ignore a response event before response.created.');
+            }
+            return snapshot;
+        }
+        dispatchEvent = prepared;
     }
     if (!snapshot) {
         if (dispatchEvent.type !== 'response.created') {
@@ -68591,6 +76977,307 @@ function accumulateResponseWithContext(event, snapshot, context, rejectInvalidSh
     return assertNever(dispatchEvent);
 }
 //# sourceMappingURL=response-accumulator.js.map
+
+/***/ }),
+
+/***/ 5258:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.diagnosticFailure = diagnosticFailure;
+exports.reportDiagnostic = reportDiagnostic;
+const failureReasons = {
+    run: 'invalid_output',
+    request: 'api_failed',
+    arguments: 'invalid_input',
+    approval: 'policy_failed',
+    action: 'driver_failed',
+    output: 'invalid_output',
+    selection: 'invalid_output',
+    verification: 'invalid_output',
+};
+function diagnosticFailure(stage, signal) {
+    return signal?.aborted ? 'cancelled' : failureReasons[stage];
+}
+async function settleDiagnostic(result) {
+    try {
+        await result;
+    }
+    catch {
+        // Observer failures must not change the execution they describe.
+    }
+}
+function reportDiagnostic(observer, event, started, nativeUsage) {
+    if (!observer) {
+        return;
+    }
+    try {
+        let usage = null;
+        if (nativeUsage) {
+            const { input_tokens, output_tokens, total_tokens } = nativeUsage;
+            if (Number.isSafeInteger(input_tokens) &&
+                input_tokens >= 0 &&
+                Number.isSafeInteger(output_tokens) &&
+                output_tokens >= 0 &&
+                Number.isSafeInteger(total_tokens) &&
+                total_tokens >= 0) {
+                usage = { input_tokens, output_tokens, total_tokens };
+            }
+        }
+        const result = observer({
+            ...event,
+            call_id: event.call_id ?? null,
+            member: event.member ?? null,
+            duration_ms: Math.max(0, performance.now() - started),
+            usage,
+        });
+        // Diagnostics never wait for a sink, and rejected observers cannot change dispatch.
+        void settleDiagnostic(result);
+    }
+    catch {
+        // Even a broken usage field or observer is outside execution policy.
+    }
+}
+//# sourceMappingURL=runner-diagnostics.js.map
+
+/***/ }),
+
+/***/ 61230:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.RunnerLifecycle = void 0;
+exports.overlayRequestOptions = overlayRequestOptions;
+exports.isObjectPrototype = isObjectPrototype;
+exports.configuredOption = configuredOption;
+exports.continuationRequestOptions = continuationRequestOptions;
+exports.protectRunnerJSON = protectRunnerJSON;
+const values_1 = __nccwpck_require__(23049);
+const headers_1 = __nccwpck_require__(4559);
+const uuid_1 = __nccwpck_require__(99688);
+function overlayRequestOptions(original, changes) {
+    if (!original) {
+        return changes;
+    }
+    // Keep untouched caller fields live while dispatch wrappers own their local writes and deletions.
+    // SAFETY: The extensible target keeps the original prototype while traps expose current own fields.
+    const shadow = Object.create(Object.getPrototypeOf(original));
+    const deleted = new Set();
+    return new Proxy(shadow, {
+        ownKeys(target) {
+            if (!Reflect.isExtensible(target)) {
+                return Reflect.ownKeys(target);
+            }
+            const virtual = [...Reflect.ownKeys(original), ...Reflect.ownKeys(changes)].filter((key) => !deleted.has(key));
+            return [...new Set([...virtual, ...Reflect.ownKeys(target)])];
+        },
+        getOwnPropertyDescriptor(target, key) {
+            const local = Object.getOwnPropertyDescriptor(target, key);
+            if (local || deleted.has(key) || !Reflect.isExtensible(target)) {
+                return local;
+            }
+            const descriptor = Object.getOwnPropertyDescriptor((0, values_1.hasOwn)(changes, key) ? changes : original, key);
+            return descriptor ? { ...descriptor, configurable: true } : undefined;
+        },
+        get(target, key, receiver) {
+            if ((0, values_1.hasOwn)(target, key)) {
+                // oxlint-disable-next-line anti-slop/no-reflect-get -- Wrapper-owned getters must see the complete request view.
+                return Reflect.get(target, key, receiver);
+            }
+            if (deleted.has(key) || !Reflect.isExtensible(target)) {
+                // oxlint-disable-next-line anti-slop/no-reflect-get -- A removed own field can still expose an inherited native getter.
+                return Reflect.get(target, key, original);
+            }
+            // oxlint-disable-next-line anti-slop/no-reflect-get -- Keep native getter receivers and defer their reads until native create.
+            return (0, values_1.hasOwn)(changes, key) ? Reflect.get(changes, key, changes) : Reflect.get(original, key, original);
+        },
+        set(target, key, value, receiver) {
+            if ((0, values_1.hasOwn)(target, key)) {
+                return Reflect.set(target, key, value, receiver);
+            }
+            return Reflect.defineProperty(target, key, {
+                value,
+                writable: true,
+                enumerable: true,
+                configurable: true,
+            });
+        },
+        deleteProperty(target, key) {
+            if (!Reflect.deleteProperty(target, key)) {
+                return false;
+            }
+            deleted.add(key);
+            return true;
+        },
+        has(target, key) {
+            return (Reflect.has(target, key) ||
+                (Reflect.isExtensible(target) &&
+                    !deleted.has(key) &&
+                    ((0, values_1.hasOwn)(changes, key) || Reflect.has(original, key))));
+        },
+        preventExtensions(target) {
+            if (!Reflect.isExtensible(target)) {
+                return true;
+            }
+            const keys = new Set([...Reflect.ownKeys(original), ...Reflect.ownKeys(changes)]);
+            for (const key of keys) {
+                if (deleted.has(key) || (0, values_1.hasOwn)(target, key)) {
+                    continue;
+                }
+                const source = (0, values_1.hasOwn)(changes, key) ? changes : original;
+                const descriptor = Object.getOwnPropertyDescriptor(source, key);
+                if (!descriptor) {
+                    continue;
+                }
+                if ('value' in descriptor) {
+                    Object.defineProperty(target, key, { ...descriptor, configurable: true });
+                }
+                else {
+                    const getter = descriptor.get;
+                    let replaced = false;
+                    let replacement;
+                    const bound = { ...descriptor, configurable: true };
+                    if (getter) {
+                        bound.get = () => (replaced ? replacement : getter.call(source));
+                    }
+                    // Wrapper writes remain local even when the source has an accessor setter.
+                    if (descriptor.set) {
+                        bound.set = (value) => {
+                            replaced = true;
+                            replacement = value;
+                        };
+                    }
+                    Object.defineProperty(target, key, bound);
+                }
+            }
+            return Reflect.preventExtensions(target);
+        },
+    });
+}
+/** One active owner per helper. Closing admission never waits on caller callbacks. */
+class RunnerLifecycle {
+    constructor() {
+        this.state = 'open';
+    }
+    enter() {
+        if (this.state !== 'open') {
+            throw new TypeError(this.state === 'busy' ? 'Helper is busy.' : 'Helper is closed.');
+        }
+        this.state = 'busy';
+    }
+    leave() {
+        this.state = this.state === 'draining' ? 'closed' : 'open';
+    }
+    close() {
+        this.state = this.state === 'busy' || this.state === 'draining' ? 'draining' : 'closed';
+        return { status: this.state };
+    }
+}
+exports.RunnerLifecycle = RunnerLifecycle;
+/** Recognize local Object.prototype and foreign bases with intact native constructor metadata. */
+// oxlint-disable-next-line anti-slop/no-object-parameters -- This boundary inspects arbitrary prototype owners before reading configured fields.
+function isObjectPrototype(value) {
+    if (value === Object.prototype) {
+        return true;
+    }
+    if (Object.getPrototypeOf(value) !== null) {
+        return false;
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, 'constructor');
+    if (!descriptor || !(0, values_1.hasOwn)(descriptor, 'value')) {
+        return false;
+    }
+    const constructor = descriptor.value;
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- A prototype descriptor is untrusted until its constructor is callable and matches the native Object contract.
+    if (typeof constructor !== 'function') {
+        return false;
+    }
+    const prototype = Object.getOwnPropertyDescriptor(constructor, 'prototype');
+    return (prototype !== undefined &&
+        (0, values_1.hasOwn)(prototype, 'value') &&
+        prototype.value === value &&
+        Function.prototype.toString.call(constructor) === Function.prototype.toString.call(Object));
+}
+/** Read configured fields before recognized native base prototypes; reuse captured own getters. */
+function configuredOption(options, key, copied) {
+    let owner = options;
+    while (owner !== null && !isObjectPrototype(owner)) {
+        const descriptor = Object.getOwnPropertyDescriptor(owner, key);
+        if (descriptor) {
+            return owner === options && descriptor.enumerable && copied ? copied[key] : options[key];
+        }
+        // SAFETY: Object.getPrototypeOf returns the object's prototype or null.
+        owner = Object.getPrototypeOf(owner);
+    }
+    return undefined;
+}
+function continuationRequestOptions(client, options, signal) {
+    const headers = (0, headers_1.buildHeaders)([
+        options && Object.getOwnPropertyDescriptor(options, 'headers')?.enumerable ? options.headers : undefined,
+    ]);
+    const effectiveHeaders = (0, headers_1.buildHeaders)([client['_options'].defaultHeaders, headers]);
+    const idempotencyKey = options && Object.getOwnPropertyDescriptor(options, 'idempotencyKey')?.enumerable
+        ? options.idempotencyKey
+        : undefined;
+    if (!idempotencyKey && !effectiveHeaders.values.has('idempotency-key')) {
+        if (options === undefined && signal === undefined) {
+            return;
+        }
+        const captured = { signal };
+        // Preserve the fields that native create would omit when spreading the caller's options.
+        for (const [key, value] of [
+            ['headers', headers],
+            ['idempotencyKey', idempotencyKey],
+        ]) {
+            Object.defineProperty(captured, key, {
+                value,
+                writable: true,
+                configurable: true,
+                enumerable: options ? Boolean(Object.getOwnPropertyDescriptor(options, key)?.enumerable) : false,
+            });
+        }
+        return overlayRequestOptions(options, captured);
+    }
+    const key = `stainless-node-retry-${(0, uuid_1.uuid4)()}`;
+    return overlayRequestOptions(options, {
+        signal,
+        idempotencyKey: key,
+        headers: (0, headers_1.buildHeaders)([
+            headers,
+            ...(effectiveHeaders.values.has('idempotency-key') ? [{ 'idempotency-key': key }] : []),
+        ]),
+    });
+}
+// Walk only captured or parsed helper-owned replay and projected continuation data.
+// oxlint-disable-next-line anti-slop/no-object-parameters -- Native JSON here contains heterogeneous helper-owned records and arrays.
+function protectRunnerJSON(value) {
+    const pending = [value];
+    const seen = new WeakSet();
+    for (const record of pending) {
+        const prototype = Object.getPrototypeOf(record);
+        if (seen.has(record) ||
+            (!Array.isArray(record) && prototype !== Object.prototype && prototype !== null)) {
+            continue;
+        }
+        // Keep built-in JSON conversion (for example Date) and let the native encoder reject any cycle.
+        seen.add(record);
+        if (!(0, values_1.hasOwn)(record, 'toJSON')) {
+            Object.defineProperty(record, 'toJSON', { value: undefined, writable: true, configurable: true });
+        }
+        const entries = Object.values(record);
+        for (const entry of entries) {
+            // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Traverse only object-valued native JSON fields; the encoder validates the remaining values.
+            if (entry !== null && typeof entry === 'object') {
+                pending.push(entry);
+            }
+        }
+    }
+}
+//# sourceMappingURL=runner-lifecycle.js.map
 
 /***/ }),
 
@@ -68997,7 +77684,9 @@ function makeFile(fileBits, fileName, options) {
  * Directory components separated by either `/` or `\\` are discarded unless an
  * explicitly supplied `name` or `filename` opts into preserving its path. Preserved
  * paths must be safe and relative, and use forward slashes. Paths inferred from URLs and filesystem streams
- * discard their directories.
+ * discard their directories. URL filenames decode valid UTF-8 percent escapes,
+ * except that ASCII control characters stay escaped for multipart compatibility.
+ * A basename stays encoded if decoding would introduce literal multipart escape sequences.
  */
 function getName(value, options) {
     if (typeof value !== 'object' || value === null) {
@@ -69011,7 +77700,8 @@ function getName(value, options) {
     const url = 'url' in value && value.url && String(value.url);
     if (url) {
         try {
-            return basename(new URL(url).pathname);
+            const filename = basename(new URL(url).pathname);
+            return filename === undefined ? undefined : basename(decodeURLFilename(filename));
         }
         catch {
             return basename(url);
@@ -69022,6 +77712,21 @@ function getName(value, options) {
 }
 function basename(value) {
     return value.split(/[\\/]/).pop() || undefined;
+}
+function decodeURLFilename(filename) {
+    try {
+        const decodedFilename = decodeURIComponent(filename);
+        // Fetch multipart receivers interpret these spellings as CR, LF, or a quote.
+        if (/%(?:0[AD]|22)/i.test(decodedFilename)) {
+            return filename;
+        }
+        // oxlint-disable-next-line no-control-regex -- Multipart parsers reject unescaped ASCII controls in filenames.
+        return decodedFilename.replace(/[\u0000-\u001F\u007F]/gu, encodeURIComponent);
+    }
+    catch {
+        // A malformed escape leaves the original URL segment usable as a filename.
+        return filename;
+    }
 }
 function normalizeFilenamePath(value) {
     const normalized = value.replace(/\\/g, '/');
@@ -69744,6 +78449,10 @@ const sensitiveQueryNames = new Set([
     'password',
     'clientsecret',
     'signingsecret',
+    'sig',
+    'signature',
+    'xgoogsignature',
+    'xgoogcredential',
     'xamzsecuritytoken',
     'xamzsignature',
     'xamzcredential',
@@ -70567,6 +79276,7 @@ exports.AbstractChatCompletionRunner = void 0;
 const tslib_1 = __nccwpck_require__(97533);
 const error_1 = __nccwpck_require__(22209);
 const uuid_1 = __nccwpck_require__(99688);
+const values_1 = __nccwpck_require__(23049);
 const parser_1 = __nccwpck_require__(59252);
 const chatCompletionUtils_1 = __nccwpck_require__(76674);
 const EventStream_1 = __nccwpck_require__(76615);
@@ -71011,6 +79721,28 @@ _a = AbstractChatCompletionRunner, _AbstractChatCompletionRunner_completionArriv
             total.completion_tokens += usage.completion_tokens;
             total.prompt_tokens += usage.prompt_tokens;
             total.total_tokens += usage.total_tokens;
+            for (const key of ['completion_tokens_details', 'prompt_tokens_details']) {
+                const details = usage[key];
+                if ((0, values_1.isObj)(details)) {
+                    // SAFETY: Both token detail types contain only optional numeric counts.
+                    const totalDetails = (total[key] ?? (total[key] = {}));
+                    for (const name in details) {
+                        if (!(0, values_1.hasOwn)(details, name)) {
+                            continue;
+                        }
+                        const count = details[name];
+                        // oxlint-disable-next-line anti-slop/no-runtime-typeof -- API-compatible endpoints can return nonnumeric detail values despite the declared response type.
+                        if (typeof count === 'number') {
+                            Object.defineProperty(totalDetails, name, {
+                                value: ((0, values_1.hasOwn)(totalDetails, name) ? (totalDetails[name] ?? 0) : 0) + count,
+                                enumerable: true,
+                                configurable: true,
+                                writable: true,
+                            });
+                        }
+                    }
+                }
+            }
         }
     }
     return total;
@@ -71822,6 +80554,7 @@ const uuid_1 = __nccwpck_require__(99688);
 const values_1 = __nccwpck_require__(23049);
 const parser_2 = __nccwpck_require__(59252);
 const streaming_1 = __nccwpck_require__(39567);
+const streaming_2 = __nccwpck_require__(70960);
 const AbstractChatCompletionRunner_1 = __nccwpck_require__(70407);
 // oxlint-disable-next-line anti-slop/no-unknown-returns -- Partial JSON may have any shape; callers validate or parse it against their response schema.
 function parseStructuredStreamingJSON(content) {
@@ -72731,7 +81464,7 @@ class ChatCompletionStream extends AbstractChatCompletionRunner_1.AbstractChatCo
                 this._addMessage(message.message);
                 continue;
             }
-            const chunk = item;
+            const chunk = (0, streaming_2.normalizeChatCompletionChunk)(item);
             if (chatId && chunk.id && chatId !== chunk.id) {
                 // A new request has been made.
                 this._addChatCompletion(tslib_1.__classPrivateFieldGet(this, _ChatCompletionStream_instances, "m", _ChatCompletionStream_endRequest).call(this));
@@ -73113,7 +81846,13 @@ class ChatCompletionStream extends AbstractChatCompletionRunner_1.AbstractChatCo
             }
             let choice = snapshot.choices[index];
             if (!choice) {
-                const newChoice = { finish_reason, index, message: {}, logprobs: null, ...other };
+                const newChoice = {
+                    finish_reason: finish_reason ?? null,
+                    index,
+                    message: {},
+                    logprobs: null,
+                    ...other,
+                };
                 snapshot.choices[index] = newChoice;
                 choice = newChoice;
             }
@@ -75346,7 +84085,7 @@ function maybeParseResponse(response, params) {
  * Parses completed response text and strict function-tool arguments, matching
  * namespaced functions by both namespace and name.
  *
- * Incomplete or nonterminal responses keep their parsed values as `null`, and
+ * Incomplete responses and messages with an explicit non-final phase stay unparsed.
  * `output_parsed` returns the first successfully parsed output-text item.
  */
 function parseResponse(response, params) {
@@ -75360,7 +84099,9 @@ function parseResponse(response, params) {
                 if (content.type === 'output_text') {
                     return {
                         ...content,
-                        parsed: shouldParse ? parseTextFormat(params, content.text) : null,
+                        parsed: shouldParse && (item.phase == null || item.phase === 'final_answer')
+                            ? parseTextFormat(params, content.text)
+                            : null,
                     };
                 }
                 return content;
@@ -75443,6 +84184,11 @@ function getInputToolByName(input_tools, name, namespace) {
         else if (tool.type === 'namespace' && tool.name === namespace) {
             return tool.tools.find((nested) => nested.type === 'function' && nested.name === name);
         }
+    }
+    // Hosted discovery exposes a deferred top-level function under its own name.
+    // A declared namespace above owns that identity, even if it has no matching function.
+    if (namespace === name) {
+        return input_tools.find((tool) => tool.type === 'function' && tool.name === name && tool.defer_loading === true);
     }
     return undefined;
 }
@@ -75576,43 +84322,17 @@ exports.allSettledWithThrow = allSettledWithThrow;
 
 "use strict";
 
-var _AgentSessionStream_instances, _AgentSessionStream_consumed, _AgentSessionStream_format, _AgentSessionStream_parsedResult, _AgentSessionStream_collection, _AgentSessionStream_stream, _AgentSessionStream_response, _AgentSessionStream_reading, _AgentSessionStream_sessions, _AgentSessionStream_sessionID, _AgentSessionStream_input, _AgentSessionStream_handlers, _AgentSessionStream_inputKey, _AgentSessionStream_options, _AgentSessionStream_iterate, _AgentSessionStream_result, _AgentSessionStream_checkAbort, _AgentSessionStream_abortError, _AgentSessionStream_wait, _AgentSessionStream_submit;
+var _AgentSessionStream_instances, _AgentSessionStream_consumed, _AgentSessionStream_format, _AgentSessionStream_parsedResult, _AgentSessionStream_collection, _AgentSessionStream_stream, _AgentSessionStream_response, _AgentSessionStream_reading, _AgentSessionStream_sessions, _AgentSessionStream_sessionID, _AgentSessionStream_input, _AgentSessionStream_dispatcher, _AgentSessionStream_inputKey, _AgentSessionStream_options, _AgentSessionStream_iterate, _AgentSessionStream_checkAbort, _AgentSessionStream_abortError;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.AgentSessionStream = void 0;
 const tslib_1 = __nccwpck_require__(97533);
 const turn_state_1 = __nccwpck_require__(23575);
+const tool_dispatcher_1 = __nccwpck_require__(39769);
 const parse_result_1 = __nccwpck_require__(26110);
 const result_collection_1 = __nccwpck_require__(86057);
 const error_1 = __nccwpck_require__(59889);
 const headers_1 = __nccwpck_require__(4559);
 const uuid_1 = __nccwpck_require__(99688);
-const values_1 = __nccwpck_require__(23049);
-const tool_output_1 = __nccwpck_require__(41917);
-function normalizedOutput(value) {
-    if (value === null) {
-        return null;
-    }
-    if (typeof value === 'string' || (Array.isArray(value) && value.every(tool_output_1.isInputContent))) {
-        return value;
-    }
-    throw new error_1.OpenAIError('Tool output must be text, content, a JSON object, or null');
-}
-// oxlint-disable-next-line anti-slop/no-object-parameters -- The public AgentToolOutput contract accepts arbitrary JSON-serializable object results.
-function toolResult(call, value) {
-    const output = (0, values_1.isObj)(value) ? JSON.stringify(value) : value;
-    // Detect unserializable callback results inside the redacted failure boundary.
-    const serialized = JSON.stringify(output);
-    if (serialized === undefined) {
-        throw new error_1.OpenAIError('Tool output must be JSON serializable');
-    }
-    return {
-        type: 'agent.session.input.tool_result',
-        turn_id: call.turn_id,
-        call_id: call.call_id,
-        success: true,
-        output: normalizedOutput(typeof output === 'string' ? output : JSON.parse(serialized)),
-    };
-}
 async function cancelBody(response) {
     try {
         await response?.body?.cancel();
@@ -75650,7 +84370,7 @@ class AgentSessionStream {
         _AgentSessionStream_sessions.set(this, void 0);
         _AgentSessionStream_sessionID.set(this, void 0);
         _AgentSessionStream_input.set(this, void 0);
-        _AgentSessionStream_handlers.set(this, void 0);
+        _AgentSessionStream_dispatcher.set(this, void 0);
         _AgentSessionStream_inputKey.set(this, void 0);
         _AgentSessionStream_options.set(this, void 0);
         const input = typeof params.input === 'string'
@@ -75666,7 +84386,6 @@ class AgentSessionStream {
         tslib_1.__classPrivateFieldSet(this, _AgentSessionStream_sessions, sessions, "f");
         tslib_1.__classPrivateFieldSet(this, _AgentSessionStream_sessionID, sessionID, "f");
         tslib_1.__classPrivateFieldSet(this, _AgentSessionStream_input, { type: 'agent.session.input.message', input }, "f");
-        tslib_1.__classPrivateFieldSet(this, _AgentSessionStream_handlers, new Map(Object.entries(params.toolHandlers ?? {})), "f");
         const headers = (0, headers_1.buildHeaders)([options?.headers]);
         tslib_1.__classPrivateFieldSet(this, _AgentSessionStream_inputKey, headers.nulls.has('idempotency-key')
             ? undefined
@@ -75678,7 +84397,8 @@ class AgentSessionStream {
         headers.nulls.delete('idempotency-key');
         const { idempotencyKey: _key, ...rest } = options ?? {};
         tslib_1.__classPrivateFieldSet(this, _AgentSessionStream_options, { ...rest, headers }, "f");
-        tslib_1.__classPrivateFieldSet(this, _AgentSessionStream_collection, new result_collection_1.ResultCollection(() => tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_instances, "m", _AgentSessionStream_iterate).call(this), (name) => tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_handlers, "f").has(name), sessionID), "f");
+        tslib_1.__classPrivateFieldSet(this, _AgentSessionStream_dispatcher, new tool_dispatcher_1.AgentToolDispatcher(sessions, params.toolHandlers ?? {}, this.controller, tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_options, "f"), params.onToolError), "f");
+        tslib_1.__classPrivateFieldSet(this, _AgentSessionStream_collection, new result_collection_1.ResultCollection(() => tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_instances, "m", _AgentSessionStream_iterate).call(this), (name) => tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_dispatcher, "f").canHandle(name), sessionID), "f");
     }
     /** Closes local requests without cancelling the turn; an optional reason becomes the abort error's cause. */
     abort(reason) {
@@ -75689,7 +84409,7 @@ class AgentSessionStream {
         }
     }
     /** Starts iteration once; use for await to ensure early exits close the connection. */
-    [(_AgentSessionStream_consumed = new WeakMap(), _AgentSessionStream_format = new WeakMap(), _AgentSessionStream_parsedResult = new WeakMap(), _AgentSessionStream_collection = new WeakMap(), _AgentSessionStream_stream = new WeakMap(), _AgentSessionStream_response = new WeakMap(), _AgentSessionStream_reading = new WeakMap(), _AgentSessionStream_sessions = new WeakMap(), _AgentSessionStream_sessionID = new WeakMap(), _AgentSessionStream_input = new WeakMap(), _AgentSessionStream_handlers = new WeakMap(), _AgentSessionStream_inputKey = new WeakMap(), _AgentSessionStream_options = new WeakMap(), _AgentSessionStream_instances = new WeakSet(), Symbol.asyncIterator)]() {
+    [(_AgentSessionStream_consumed = new WeakMap(), _AgentSessionStream_format = new WeakMap(), _AgentSessionStream_parsedResult = new WeakMap(), _AgentSessionStream_collection = new WeakMap(), _AgentSessionStream_stream = new WeakMap(), _AgentSessionStream_response = new WeakMap(), _AgentSessionStream_reading = new WeakMap(), _AgentSessionStream_sessions = new WeakMap(), _AgentSessionStream_sessionID = new WeakMap(), _AgentSessionStream_input = new WeakMap(), _AgentSessionStream_dispatcher = new WeakMap(), _AgentSessionStream_inputKey = new WeakMap(), _AgentSessionStream_options = new WeakMap(), _AgentSessionStream_instances = new WeakSet(), Symbol.asyncIterator)]() {
         if (tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_consumed, "f")) {
             throw new error_1.OpenAIError('An AgentSessionStream can only be consumed once');
         }
@@ -75743,10 +84463,7 @@ _AgentSessionStream_iterate = async function* _AgentSessionStream_iterate() {
                 continue;
             }
             const terminal = state.terminal(event);
-            const pendingCall = state.call(event);
-            const handler = pendingCall && tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_handlers, "f").get(pendingCall.name);
-            // Freeze dispatch identity and arguments before exposing the original event.
-            const call = pendingCall && handler ? structuredClone(pendingCall) : undefined;
+            const dispatch = tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_dispatcher, "f").prepare(state.call(event), tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_sessionID, "f"));
             if (terminal) {
                 tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_stream, "f").controller.abort();
             }
@@ -75755,12 +84472,7 @@ _AgentSessionStream_iterate = async function* _AgentSessionStream_iterate() {
                 return;
             }
             tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_instances, "m", _AgentSessionStream_checkAbort).call(this);
-            if (!call || !handler) {
-                continue;
-            }
-            const result = await tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_instances, "m", _AgentSessionStream_result).call(this, call, handler);
-            tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_instances, "m", _AgentSessionStream_checkAbort).call(this);
-            await tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_instances, "m", _AgentSessionStream_submit).call(this, result, options);
+            await dispatch?.();
         }
         tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_instances, "m", _AgentSessionStream_checkAbort).call(this);
         throw new error_1.OpenAIError('Session event stream ended before the turn reached idle or failed');
@@ -75769,25 +84481,6 @@ _AgentSessionStream_iterate = async function* _AgentSessionStream_iterate() {
         externalSignal?.removeEventListener('abort', abort);
         this.controller.signal.removeEventListener('abort', abort);
         this.abort();
-    }
-}, _AgentSessionStream_result = async function _AgentSessionStream_result(call, handler) {
-    try {
-        const args = typeof call.arguments === 'string' ? JSON.parse(call.arguments) : call.arguments;
-        if (!(0, values_1.isObj)(args)) {
-            throw new error_1.OpenAIError('Function arguments must be a JSON object');
-        }
-        // SAFETY: Arguments were parsed as JSON and checked to be a non-null non-array object before invoking the handler.
-        return toolResult(call, await tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_instances, "m", _AgentSessionStream_wait).call(this, () => handler(args)));
-    }
-    catch {
-        tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_instances, "m", _AgentSessionStream_checkAbort).call(this);
-        return {
-            type: 'agent.session.input.tool_result',
-            turn_id: call.turn_id,
-            call_id: call.call_id,
-            success: false,
-            error: 'Tool handler failed.',
-        };
     }
 }, _AgentSessionStream_checkAbort = function _AgentSessionStream_checkAbort() {
     if (this.controller.signal.aborted) {
@@ -75801,55 +84494,6 @@ _AgentSessionStream_iterate = async function* _AgentSessionStream_iterate() {
         configurable: true,
     });
     return error;
-}, _AgentSessionStream_wait = async function _AgentSessionStream_wait(action) {
-    let onAbort;
-    // oxlint-disable-next-line promise/avoid-new -- Bridge the caller's AbortSignal while a handler or registration delay is pending.
-    const aborted = new Promise((_resolve, reject) => {
-        onAbort = () => reject(tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_instances, "m", _AgentSessionStream_abortError).call(this));
-        this.controller.signal.addEventListener('abort', onAbort, { once: true });
-    });
-    try {
-        tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_instances, "m", _AgentSessionStream_checkAbort).call(this);
-        // Capture synchronous throws before racing cancellation, so both promises
-        // always have rejection handlers even if the callback aborts and throws.
-        const invoke = async () => await action();
-        return await Promise.race([invoke(), aborted]);
-    }
-    finally {
-        if (onAbort) {
-            this.controller.signal.removeEventListener('abort', onAbort);
-        }
-    }
-}, _AgentSessionStream_submit = async function _AgentSessionStream_submit(result, options, key = (0, uuid_1.uuid4)(), attempt = 0) {
-    tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_instances, "m", _AgentSessionStream_checkAbort).call(this);
-    try {
-        await tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_sessions, "f").events.create(tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_sessionID, "f"), { events: [result], 'Idempotency-Key': key }, options);
-    }
-    catch (error) {
-        const delay = [100, 300, 600][attempt];
-        if (delay === undefined ||
-            !(error instanceof error_1.BadRequestError) ||
-            error.code !== 'invalid_request_error' ||
-            !error.error ||
-            !('message' in error.error) ||
-            error.error.message !== `Unknown pending tool call: ${result.call_id}`) {
-            throw error;
-        }
-        let timer;
-        try {
-            await tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_instances, "m", _AgentSessionStream_wait).call(this, () => 
-            // oxlint-disable-next-line promise/avoid-new -- Own the registration timer so cancellation clears it promptly.
-            new Promise((resolve) => {
-                timer = setTimeout(resolve, delay);
-            }));
-        }
-        finally {
-            if (timer !== undefined) {
-                clearTimeout(timer);
-            }
-        }
-        await tslib_1.__classPrivateFieldGet(this, _AgentSessionStream_instances, "m", _AgentSessionStream_submit).call(this, result, options, key, attempt + 1);
-    }
 };
 //# sourceMappingURL=agent-session-stream.js.map
 
@@ -75970,15 +84614,46 @@ function pollAssistantRun(resource, runID, params, options) {
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.withAgentTurnResult = withAgentTurnResult;
+exports.captureCreationTools = captureCreationTools;
+const error_1 = __nccwpck_require__(59889);
+const headers_1 = __nccwpck_require__(4559);
+const turn_state_1 = __nccwpck_require__(23575);
+const tool_dispatcher_1 = __nccwpck_require__(39769);
 const parse_result_1 = __nccwpck_require__(26110);
 const result_collection_1 = __nccwpck_require__(86057);
+async function* dispatchCreationTools(source, dispatcher, signal) {
+    const state = new turn_state_1.TurnState();
+    let sessionID;
+    for await (const event of { [Symbol.asyncIterator]: source }) {
+        if (event.type === 'agent.session.created') {
+            sessionID ?? (sessionID = event.session.id);
+        }
+        const dispatch = state.accept(event) ? dispatcher.prepare(state.call(event), sessionID) : undefined;
+        yield event;
+        if (signal.aborted) {
+            return;
+        }
+        try {
+            await dispatch?.();
+        }
+        catch (error) {
+            if (signal.aborted && error instanceof error_1.APIUserAbortError) {
+                return;
+            }
+            throw error;
+        }
+    }
+}
 /** Add beta result collection without replacing custom stream instances.
  * @internal
  */
-function withAgentTurnResult(stream, format) {
+function withAgentTurnResult(stream, format, tools) {
     let collection;
     stream.__betaTransformIterator((source) => {
-        collection = new result_collection_1.ResultCollection(source, undefined, undefined, stream.controller.signal);
+        // A tool result has its own POST endpoint, independent of creation overrides.
+        const { path: _path, method: _method, stream: _stream, ...options } = tools?.options ?? {};
+        const dispatcher = tools && new tool_dispatcher_1.AgentToolDispatcher(tools.sessions, tools.handlers, stream.controller, options);
+        collection = new result_collection_1.ResultCollection(dispatcher ? () => dispatchCreationTools(source, dispatcher, stream.controller.signal) : source, dispatcher ? (name) => dispatcher.canHandle(name) : undefined, undefined, stream.controller.signal);
         return () => collection.iterate();
     });
     let parsed;
@@ -75990,6 +84665,43 @@ function withAgentTurnResult(stream, format) {
         },
     });
     return result;
+}
+/** Remove local callbacks without changing ordinary creation requests. @internal */
+function captureCreationTools(body, options) {
+    const descriptor = Object.getOwnPropertyDescriptor(body, 'toolHandlers');
+    if (!descriptor) {
+        return { body, options };
+    }
+    const handlers = body.toolHandlers;
+    if (handlers === undefined && 'value' in descriptor) {
+        return { body, options };
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(body);
+    delete descriptors.toolHandlers;
+    const capturedOptions = { ...options };
+    if ('toJSON' in body || capturedOptions.body !== undefined) {
+        throw new error_1.OpenAIError('Creation tool handlers cannot customize request body serialization');
+    }
+    if (handlers === undefined) {
+        // SAFETY: Preserve request fields while removing the accessor so serialization cannot evaluate it again.
+        return {
+            body: Object.create(Object.getPrototypeOf(body), descriptors),
+            options: capturedOptions,
+        };
+    }
+    const { stream } = body;
+    if (stream !== true) {
+        throw new error_1.OpenAIError('toolHandlers requires stream: true');
+    }
+    capturedOptions.headers = (0, headers_1.buildHeaders)([capturedOptions.headers]);
+    descriptors.stream = { value: stream, enumerable: true, configurable: true, writable: true };
+    // SAFETY: Preserve request fields, omitting callbacks and fixing the validated streaming mode.
+    const request = Object.create(Object.getPrototypeOf(body), descriptors);
+    return {
+        body: request,
+        options: capturedOptions,
+        handlers: handlers && Object.fromEntries(Object.entries(handlers)),
+    };
 }
 //# sourceMappingURL=agent-session-create-stream.js.map
 
@@ -76662,6 +85374,198 @@ _ResultCollection_iterator = new WeakMap(), _ResultCollection_ended = new WeakMa
 
 /***/ }),
 
+/***/ 39769:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+var _AgentToolDispatcher_instances, _AgentToolDispatcher_handlers, _AgentToolDispatcher_options, _AgentToolDispatcher_sessions, _AgentToolDispatcher_controller, _AgentToolDispatcher_onToolError, _AgentToolDispatcher_result, _AgentToolDispatcher_checkAbort, _AgentToolDispatcher_abortError, _AgentToolDispatcher_wait, _AgentToolDispatcher_submit;
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.AgentToolDispatcher = void 0;
+const tslib_1 = __nccwpck_require__(97533);
+const error_1 = __nccwpck_require__(59889);
+const headers_1 = __nccwpck_require__(4559);
+const uuid_1 = __nccwpck_require__(99688);
+const values_1 = __nccwpck_require__(23049);
+const tool_output_1 = __nccwpck_require__(41917);
+const tool_stages_1 = __nccwpck_require__(54143);
+function normalizedOutput(value) {
+    if (value === null) {
+        return null;
+    }
+    if (typeof value === 'string' || (Array.isArray(value) && value.every(tool_output_1.isInputContent))) {
+        return value;
+    }
+    throw new error_1.OpenAIError('Tool output must be text, content, a JSON object, or null');
+}
+// oxlint-disable-next-line anti-slop/no-object-parameters -- The public AgentToolOutput contract accepts arbitrary JSON-serializable object results.
+function toolResult(call, value) {
+    const output = (0, values_1.isObj)(value) ? JSON.stringify(value) : value;
+    // Detect unserializable callback results inside the redacted failure boundary.
+    const serialized = JSON.stringify(output);
+    if (serialized === undefined) {
+        throw new error_1.OpenAIError('Tool output must be JSON serializable');
+    }
+    return {
+        type: 'agent.session.input.tool_result',
+        turn_id: call.turn_id,
+        call_id: call.call_id,
+        success: true,
+        output: normalizedOutput(typeof output === 'string' ? output : JSON.parse(serialized)),
+    };
+}
+/** Shared local function dispatch for creation and follow-up streams. @internal */
+class AgentToolDispatcher {
+    constructor(sessions, handlers, controller, options, onToolError) {
+        _AgentToolDispatcher_instances.add(this);
+        _AgentToolDispatcher_handlers.set(this, void 0);
+        _AgentToolDispatcher_options.set(this, void 0);
+        _AgentToolDispatcher_sessions.set(this, void 0);
+        _AgentToolDispatcher_controller.set(this, void 0);
+        _AgentToolDispatcher_onToolError.set(this, void 0);
+        tslib_1.__classPrivateFieldSet(this, _AgentToolDispatcher_sessions, sessions, "f");
+        tslib_1.__classPrivateFieldSet(this, _AgentToolDispatcher_controller, controller, "f");
+        tslib_1.__classPrivateFieldSet(this, _AgentToolDispatcher_onToolError, onToolError, "f");
+        tslib_1.__classPrivateFieldSet(this, _AgentToolDispatcher_handlers, new Map(Object.entries(handlers)), "f");
+        const headers = (0, headers_1.buildHeaders)([options?.headers]);
+        headers.values.delete('idempotency-key');
+        headers.nulls.delete('idempotency-key');
+        const { idempotencyKey: _key, ...rest } = options ?? {};
+        tslib_1.__classPrivateFieldSet(this, _AgentToolDispatcher_options, { ...rest, headers, signal: controller.signal }, "f");
+    }
+    canHandle(name) {
+        return typeof tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_handlers, "f").get(name) === 'function';
+    }
+    /** Capture routing and arguments before the caller can mutate the yielded event. */
+    prepare(call, sessionID) {
+        const handler = call && tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_handlers, "f").get(call.name);
+        if (!call || typeof handler !== 'function') {
+            return;
+        }
+        if (!sessionID) {
+            throw new error_1.OpenAIError('Tool call received before the session creation event');
+        }
+        const snapshot = structuredClone(call);
+        return async () => {
+            tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_instances, "m", _AgentToolDispatcher_checkAbort).call(this);
+            const result = await tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_instances, "m", _AgentToolDispatcher_result).call(this, snapshot, handler, sessionID);
+            tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_instances, "m", _AgentToolDispatcher_checkAbort).call(this);
+            await tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_instances, "m", _AgentToolDispatcher_submit).call(this, sessionID, result);
+        };
+    }
+}
+exports.AgentToolDispatcher = AgentToolDispatcher;
+_AgentToolDispatcher_handlers = new WeakMap(), _AgentToolDispatcher_options = new WeakMap(), _AgentToolDispatcher_sessions = new WeakMap(), _AgentToolDispatcher_controller = new WeakMap(), _AgentToolDispatcher_onToolError = new WeakMap(), _AgentToolDispatcher_instances = new WeakSet(), _AgentToolDispatcher_result = async function _AgentToolDispatcher_result(call, handler, sessionID) {
+    let stage = 'arguments';
+    try {
+        const args = typeof call.arguments === 'string' ? JSON.parse(call.arguments) : call.arguments;
+        if (!(0, values_1.isObj)(args)) {
+            throw new error_1.OpenAIError('Function arguments must be a JSON object');
+        }
+        stage = 'execution';
+        // SAFETY: Arguments were parsed as JSON and checked to be a non-null non-array object before invoking the handler.
+        const arguments_ = args;
+        const output = await tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_instances, "m", _AgentToolDispatcher_wait).call(this, () => tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_onToolError, "f") && handler[tool_stages_1.toolStages]
+            ? handler(arguments_, (value) => {
+                stage = value;
+            })
+            : handler(arguments_));
+        stage = 'output';
+        return toolResult(call, output);
+    }
+    catch (error) {
+        tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_instances, "m", _AgentToolDispatcher_checkAbort).call(this);
+        if (tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_onToolError, "f")) {
+            const failure = Object.freeze({
+                error,
+                stage,
+                tool_name: call.name,
+                session_id: sessionID,
+                turn_id: call.turn_id,
+                call_id: call.call_id,
+            });
+            try {
+                await tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_instances, "m", _AgentToolDispatcher_wait).call(this, () => tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_onToolError, "f")?.call(this, failure));
+            }
+            catch {
+                // Observers must not prevent the original sanitized tool failure from being submitted.
+                tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_instances, "m", _AgentToolDispatcher_checkAbort).call(this);
+            }
+        }
+        return {
+            type: 'agent.session.input.tool_result',
+            turn_id: call.turn_id,
+            call_id: call.call_id,
+            success: false,
+            error: 'Tool handler failed.',
+        };
+    }
+}, _AgentToolDispatcher_checkAbort = function _AgentToolDispatcher_checkAbort() {
+    if (tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_controller, "f").signal.aborted) {
+        throw tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_instances, "m", _AgentToolDispatcher_abortError).call(this);
+    }
+}, _AgentToolDispatcher_abortError = function _AgentToolDispatcher_abortError() {
+    const error = new error_1.APIUserAbortError();
+    Object.defineProperty(error, 'cause', {
+        value: tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_controller, "f").signal.reason,
+        writable: true,
+        configurable: true,
+    });
+    return error;
+}, _AgentToolDispatcher_wait = async function _AgentToolDispatcher_wait(action) {
+    let onAbort;
+    // oxlint-disable-next-line promise/avoid-new -- Bridge the caller's AbortSignal while a handler or registration delay is pending.
+    const aborted = new Promise((_resolve, reject) => {
+        onAbort = () => reject(tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_instances, "m", _AgentToolDispatcher_abortError).call(this));
+        tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_controller, "f").signal.addEventListener('abort', onAbort, { once: true });
+    });
+    try {
+        tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_instances, "m", _AgentToolDispatcher_checkAbort).call(this);
+        // Capture synchronous throws before racing cancellation, so both promises
+        // always have rejection handlers even if the callback aborts and throws.
+        const invoke = async () => await action();
+        return await Promise.race([invoke(), aborted]);
+    }
+    finally {
+        if (onAbort) {
+            tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_controller, "f").signal.removeEventListener('abort', onAbort);
+        }
+    }
+}, _AgentToolDispatcher_submit = async function _AgentToolDispatcher_submit(sessionID, result, key = (0, uuid_1.uuid4)(), attempt = 0) {
+    tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_instances, "m", _AgentToolDispatcher_checkAbort).call(this);
+    try {
+        await tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_sessions, "f").events.create(sessionID, { events: [result], 'Idempotency-Key': key }, tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_options, "f"));
+    }
+    catch (error) {
+        const delay = [100, 300, 600][attempt];
+        if (delay === undefined ||
+            !(error instanceof error_1.BadRequestError) ||
+            error.code !== 'invalid_request_error' ||
+            !error.error ||
+            !('message' in error.error) ||
+            error.error.message !== `Unknown pending tool call: ${result.call_id}`) {
+            throw error;
+        }
+        let timer;
+        try {
+            await tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_instances, "m", _AgentToolDispatcher_wait).call(this, () => 
+            // oxlint-disable-next-line promise/avoid-new -- Own the registration timer so cancellation clears it promptly.
+            new Promise((resolve) => {
+                timer = setTimeout(resolve, delay);
+            }));
+        }
+        finally {
+            if (timer !== undefined) {
+                clearTimeout(timer);
+            }
+        }
+        await tslib_1.__classPrivateFieldGet(this, _AgentToolDispatcher_instances, "m", _AgentToolDispatcher_submit).call(this, sessionID, result, key, attempt + 1);
+    }
+};
+//# sourceMappingURL=tool-dispatcher.js.map
+
+/***/ }),
+
 /***/ 41917:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -76692,6 +85596,53 @@ function isInputContent(value) {
     return (0, values_1.hasOwn)(content, 'type') && (0, values_1.hasOwn)(content, field) && typeof content[field] === 'string';
 }
 //# sourceMappingURL=tool-output.js.map
+
+/***/ }),
+
+/***/ 54143:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.toolStages = void 0;
+/** @internal */
+exports.toolStages = Symbol.for('openai.beta.agents.toolStages');
+//# sourceMappingURL=tool-stages.js.map
+
+/***/ }),
+
+/***/ 70960:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.normalizeChatCompletionChunk = normalizeChatCompletionChunk;
+exports.normalizeChatCompletionStream = normalizeChatCompletionStream;
+function normalizeChatCompletionChunk(chunk) {
+    if (!Array.isArray(chunk?.choices)) {
+        // SAFETY: This is an opaque provider record, with no choices to normalize.
+        // Preserve the existing SSE pass-through; the SDK does not validate these records.
+        return chunk;
+    }
+    return {
+        ...chunk,
+        choices: chunk.choices.map((choice) => ({ ...choice, finish_reason: choice.finish_reason ?? null })),
+    };
+}
+function normalizeChatCompletionStream(stream) {
+    const iterator = stream[Symbol.asyncIterator].bind(stream);
+    stream[Symbol.asyncIterator] = async function* normalizedChunks() {
+        const source = { [Symbol.asyncIterator]: iterator };
+        for await (const chunk of source) {
+            yield normalizeChatCompletionChunk(chunk);
+        }
+    };
+    // SAFETY: The installed iterator normalizes every wire chunk before exposing it.
+    return stream;
+}
+//# sourceMappingURL=streaming.js.map
 
 /***/ }),
 
@@ -77241,20 +86192,202 @@ async function pollWithResponse(retrieve, intermediateStatuses, terminalStatuses
 
 /***/ }),
 
+/***/ 44781:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.toResponseInputItems = toResponseInputItems;
+exports.toResponseInputItem = toResponseInputItem;
+/**
+ * Normalizes a mixed array of stored response history items into clean
+ * `ResponseInputItem`s that can be sent back to `responses.create()`. Known items
+ * that cannot be replayed without changing their meaning are omitted. SDK-only
+ * parsed values are removed without changing the stored items.
+ *
+ * @throws {TypeError} If an item type is not supported by the installed SDK.
+ */
+function toResponseInputItems(items) {
+    const inputItems = [];
+    for (const item of items) {
+        const inputItem = toResponseInputItem(item);
+        if (inputItem) {
+            inputItems.push(inputItem);
+        }
+    }
+    return inputItems;
+}
+/**
+ * Normalizes a stored response history item into a clean `ResponseInputItem`, or
+ * returns `null` when a known item cannot be replayed without changing its
+ * meaning. SDK-only parsed values are removed without changing the stored item.
+ *
+ * @throws {TypeError} If the item type is not supported by the installed SDK.
+ */
+function toResponseInputItem(item) {
+    switch (item.type) {
+        case 'message': {
+            if (item.role !== 'assistant' || !('id' in item) || !Array.isArray(item.content)) {
+                return stripCreatedBy(item);
+            }
+            const content = item.content.map((part) => {
+                if ((part.type === 'output_text' || part.type === 'refusal') && 'parsed' in part) {
+                    const { parsed: _parsed, ...inputPart } = part;
+                    return inputPart;
+                }
+                return part;
+            });
+            if (content.every((part, index) => part === item.content[index])) {
+                return stripCreatedBy(item);
+            }
+            return { ...stripCreatedBy(item), content };
+        }
+        case 'function_call': {
+            const inputItem = stripCreatedBy(item);
+            if (!('parsed_arguments' in inputItem)) {
+                return inputItem;
+            }
+            const { parsed_arguments: _parsedArguments, ...withoutParsedArguments } = inputItem;
+            return withoutParsedArguments;
+        }
+        case 'additional_tools': {
+            if (item.role !== 'developer') {
+                return null;
+            }
+            // SAFETY: The item discriminator selects its matching input type; removing output-only provenance fields preserves the remaining wire input fields.
+            return stripCreatedBy(item);
+        }
+        case 'shell_call_output': {
+            // SAFETY: The item discriminator selects its matching input type; removing output-only provenance fields preserves the remaining wire input fields.
+            const output = item.output.map((chunk) => stripCreatedBy(chunk));
+            // SAFETY: The item discriminator selects its matching input type; removing output-only provenance fields preserves the remaining wire input fields.
+            return {
+                ...stripCreatedBy(item),
+                output,
+            };
+        }
+        case 'computer_call_output': {
+            // SAFETY: Runtime API items may contain the output-only created_by field; this view permits removing it without changing the declared input type.
+            const { created_by: _createdBy, ...withoutCreatedBy } = item;
+            if (withoutCreatedBy.status === 'failed') {
+                return null;
+            }
+            // SAFETY: The item discriminator selects its matching input type; removing output-only provenance fields preserves the remaining wire input fields.
+            return withoutCreatedBy;
+        }
+        case 'custom_tool_call_output': {
+            if ('status' in item && item.status !== 'completed') {
+                return null;
+            }
+            // SAFETY: Runtime API items may contain the output-only created_by field; this view permits removing it without changing the declared input type.
+            const { created_by: _createdBy, status: _status, ...inputItem } = item;
+            // SAFETY: The item discriminator selects its matching input type; removing output-only provenance fields preserves the remaining wire input fields.
+            return inputItem;
+        }
+        case 'apply_patch_call':
+        case 'apply_patch_call_output':
+        case 'code_interpreter_call':
+        case 'compaction':
+        case 'compaction_trigger':
+        case 'computer_call':
+        case 'configuration_update':
+        case 'custom_tool_call':
+        case 'file_search_call':
+        case 'function_call_output':
+        case 'image_generation_call':
+        case 'item_reference':
+        case 'local_shell_call':
+        case 'local_shell_call_output':
+        case 'mcp_approval_request':
+        case 'mcp_approval_response':
+        case 'mcp_call':
+        case 'mcp_list_tools':
+        case 'program':
+        case 'program_output':
+        case 'reasoning':
+        case 'shell_call':
+        case 'tool_search_call':
+        case 'tool_search_output':
+        case 'web_search_call':
+        case null:
+        case undefined: {
+            // SAFETY: The item discriminator selects its matching input type; removing output-only provenance fields preserves the remaining wire input fields.
+            return stripCreatedBy(item);
+        }
+        default: {
+            return assertNever(item);
+        }
+    }
+}
+function stripCreatedBy(item) {
+    if (!('created_by' in item)) {
+        return item;
+    }
+    // SAFETY: Runtime API items may contain the output-only created_by field; this view permits removing it without changing the declared input type.
+    const { created_by: _createdBy, ...rest } = item;
+    // SAFETY: Only the optional output provenance property was removed; every field belonging to the generic input contract remains.
+    return rest;
+}
+function assertNever(value) {
+    // SAFETY: This always-throwing path reports a runtime discriminator outside the current TypeScript union without accepting it as a valid item.
+    const type = value.type;
+    throw new TypeError(`Unsupported response item type: ${String(type)}`);
+}
+//# sourceMappingURL=ResponseInputItems.js.map
+
+/***/ }),
+
 /***/ 94525:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
-var _ResponseStream_instances, _ResponseStream_params, _ResponseStream_currentResponseSnapshot, _ResponseStream_finalResponse, _ResponseStream_accumulatorContext, _ResponseStream_beginRequest, _ResponseStream_addEvent, _ResponseStream_endRequest;
+var _ResponseStream_instances, _ResponseStream_params, _ResponseStream_currentResponseSnapshot, _ResponseStream_finalResponse, _ResponseStream_accumulatorContext, _ResponseStream_outputPositions, _ResponseStream_wireByIdentity, _ResponseStream_interimOrderDirty, _ResponseStream_completedOutput, _ResponseStream_unfinishedOutput, _ResponseStream_beginRequest, _ResponseStream_prepareEvent, _ResponseStream_prepareOutputEvent, _ResponseStream_outputAtWireIndex, _ResponseStream_assertComplete, _ResponseStream_recordOutput, _ResponseStream_reorderInterimOutput, _ResponseStream_updateInterimResponse, _ResponseStream_addEvent, _ResponseStream_endRequest;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.ResponseStream = void 0;
 const tslib_1 = __nccwpck_require__(97533);
 const error_1 = __nccwpck_require__(22209);
 const EventStream_1 = __nccwpck_require__(76615);
 const response_accumulator_1 = __nccwpck_require__(61008);
+const canonical_output_text_1 = __nccwpck_require__(61366);
+const values_1 = __nccwpck_require__(23049);
 const ResponsesParser_1 = __nccwpck_require__(72688);
 const streaming_1 = __nccwpck_require__(39567);
+// Require every generated native event field here. Unknown hidden transport members remain private.
+const nativeEventFields = {
+    annotation: true,
+    annotation_index: true,
+    arguments: true,
+    background: true,
+    code: true,
+    command: true,
+    command_index: true,
+    content_index: true,
+    delta: true,
+    input: true,
+    item: true,
+    item_id: true,
+    logprobs: true,
+    message: true,
+    obfuscation: true,
+    output: true,
+    output_format: true,
+    output_index: true,
+    param: true,
+    part: true,
+    partial_image_b64: true,
+    partial_image_index: true,
+    quality: true,
+    refusal: true,
+    response: true,
+    sequence_number: true,
+    size: true,
+    status: true,
+    summary_index: true,
+    text: true,
+    type: true,
+};
 /** Streams Responses API events while accumulating the latest response and parsed output. */
 class ResponseStream extends EventStream_1.EventStream {
     /** Creates an unstarted stream, retaining request parameters for structured-output parsing. */
@@ -77265,7 +86398,18 @@ class ResponseStream extends EventStream_1.EventStream {
         _ResponseStream_currentResponseSnapshot.set(this, void 0);
         _ResponseStream_finalResponse.set(this, void 0);
         _ResponseStream_accumulatorContext.set(this, (0, response_accumulator_1.createResponseContext)());
+        _ResponseStream_outputPositions.set(this, new Map());
+        _ResponseStream_wireByIdentity.set(this, new Map());
+        _ResponseStream_interimOrderDirty.set(this, false);
+        _ResponseStream_completedOutput.set(this, new Map());
+        _ResponseStream_unfinishedOutput.set(this, new Map());
         tslib_1.__classPrivateFieldSet(this, _ResponseStream_params, params, "f");
+        this.once('end', () => {
+            tslib_1.__classPrivateFieldGet(this, _ResponseStream_outputPositions, "f").clear();
+            tslib_1.__classPrivateFieldGet(this, _ResponseStream_wireByIdentity, "f").clear();
+            tslib_1.__classPrivateFieldGet(this, _ResponseStream_completedOutput, "f").clear();
+            tslib_1.__classPrivateFieldGet(this, _ResponseStream_unfinishedOutput, "f").clear();
+        });
     }
     /** Starts a new response stream or replays an existing response by its identifier. */
     static createResponse(client, params, options) {
@@ -77320,12 +86464,251 @@ class ResponseStream extends EventStream_1.EventStream {
         return tslib_1.__classPrivateFieldGet(this, _ResponseStream_instances, "m", _ResponseStream_endRequest).call(this);
     }
     /** Iterates over response events; stopping iteration early aborts the underlying request. */
-    [(_ResponseStream_params = new WeakMap(), _ResponseStream_currentResponseSnapshot = new WeakMap(), _ResponseStream_finalResponse = new WeakMap(), _ResponseStream_accumulatorContext = new WeakMap(), _ResponseStream_instances = new WeakSet(), _ResponseStream_beginRequest = function _ResponseStream_beginRequest() {
+    [(_ResponseStream_params = new WeakMap(), _ResponseStream_currentResponseSnapshot = new WeakMap(), _ResponseStream_finalResponse = new WeakMap(), _ResponseStream_accumulatorContext = new WeakMap(), _ResponseStream_outputPositions = new WeakMap(), _ResponseStream_wireByIdentity = new WeakMap(), _ResponseStream_interimOrderDirty = new WeakMap(), _ResponseStream_completedOutput = new WeakMap(), _ResponseStream_unfinishedOutput = new WeakMap(), _ResponseStream_instances = new WeakSet(), _ResponseStream_beginRequest = function _ResponseStream_beginRequest() {
         if (this.ended) {
             return;
         }
         tslib_1.__classPrivateFieldSet(this, _ResponseStream_currentResponseSnapshot, undefined, "f");
         tslib_1.__classPrivateFieldSet(this, _ResponseStream_accumulatorContext, (0, response_accumulator_1.createResponseContext)(), "f");
+        tslib_1.__classPrivateFieldGet(this, _ResponseStream_outputPositions, "f").clear();
+        tslib_1.__classPrivateFieldGet(this, _ResponseStream_wireByIdentity, "f").clear();
+        tslib_1.__classPrivateFieldSet(this, _ResponseStream_interimOrderDirty, false, "f");
+        tslib_1.__classPrivateFieldGet(this, _ResponseStream_completedOutput, "f").clear();
+        tslib_1.__classPrivateFieldGet(this, _ResponseStream_unfinishedOutput, "f").clear();
+    }, _ResponseStream_prepareEvent = function _ResponseStream_prepareEvent(event) {
+        if (event.type === 'response.created' ||
+            event.type === 'response.queued' ||
+            event.type === 'response.in_progress' ||
+            event.type === 'response.completed' ||
+            event.type === 'response.failed' ||
+            event.type === 'response.incomplete') {
+            if (!(0, values_1.hasOwn)(event, 'response')) {
+                throw new error_1.OpenAIError('Lifecycle events require their own response field.');
+            }
+            const { response: wireResponse, ...fields } = event;
+            if (!(0, values_1.isObj)(wireResponse)) {
+                throw new error_1.OpenAIError('Lifecycle events require a response object.');
+            }
+            let response = structuredClone(wireResponse);
+            if (tslib_1.__classPrivateFieldGet(this, _ResponseStream_currentResponseSnapshot, "f") && response.id !== tslib_1.__classPrivateFieldGet(this, _ResponseStream_currentResponseSnapshot, "f").id) {
+                throw new error_1.OpenAIError('Lifecycle response identity changed.');
+            }
+            if (!(0, values_1.hasOwn)(response, 'output') || response.output == null) {
+                let output;
+                if (event.type === 'response.completed') {
+                    output = [...tslib_1.__classPrivateFieldGet(this, _ResponseStream_completedOutput, "f")]
+                        // oxlint-disable-next-line unicorn/no-array-sort -- Sort a fresh array; ES2020 declarations do not include toSorted.
+                        .sort(([left], [right]) => left - right)
+                        .map(([, item]) => structuredClone(item));
+                }
+                else if (event.type === 'response.failed' || event.type === 'response.incomplete') {
+                    output = [...tslib_1.__classPrivateFieldGet(this, _ResponseStream_outputPositions, "f").keys()]
+                        // oxlint-disable-next-line unicorn/no-array-sort -- Sort fresh wire indexes; retain partial and completed items.
+                        .sort((left, right) => left - right)
+                        .map((index) => structuredClone(tslib_1.__classPrivateFieldGet(this, _ResponseStream_instances, "m", _ResponseStream_outputAtWireIndex).call(this, index)));
+                }
+                else {
+                    output = [];
+                }
+                response = { ...response, output };
+                if (event.type === 'response.completed' ||
+                    event.type === 'response.failed' ||
+                    event.type === 'response.incomplete') {
+                    (0, ResponsesParser_1.addOutputText)(response);
+                }
+            }
+            if (event.type === 'response.completed') {
+                tslib_1.__classPrivateFieldGet(this, _ResponseStream_instances, "m", _ResponseStream_assertComplete).call(this, response);
+            }
+            return { ...fields, type: event.type, sequence_number: event.sequence_number, response };
+        }
+        return tslib_1.__classPrivateFieldGet(this, _ResponseStream_instances, "m", _ResponseStream_prepareOutputEvent).call(this, event);
+    }, _ResponseStream_prepareOutputEvent = function _ResponseStream_prepareOutputEvent(event) {
+        if (!tslib_1.__classPrivateFieldGet(this, _ResponseStream_currentResponseSnapshot, "f") || !(0, values_1.hasOwn)(event, 'output_index') || !('output_index' in event)) {
+            return event;
+        }
+        const index = event.output_index;
+        if (!Number.isSafeInteger(index) || index < 0) {
+            throw new error_1.OpenAIError('Invalid response output index.');
+        }
+        let position;
+        if (event.type === 'response.output_item.added') {
+            if (event.item == null) {
+                return null;
+            }
+            if (tslib_1.__classPrivateFieldGet(this, _ResponseStream_completedOutput, "f").has(index) || tslib_1.__classPrivateFieldGet(this, _ResponseStream_unfinishedOutput, "f").has(index)) {
+                throw new error_1.OpenAIError(`Duplicate response output index ${index}.`);
+            }
+            position = tslib_1.__classPrivateFieldGet(this, _ResponseStream_currentResponseSnapshot, "f").output.length;
+        }
+        else {
+            const existing = tslib_1.__classPrivateFieldGet(this, _ResponseStream_outputPositions, "f").get(index);
+            if (existing === undefined) {
+                throw new error_1.OpenAIError(`missing output at index ${index}`);
+            }
+            position = existing;
+        }
+        return new Proxy(event, {
+            get(target, property) {
+                // oxlint-disable-next-line anti-slop/no-reflect-get -- Preserve the sanitized event fields and their receiver while translating only the dispatch index.
+                return property === 'output_index' ? position : Reflect.get(target, property, target);
+            },
+        });
+    }, _ResponseStream_outputAtWireIndex = function _ResponseStream_outputAtWireIndex(wireIndex) {
+        const position = tslib_1.__classPrivateFieldGet(this, _ResponseStream_outputPositions, "f").get(wireIndex);
+        return (tslib_1.__classPrivateFieldGet(this, _ResponseStream_completedOutput, "f").get(wireIndex) ??
+            (position === undefined ? undefined : tslib_1.__classPrivateFieldGet(this, _ResponseStream_currentResponseSnapshot, "f")?.output[position]));
+    }, _ResponseStream_assertComplete = function _ResponseStream_assertComplete(response) {
+        if (tslib_1.__classPrivateFieldGet(this, _ResponseStream_unfinishedOutput, "f").size === 0 && tslib_1.__classPrivateFieldGet(this, _ResponseStream_completedOutput, "f").size === 0) {
+            return;
+        }
+        const finalItems = new Map((response.output ?? []).map((item) => [outputIdentity(item), item]));
+        for (const item of tslib_1.__classPrivateFieldGet(this, _ResponseStream_completedOutput, "f").values()) {
+            const replacement = finalItems.get(outputIdentity(item));
+            if (replacement) {
+                (0, response_accumulator_1.validateResponseOutputItemIdentity)(item, replacement, 'response.completed');
+            }
+        }
+        for (const [wireIndex, identity] of tslib_1.__classPrivateFieldGet(this, _ResponseStream_unfinishedOutput, "f")) {
+            const replacement = finalItems.get(identity);
+            if (!replacement) {
+                throw new error_1.OpenAIError('Cannot complete response with unfinished output items.');
+            }
+            const previous = tslib_1.__classPrivateFieldGet(this, _ResponseStream_instances, "m", _ResponseStream_outputAtWireIndex).call(this, wireIndex);
+            if (!previous) {
+                throw new error_1.OpenAIError('Cannot complete response with a missing output identity.');
+            }
+            (0, response_accumulator_1.validateResponseOutputItemIdentity)(previous, replacement, 'response.completed');
+        }
+    }, _ResponseStream_recordOutput = function _ResponseStream_recordOutput(event, response, position) {
+        if (event.type === 'response.completed') {
+            tslib_1.__classPrivateFieldSet(this, _ResponseStream_interimOrderDirty, false, "f");
+            return;
+        }
+        if (response !== tslib_1.__classPrivateFieldGet(this, _ResponseStream_currentResponseSnapshot, "f")) {
+            const previous = new Map();
+            for (const [wireIndex, item] of tslib_1.__classPrivateFieldGet(this, _ResponseStream_completedOutput, "f")) {
+                previous.set(outputIdentity(item), wireIndex);
+            }
+            for (const [wireIndex, identity] of tslib_1.__classPrivateFieldGet(this, _ResponseStream_unfinishedOutput, "f")) {
+                previous.set(identity, wireIndex);
+            }
+            const positions = new Map();
+            tslib_1.__classPrivateFieldGet(this, _ResponseStream_wireByIdentity, "f").clear();
+            for (const [newPosition, item] of response.output.entries()) {
+                const identity = outputIdentity(item);
+                const oldWireIndex = previous.get(identity);
+                const wireIndex = oldWireIndex ?? newPosition;
+                const done = tslib_1.__classPrivateFieldGet(this, _ResponseStream_completedOutput, "f").get(wireIndex);
+                const unfinished = tslib_1.__classPrivateFieldGet(this, _ResponseStream_unfinishedOutput, "f").get(wireIndex);
+                if (positions.has(wireIndex) ||
+                    (done && outputIdentity(done) !== identity) ||
+                    (unfinished !== undefined && unfinished !== identity)) {
+                    throw new error_1.OpenAIError('Response snapshot has conflicting output positions.');
+                }
+                const previousItem = tslib_1.__classPrivateFieldGet(this, _ResponseStream_instances, "m", _ResponseStream_outputAtWireIndex).call(this, wireIndex);
+                if (previousItem) {
+                    (0, response_accumulator_1.validateResponseOutputItemIdentity)(previousItem, item, event.type);
+                }
+                positions.set(wireIndex, newPosition);
+                tslib_1.__classPrivateFieldGet(this, _ResponseStream_wireByIdentity, "f").set(identity, wireIndex);
+                if (done) {
+                    tslib_1.__classPrivateFieldGet(this, _ResponseStream_completedOutput, "f").set(wireIndex, structuredClone(item));
+                }
+                else {
+                    tslib_1.__classPrivateFieldGet(this, _ResponseStream_unfinishedOutput, "f").set(wireIndex, identity);
+                }
+            }
+            tslib_1.__classPrivateFieldSet(this, _ResponseStream_outputPositions, positions, "f");
+            tslib_1.__classPrivateFieldSet(this, _ResponseStream_interimOrderDirty, !['response.failed', 'response.incomplete'].includes(event.type), "f");
+            if (['response.created', 'response.queued', 'response.in_progress'].includes(event.type)) {
+                tslib_1.__classPrivateFieldGet(this, _ResponseStream_instances, "m", _ResponseStream_reorderInterimOutput).call(this, response);
+            }
+            return;
+        }
+        if (position === undefined) {
+            return;
+        }
+        if (event.type === 'response.output_item.added' && event.item != null) {
+            tslib_1.__classPrivateFieldGet(this, _ResponseStream_outputPositions, "f").set(event.output_index, position);
+            const identity = outputIdentity(event.item);
+            tslib_1.__classPrivateFieldGet(this, _ResponseStream_unfinishedOutput, "f").set(event.output_index, identity);
+            tslib_1.__classPrivateFieldGet(this, _ResponseStream_wireByIdentity, "f").set(identity, event.output_index);
+            tslib_1.__classPrivateFieldSet(this, _ResponseStream_interimOrderDirty, true, "f");
+        }
+        else if (event.type === 'response.output_item.done') {
+            const item = response.output[position];
+            if (!item) {
+                throw new error_1.OpenAIError(`missing output at index ${event.output_index}`);
+            }
+            tslib_1.__classPrivateFieldGet(this, _ResponseStream_completedOutput, "f").set(event.output_index, structuredClone(item));
+            tslib_1.__classPrivateFieldGet(this, _ResponseStream_unfinishedOutput, "f").delete(event.output_index);
+        }
+    }, _ResponseStream_reorderInterimOutput = function _ResponseStream_reorderInterimOutput(response) {
+        if (!tslib_1.__classPrivateFieldGet(this, _ResponseStream_interimOrderDirty, "f")) {
+            return;
+        }
+        const ordered = [...tslib_1.__classPrivateFieldGet(this, _ResponseStream_outputPositions, "f")];
+        // oxlint-disable-next-line unicorn/no-array-sort -- Sort the fresh map entries; the source supports ES2020.
+        ordered.sort(([left], [right]) => left - right);
+        if (ordered.some(([, oldPosition], newPosition) => oldPosition !== newPosition)) {
+            const derivedText = tslib_1.__classPrivateFieldGet(this, _ResponseStream_accumulatorContext, "f").canonicalSnapshot === response;
+            response.output = ordered.map(([, oldPosition]) => response.output[oldPosition]);
+            tslib_1.__classPrivateFieldSet(this, _ResponseStream_outputPositions, new Map(ordered.map(([wireIndex], newPosition) => [wireIndex, newPosition])), "f");
+            tslib_1.__classPrivateFieldSet(this, _ResponseStream_accumulatorContext, (0, response_accumulator_1.createResponseContext)(), "f");
+            if (derivedText) {
+                (0, canonical_output_text_1.ensureCanonicalOutputText)(tslib_1.__classPrivateFieldGet(this, _ResponseStream_accumulatorContext, "f"), response);
+            }
+        }
+        tslib_1.__classPrivateFieldSet(this, _ResponseStream_interimOrderDirty, false, "f");
+    }, _ResponseStream_updateInterimResponse = function _ResponseStream_updateInterimResponse(incoming, snapshot) {
+        if (!Array.isArray(incoming.output)) {
+            return false;
+        }
+        const suppliedText = (0, values_1.hasOwn)(incoming, 'output_text') ? incoming.output_text : undefined;
+        if (incoming.output.length !== 0) {
+            // The temporary response validates only the supplied items. Its derived
+            // output_text is not the aggregate for the retained full response.
+            const validated = (0, response_accumulator_1.cloneValidatedResponse)((0, response_accumulator_1.createResponseContext)(), incoming);
+            const replacements = [];
+            for (const item of validated.output) {
+                const wire = tslib_1.__classPrivateFieldGet(this, _ResponseStream_wireByIdentity, "f").get(outputIdentity(item));
+                const position = wire === undefined ? undefined : tslib_1.__classPrivateFieldGet(this, _ResponseStream_outputPositions, "f").get(wire);
+                if (wire === undefined || position === undefined) {
+                    return false;
+                }
+                replacements.push({ wire, position, item });
+            }
+            const updateText = suppliedText == null;
+            if (!updateText) {
+                // Explicit interim text replaces the full aggregate after any required
+                // reorder; deriving text from retained messages here would be discarded.
+                tslib_1.__classPrivateFieldGet(this, _ResponseStream_accumulatorContext, "f").canonicalSnapshot = undefined;
+            }
+            for (const { wire, position, item } of replacements) {
+                (0, response_accumulator_1.replaceResponseOutputItem)(tslib_1.__classPrivateFieldGet(this, _ResponseStream_accumulatorContext, "f"), snapshot, position, item, updateText);
+                if (tslib_1.__classPrivateFieldGet(this, _ResponseStream_completedOutput, "f").has(wire)) {
+                    tslib_1.__classPrivateFieldGet(this, _ResponseStream_completedOutput, "f").set(wire, structuredClone(item));
+                }
+            }
+            tslib_1.__classPrivateFieldGet(this, _ResponseStream_instances, "m", _ResponseStream_reorderInterimOutput).call(this, snapshot);
+        }
+        const { output } = snapshot;
+        let outputText = suppliedText;
+        if (outputText == null) {
+            (0, canonical_output_text_1.ensureCanonicalOutputText)(tslib_1.__classPrivateFieldGet(this, _ResponseStream_accumulatorContext, "f"), snapshot);
+            outputText = snapshot.output_text;
+        }
+        else {
+            tslib_1.__classPrivateFieldGet(this, _ResponseStream_accumulatorContext, "f").canonicalSnapshot = undefined;
+        }
+        for (const key of Object.keys(snapshot)) {
+            if (!(0, values_1.hasOwn)(incoming, key)) {
+                Reflect.deleteProperty(snapshot, key);
+            }
+        }
+        Object.defineProperties(snapshot, Object.getOwnPropertyDescriptors({ ...incoming, output, output_text: outputText }));
+        return true;
     }, _ResponseStream_addEvent = function _ResponseStream_addEvent(event, starting_after) {
         if (this.ended) {
             return;
@@ -77345,54 +86728,90 @@ class ResponseStream extends EventStream_1.EventStream {
             throw new error_1.APIError(undefined, error, event.message, undefined);
         }
         let dispatchEvent = event;
+        let outputPosition;
         const response = (0, response_accumulator_1.accumulateResponseWithContext)(event, tslib_1.__classPrivateFieldGet(this, _ResponseStream_currentResponseSnapshot, "f"), tslib_1.__classPrivateFieldGet(this, _ResponseStream_accumulatorContext, "f"), true, (sanitizedEvent) => {
             dispatchEvent = sanitizedEvent;
+            const prepared = tslib_1.__classPrivateFieldGet(this, _ResponseStream_instances, "m", _ResponseStream_prepareEvent).call(this, sanitizedEvent);
+            if (prepared) {
+                if ((0, values_1.hasOwn)(prepared, 'output_index') && 'output_index' in prepared) {
+                    outputPosition = prepared.output_index;
+                }
+                else if ((0, values_1.hasOwn)(prepared, 'response') && 'response' in prepared) {
+                    dispatchEvent = prepared;
+                    if ((prepared.type === 'response.created' ||
+                        prepared.type === 'response.queued' ||
+                        prepared.type === 'response.in_progress') &&
+                        tslib_1.__classPrivateFieldGet(this, _ResponseStream_currentResponseSnapshot, "f")) {
+                        if (tslib_1.__classPrivateFieldGet(this, _ResponseStream_instances, "m", _ResponseStream_updateInterimResponse).call(this, prepared.response, tslib_1.__classPrivateFieldGet(this, _ResponseStream_currentResponseSnapshot, "f"))) {
+                            return null;
+                        }
+                        const identities = new Set(prepared.response.output.map(outputIdentity));
+                        const retained = tslib_1.__classPrivateFieldGet(this, _ResponseStream_currentResponseSnapshot, "f").output.filter((item) => !identities.has(outputIdentity(item)));
+                        if (retained.length) {
+                            return {
+                                ...prepared,
+                                response: { ...prepared.response, output: [...prepared.response.output, ...retained] },
+                            };
+                        }
+                    }
+                }
+            }
+            return prepared;
         });
+        tslib_1.__classPrivateFieldGet(this, _ResponseStream_instances, "m", _ResponseStream_recordOutput).call(this, dispatchEvent, response, outputPosition);
         tslib_1.__classPrivateFieldSet(this, _ResponseStream_currentResponseSnapshot, response, "f");
-        maybeEmit('event', event);
-        switch (dispatchEvent.type) {
+        if (dispatchEvent.type === 'response.output_item.added' && dispatchEvent.item == null) {
+            return;
+        }
+        const wireSnapshot = { ...dispatchEvent };
+        for (const key of Object.keys(nativeEventFields)) {
+            const descriptor = Object.getOwnPropertyDescriptor(dispatchEvent, key);
+            if (descriptor && !descriptor.enumerable) {
+                Object.defineProperty(wireSnapshot, key, {
+                    // oxlint-disable-next-line anti-slop/no-reflect-get -- Read accepted non-enumerable fields from the sanitized Proxy, never the original transport.
+                    value: Reflect.get(dispatchEvent, key, dispatchEvent),
+                    enumerable: true,
+                });
+            }
+        }
+        const eventSnapshot = structuredClone(wireSnapshot);
+        maybeEmit('event', eventSnapshot);
+        switch (wireSnapshot.type) {
             case 'response.output_text.delta': {
-                const output = response.output[dispatchEvent.output_index];
+                const output = response.output[outputPosition ?? wireSnapshot.output_index];
                 if (!output) {
-                    throw new error_1.OpenAIError(`missing output at index ${dispatchEvent.output_index}`);
+                    throw new error_1.OpenAIError(`missing output at index ${wireSnapshot.output_index}`);
                 }
                 if (output.type === 'message') {
-                    const content = output.content[dispatchEvent.content_index];
+                    const content = output.content[wireSnapshot.content_index];
                     if (!content) {
-                        throw new error_1.OpenAIError(`missing content at index ${dispatchEvent.content_index}`);
+                        throw new error_1.OpenAIError(`missing content at index ${wireSnapshot.content_index}`);
                     }
                     if (content.type !== 'output_text') {
                         throw new error_1.OpenAIError(`expected content to be 'output_text', got ${content.type}`);
                     }
                     maybeEmit('response.output_text.delta', {
-                        ...dispatchEvent,
-                        type: dispatchEvent.type,
-                        item_id: dispatchEvent.item_id,
-                        output_index: dispatchEvent.output_index,
-                        content_index: dispatchEvent.content_index,
+                        ...structuredClone(wireSnapshot),
                         snapshot: content.text,
                     });
                 }
                 break;
             }
             case 'response.function_call_arguments.delta': {
-                const output = response.output[dispatchEvent.output_index];
+                const output = response.output[outputPosition ?? wireSnapshot.output_index];
                 if (!output) {
-                    throw new error_1.OpenAIError(`missing output at index ${dispatchEvent.output_index}`);
+                    throw new error_1.OpenAIError(`missing output at index ${wireSnapshot.output_index}`);
                 }
                 if (output.type === 'function_call') {
                     maybeEmit('response.function_call_arguments.delta', {
-                        ...dispatchEvent,
-                        type: dispatchEvent.type,
-                        item_id: dispatchEvent.item_id,
-                        output_index: dispatchEvent.output_index,
+                        ...structuredClone(wireSnapshot),
                         snapshot: output.arguments,
                     });
                 }
                 break;
             }
             default: {
-                maybeEmit(dispatchEvent.type, event);
+                maybeEmit(wireSnapshot.type, eventSnapshot);
                 break;
             }
         }
@@ -77404,8 +86823,14 @@ class ResponseStream extends EventStream_1.EventStream {
         if (!snapshot) {
             throw new error_1.OpenAIError(`request ended without sending any events`);
         }
+        tslib_1.__classPrivateFieldGet(this, _ResponseStream_instances, "m", _ResponseStream_reorderInterimOutput).call(this, snapshot);
         tslib_1.__classPrivateFieldSet(this, _ResponseStream_currentResponseSnapshot, undefined, "f");
         tslib_1.__classPrivateFieldSet(this, _ResponseStream_accumulatorContext, (0, response_accumulator_1.createResponseContext)(), "f");
+        tslib_1.__classPrivateFieldGet(this, _ResponseStream_outputPositions, "f").clear();
+        tslib_1.__classPrivateFieldGet(this, _ResponseStream_wireByIdentity, "f").clear();
+        tslib_1.__classPrivateFieldSet(this, _ResponseStream_interimOrderDirty, false, "f");
+        tslib_1.__classPrivateFieldGet(this, _ResponseStream_completedOutput, "f").clear();
+        tslib_1.__classPrivateFieldGet(this, _ResponseStream_unfinishedOutput, "f").clear();
         const parsedResponse = finalizeResponse(snapshot, tslib_1.__classPrivateFieldGet(this, _ResponseStream_params, "f"));
         tslib_1.__classPrivateFieldSet(this, _ResponseStream_finalResponse, parsedResponse, "f");
         return parsedResponse;
@@ -77432,6 +86857,13 @@ class ResponseStream extends EventStream_1.EventStream {
     }
 }
 exports.ResponseStream = ResponseStream;
+function outputIdentity(item) {
+    return JSON.stringify([
+        item.type,
+        !(0, response_accumulator_1.hasRoutedOutputCallIdentity)(item) && (0, values_1.hasOwn)(item, 'id') ? item.id : null,
+        (0, values_1.hasOwn)(item, 'call_id') && 'call_id' in item ? item.call_id : null,
+    ]);
+}
 function finalizeResponse(snapshot, params) {
     return (0, ResponsesParser_1.maybeParseResponse)(snapshot, params);
 }
@@ -79075,6 +88507,47 @@ class APIKeys extends resource_1.APIResource {
     retrieve(apiKeyID, params, options) {
         const { project_id } = params;
         return this._client.get((0, path_1.path) `/organization/projects/${project_id}/api_keys/${apiKeyID}`, resolveResourceRequestOptions(options, (options) => ({
+            ...options,
+            __security: { adminAPIKeyAuth: true },
+        })));
+    }
+    /**
+     * Updates the scopes and/or expiration of an existing API key in the project,
+     * including a service-account-owned key. Requires permission to write project API
+     * keys.
+     *
+     * Provide at least one of `scopes` or `expires_in_seconds`. Omitted fields stay
+     * unchanged; neither field accepts `null`. Both changes are saved together.
+     *
+     * `scopes` replaces the key's scope restrictions using the same scope identifiers
+     * as the dashboard. An empty array means All permissions, subject to the owner's
+     * effective access; it does not mean no access. Use `["api.all.read"]` for
+     * read-only access or specific scopes such as `["api.files.read"]` for restricted
+     * access. This does not change user or service-account roles or grant admin
+     * permissions. Scope changes follow the same authentication-cache propagation as
+     * dashboard edits.
+     *
+     * Provide `expires_in_seconds` to set the expiration relative to this request. The
+     * value must satisfy the organization's and project's expiry policies. Expired
+     * keys cannot be updated. Retrying resets the expiration relative to the new
+     * request. The response contains only the redacted key, not its secret.
+     *
+     * @example
+     * ```ts
+     * const projectAPIKey =
+     *   await client.admin.organization.projects.apiKeys.update(
+     *     'api_key_id',
+     *     {
+     *       project_id: 'project_id',
+     *       scopes: ['api.all.read'],
+     *     },
+     *   );
+     * ```
+     */
+    update(apiKeyID, params, options) {
+        const { project_id, ...body } = params;
+        return this._client.post((0, path_1.path) `/organization/projects/${project_id}/api_keys/${apiKeyID}`, resolveResourceRequestOptions(options, (options) => ({
+            body,
             ...options,
             __security: { adminAPIKeyAuth: true },
         })));
@@ -81414,6 +90887,25 @@ class Usage extends resource_1.APIResource {
         })));
     }
     /**
+     * Get Decisions API usage details for the organization.
+     *
+     * @example
+     * ```ts
+     * const response =
+     *   await client.admin.organization.usage.decisions({
+     *     start_time: 0,
+     *   });
+     * ```
+     */
+    decisions(query, options) {
+        return this._client.get('/organization/usage/decisions', resolveResourceRequestOptions(options, (options) => ({
+            // Null optional filters mean unset; empty query values fail backend parsing.
+            query: Object.fromEntries(Object.entries(query).filter(([, value]) => value !== null)),
+            ...options,
+            __security: { adminAPIKeyAuth: true },
+        })));
+    }
+    /**
      * Get embeddings usage details for the organization.
      *
      * @example
@@ -81827,18 +91319,22 @@ const TranscriptionsAPI = tslib_1.__importStar(__nccwpck_require__(4803));
 const transcriptions_1 = __nccwpck_require__(4803);
 const TranslationsAPI = tslib_1.__importStar(__nccwpck_require__(6926));
 const translations_1 = __nccwpck_require__(6926);
+const VoicesAPI = tslib_1.__importStar(__nccwpck_require__(30273));
+const voices_1 = __nccwpck_require__(30273);
 class Audio extends resource_1.APIResource {
     constructor() {
         super(...arguments);
         this.transcriptions = new TranscriptionsAPI.Transcriptions(this._client);
         this.translations = new TranslationsAPI.Translations(this._client);
         this.speech = new SpeechAPI.Speech(this._client);
+        this.voices = new VoicesAPI.Voices(this._client);
     }
 }
 exports.Audio = Audio;
 Audio.Transcriptions = transcriptions_1.Transcriptions;
 Audio.Translations = translations_1.Translations;
 Audio.Speech = speech_1.Speech;
+Audio.Voices = voices_1.Voices;
 //# sourceMappingURL=audio.js.map
 
 /***/ }),
@@ -81947,6 +91443,54 @@ class Translations extends resource_1.APIResource {
 }
 exports.Translations = Translations;
 //# sourceMappingURL=translations.js.map
+
+/***/ }),
+
+/***/ 30273:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+// File generated from our OpenAPI spec by Castiron. See CONTRIBUTING.md for details.
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Voices = void 0;
+const resource_1 = __nccwpck_require__(3587);
+const uploads_1 = __nccwpck_require__(88947);
+function resolveResourceRequestOptions(options, buildOptions) {
+    return Promise.resolve(options).then(buildOptions);
+}
+/**
+ * Turn audio into text or text into audio.
+ */
+class Voices extends resource_1.APIResource {
+    /**
+     * Creates a voice from a text prompt or from a consent recording and an audio
+     * sample.
+     *
+     * For prompt-based creation, send `type: "prompt"` with a `name` and `prompt` as
+     * JSON or multipart form data. For creation from an audio sample, send
+     * `type: "audio_sample"` with a `name`, `audio_sample`, and `consent` recording ID
+     * as multipart form data. The type defaults to `audio_sample` when omitted.
+     *
+     * Returns the saved voice's metadata. Voices created from text prompts are
+     * supported only in Live, not in Realtime or the speech endpoint. The response
+     * does not include preview audio.
+     *
+     * @example
+     * ```ts
+     * const voice = await client.audio.voices.create({
+     *   audio_sample: fs.createReadStream('path/to/file'),
+     *   consent: 'consent',
+     *   name: 'x',
+     * });
+     * ```
+     */
+    create(body, options) {
+        return this._client.post('/audio/voices', resolveResourceRequestOptions(options, (options) => (0, uploads_1.multipartFormRequestOptions)({ body, ...options, __security: { bearerAuth: true } }, this._client)));
+    }
+}
+exports.Voices = Voices;
+//# sourceMappingURL=voices.js.map
 
 /***/ }),
 
@@ -82244,23 +91788,103 @@ Agents.Sessions = sessions_1.Sessions;
 
 // File generated from our OpenAPI spec by Castiron. See CONTRIBUTING.md for details.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.Environments = void 0;
+exports.EnvironmentInfosPage = exports.Environments = void 0;
 const tslib_1 = __nccwpck_require__(97533);
 const resource_1 = __nccwpck_require__(3587);
 const FilesAPI = tslib_1.__importStar(__nccwpck_require__(96305));
 const files_1 = __nccwpck_require__(96305);
 const TemplatesAPI = tslib_1.__importStar(__nccwpck_require__(33493));
 const templates_1 = __nccwpck_require__(33493);
+const pagination_1 = __nccwpck_require__(59847);
 const headers_1 = __nccwpck_require__(4559);
 const path_1 = __nccwpck_require__(39716);
 function resolveResourceRequestOptions(options, buildOptions) {
     return Promise.resolve(options).then(buildOptions);
+}
+// Recognizable options across SDK runtime versions. Keep this independent of
+// private RequestOptions fields so older handwritten runtimes still compile.
+const normalizeRequestOptionsForQueryKeys = new Set([
+    'method',
+    'path',
+    'query',
+    'body',
+    'headers',
+    'maxRetries',
+    'stream',
+    'timeout',
+    'httpAgent',
+    'fetchOptions',
+    'signal',
+    'idempotencyKey',
+    'defaultBaseURL',
+    '__metadata',
+    '__binaryRequest',
+    '__binaryResponse',
+    '__streamClass',
+    '__security',
+    '__synthesizeEventData',
+]);
+function normalizeRequestOptionsForQuery(value, queryKeys, options) {
+    if (typeof value !== 'object' || value === null)
+        return undefined;
+    // Optional never fields can still be explicitly undefined unless consumers
+    // enable exactOptionalPropertyTypes. Snapshot data without invoking getters.
+    const entries = Object.entries(Object.getOwnPropertyDescriptors(value)).filter(([, descriptor]) => descriptor.enumerable && (!('value' in descriptor) || descriptor.value !== undefined));
+    const keys = entries.map(([key]) => key);
+    const requestOnly = keys.some((key) => normalizeRequestOptionsForQueryKeys.has(key) && !queryKeys.includes(key));
+    if (!requestOnly)
+        return undefined;
+    // Declared query fields, including stream, must use the query argument.
+    // Mixing them with request-only options is ambiguous and could change the return type.
+    if (options !== undefined ||
+        keys.some((key) => !normalizeRequestOptionsForQueryKeys.has(key) || queryKeys.includes(key))) {
+        throw new TypeError('Query parameters and request options must be passed as separate arguments.');
+    }
+    // The query position must not gain authority to change the request destination
+    // or transport. Those overrides require the explicit request options argument.
+    if (keys.some((key) => !['headers', 'maxRetries', 'timeout', 'signal', 'idempotencyKey', 'query'].includes(key))) {
+        throw new TypeError('Pass transport overrides in the explicit request options argument.');
+    }
+    // Copy only the validated fields. Spreading value would reintroduce undefined
+    // transport overrides, and deleting them would mutate the caller's object.
+    return Object.fromEntries(entries.map(([key, descriptor]) => {
+        if ('value' in descriptor)
+            return [key, descriptor.value];
+        return [key, descriptor.get ? Reflect.apply(descriptor.get, value, []) : undefined];
+    }));
 }
 class Environments extends resource_1.APIResource {
     constructor() {
         super(...arguments);
         this.files = new FilesAPI.Files(this._client);
         this.templates = new TemplatesAPI.Templates(this._client);
+    }
+    /**
+     * Creates an OpenAI-hosted environment before creating a session. Requires access
+     * to the prewarming beta.
+     *
+     * @example
+     * ```ts
+     * const environmentInfo =
+     *   await client.beta.agents.environments.create({
+     *     environment: { type: 'openai_hosted' },
+     *   });
+     * ```
+     */
+    create(params, options) {
+        const { 'Idempotency-Key': idempotencyKey, ...body } = params;
+        return this._client.post('/agents/environments', resolveResourceRequestOptions(options, (options) => ({
+            body,
+            ...options,
+            headers: (0, headers_1.buildHeaders)([
+                {
+                    'OpenAI-Beta': 'agents=v1',
+                    ...(idempotencyKey != null ? { 'Idempotency-Key': idempotencyKey } : undefined),
+                },
+                options?.headers,
+            ]),
+            __security: { bearerAuth: true },
+        })));
     }
     /**
      * Retrieves an execution environment's connection status and safe installed
@@ -82282,8 +91906,31 @@ class Environments extends resource_1.APIResource {
             __security: { bearerAuth: true },
         })));
     }
+    list(query = {}, options) {
+        const normalizeRequestOptionsForQueryOptions = normalizeRequestOptionsForQuery(query, ['after', 'limit', 'order', 'type'], options);
+        if (normalizeRequestOptionsForQueryOptions !== undefined) {
+            options = normalizeRequestOptionsForQueryOptions;
+            query = {};
+        }
+        query = query;
+        return this._client.getAPIList('/agents/environments', EnvironmentInfosPage, resolveResourceRequestOptions(options, (options) => ({
+            query,
+            ...options,
+            headers: (0, headers_1.buildHeaders)([{ 'OpenAI-Beta': 'agents=v1' }, options?.headers]),
+            __security: { bearerAuth: true },
+        })));
+    }
 }
 exports.Environments = Environments;
+class EnvironmentInfosPage extends pagination_1.CursorPage {
+    constructor(client, response, body, options) {
+        super(client, response, body, options);
+        this.object = body.object;
+        this.first_id = body.first_id;
+        this.last_id = body.last_id;
+    }
+}
+exports.EnvironmentInfosPage = EnvironmentInfosPage;
 Environments.Files = files_1.Files;
 Environments.Templates = templates_1.Templates;
 //# sourceMappingURL=environments.js.map
@@ -82316,8 +91963,9 @@ class Files extends resource_1.APIResource {
         return (0, files_1.uploadAgentFile)(this._client, this, environmentID, params, options);
     }
     /**
-     * Copies inline bytes or a Files API file into a connected execution environment.
-     * See
+     * Copies inline bytes or a Files API file into a connected execution environment,
+     * replacing an existing regular file at the same path. Upload between turns and
+     * wait for success before starting the next turn. See
      * [environment files](https://developers.openai.com/api/docs/guides/agents-api/environments/files).
      *
      * @example
@@ -82904,10 +92552,10 @@ const ItemsAPI = tslib_1.__importStar(__nccwpck_require__(11569));
 const items_1 = __nccwpck_require__(11569);
 const TracesAPI = tslib_1.__importStar(__nccwpck_require__(89171));
 const traces_1 = __nccwpck_require__(89171);
-const TurnsAPI = tslib_1.__importStar(__nccwpck_require__(13097));
-const turns_1 = __nccwpck_require__(13097);
 const SubagentsAPI = tslib_1.__importStar(__nccwpck_require__(2446));
 const subagents_1 = __nccwpck_require__(2446);
+const TurnsAPI = tslib_1.__importStar(__nccwpck_require__(33914));
+const turns_1 = __nccwpck_require__(33914);
 const pagination_1 = __nccwpck_require__(59847);
 const headers_1 = __nccwpck_require__(4559);
 const path_1 = __nccwpck_require__(39716);
@@ -82981,7 +92629,8 @@ class Sessions extends resource_1.APIResource {
         return new agent_session_stream_1.AgentSessionStream(this, sessionID, params, options);
     }
     create(body, options) {
-        const output = (0, parse_result_1.captureAgentOutput)(body, options);
+        const creation = (0, agent_session_create_stream_1.captureCreationTools)(body, options);
+        const output = (0, parse_result_1.captureAgentOutput)(creation.body, creation.options);
         return this._client
             .post('/agents/sessions', resolveResourceRequestOptions(output.options, (options) => ({
             body: output.body,
@@ -82993,7 +92642,9 @@ class Sessions extends resource_1.APIResource {
             ._thenUnwrap((data, { options }) => 
         // SAFETY: defaultParseResponse uses this same resolved flag to return the configured stream instance.
         options.stream
-            ? (0, agent_session_create_stream_1.withAgentTurnResult)(data, output.format)
+            ? (0, agent_session_create_stream_1.withAgentTurnResult)(data, output.format, creation.handlers
+                ? { sessions: this, handlers: creation.handlers, options: output.options }
+                : undefined)
             : data);
     }
     /**
@@ -83457,7 +93108,54 @@ exports.Traces = Traces;
 
 /***/ }),
 
-/***/ 13097:
+/***/ 82598:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+// File generated from our OpenAPI spec by Castiron. See CONTRIBUTING.md for details.
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Items = void 0;
+const resource_1 = __nccwpck_require__(3587);
+const pagination_1 = __nccwpck_require__(59847);
+const headers_1 = __nccwpck_require__(4559);
+const path_1 = __nccwpck_require__(39716);
+function resolveResourceRequestOptions(options, buildOptions) {
+    return Promise.resolve(options).then(buildOptions);
+}
+class Items extends resource_1.APIResource {
+    /**
+     * Lists items belonging to one root-agent turn, including its interactions with
+     * subagents. See
+     * [inspecting agent output](https://developers.openai.com/api/docs/guides/agents-api/observability).
+     *
+     * @example
+     * ```ts
+     * // Automatically fetches more pages as needed.
+     * for await (const agentSessionItem of client.beta.agents.sessions.turns.items.list(
+     *   'turn_id',
+     *   { session_id: 'session_id' },
+     * )) {
+     *   // ...
+     * }
+     * ```
+     */
+    list(turnID, params, options) {
+        const { session_id, ...query } = params;
+        return this._client.getAPIList((0, path_1.path) `/agents/sessions/${session_id}/turns/${turnID}/items`, (pagination_1.ConversationCursorPage), resolveResourceRequestOptions(options, (options) => ({
+            query,
+            ...options,
+            headers: (0, headers_1.buildHeaders)([{ 'OpenAI-Beta': 'agents=v1' }, options?.headers]),
+            __security: { bearerAuth: true },
+        })));
+    }
+}
+exports.Items = Items;
+//# sourceMappingURL=items.js.map
+
+/***/ }),
+
+/***/ 33914:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
@@ -83465,7 +93163,10 @@ exports.Traces = Traces;
 // File generated from our OpenAPI spec by Castiron. See CONTRIBUTING.md for details.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Turns = void 0;
+const tslib_1 = __nccwpck_require__(97533);
 const resource_1 = __nccwpck_require__(3587);
+const ItemsAPI = tslib_1.__importStar(__nccwpck_require__(82598));
+const items_1 = __nccwpck_require__(82598);
 const pagination_1 = __nccwpck_require__(59847);
 const headers_1 = __nccwpck_require__(4559);
 const path_1 = __nccwpck_require__(39716);
@@ -83525,6 +93226,10 @@ function normalizeRequestOptionsForQuery(value, queryKeys, options) {
     }));
 }
 class Turns extends resource_1.APIResource {
+    constructor() {
+        super(...arguments);
+        this.items = new ItemsAPI.Items(this._client);
+    }
     /**
      * Retrieves a turn's current status, timestamps, usage, and error. Returns 404 if
      * the turn does not belong to the session. See
@@ -83563,6 +93268,7 @@ class Turns extends resource_1.APIResource {
     }
 }
 exports.Turns = Turns;
+Turns.Items = items_1.Items;
 //# sourceMappingURL=turns.js.map
 
 /***/ }),
@@ -83708,7 +93414,7 @@ class Credentials extends resource_1.APIResource {
         })));
     }
     list(vaultID, query = {}, options) {
-        const normalizeRequestOptionsForQueryOptions = normalizeRequestOptionsForQuery(query, ['after', 'limit', 'order', 'status'], options);
+        const normalizeRequestOptionsForQueryOptions = normalizeRequestOptionsForQuery(query, ['after', 'limit', 'metadata', 'order', 'status'], options);
         if (normalizeRequestOptionsForQueryOptions !== undefined) {
             options = normalizeRequestOptionsForQueryOptions;
             query = {};
@@ -83858,8 +93564,29 @@ class Vaults extends resource_1.APIResource {
             __security: { bearerAuth: true },
         })));
     }
+    /**
+     * Updates the name or metadata of an active vault. Omitted fields remain
+     * unchanged. See
+     * [vaults](https://developers.openai.com/api/docs/guides/agents-api/tools/vaults).
+     *
+     * @example
+     * ```ts
+     * const vault = await client.beta.agents.vaults.update(
+     *   'vault_id',
+     *   { name: 'Research vault' },
+     * );
+     * ```
+     */
+    update(vaultID, body, options) {
+        return this._client.post((0, path_1.path) `/vaults/${vaultID}`, resolveResourceRequestOptions(options, (options) => ({
+            body,
+            ...options,
+            headers: (0, headers_1.buildHeaders)([{ 'OpenAI-Beta': 'agents=v1' }, options?.headers]),
+            __security: { bearerAuth: true },
+        })));
+    }
     list(query = {}, options) {
-        const normalizeRequestOptionsForQueryOptions = normalizeRequestOptionsForQuery(query, ['after', 'limit', 'order', 'status'], options);
+        const normalizeRequestOptionsForQueryOptions = normalizeRequestOptionsForQuery(query, ['after', 'limit', 'metadata', 'order', 'status'], options);
         if (normalizeRequestOptionsForQueryOptions !== undefined) {
             options = normalizeRequestOptionsForQueryOptions;
             query = {};
@@ -85315,6 +95042,7 @@ const resource_1 = __nccwpck_require__(3587);
 const MessagesAPI = tslib_1.__importStar(__nccwpck_require__(33010));
 const messages_1 = __nccwpck_require__(33010);
 const pagination_1 = __nccwpck_require__(59847);
+const streaming_1 = __nccwpck_require__(70960);
 const path_1 = __nccwpck_require__(39716);
 const ChatCompletionRunner_1 = __nccwpck_require__(64497);
 const ChatCompletionStreamingRunner_1 = __nccwpck_require__(47193);
@@ -85384,12 +95112,14 @@ class Completions extends resource_1.APIResource {
         this.messages = new MessagesAPI.Messages(this._client);
     }
     create(body, options) {
-        return this._client.post('/chat/completions', resolveResourceRequestOptions(options, (options) => ({
+        return this._client
+            .post('/chat/completions', resolveResourceRequestOptions(options, (options) => ({
             body,
             ...options,
             stream: body.stream ?? false,
             __security: { bearerAuth: true },
-        })));
+        })))
+            ._thenUnwrap((result) => body.stream ? (0, streaming_1.normalizeChatCompletionStream)(result) : result);
     }
     /**
      * Get a stored chat completion. Only Chat Completions that have been created with
@@ -86129,6 +95859,36 @@ class Items extends resource_1.APIResource {
 }
 exports.Items = Items;
 //# sourceMappingURL=items.js.map
+
+/***/ }),
+
+/***/ 11150:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
+// File generated from our OpenAPI spec by Castiron. See CONTRIBUTING.md for details.
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Decisions = void 0;
+const resource_1 = __nccwpck_require__(3587);
+function resolveResourceRequestOptions(options, buildOptions) {
+    return Promise.resolve(options).then(buildOptions);
+}
+class Decisions extends resource_1.APIResource {
+    /**
+     * Use this endpoint to quickly answer classification or scoring questions about
+     * some input. You can ask multiple questions in one request.
+     */
+    create(body, options) {
+        return this._client.post('/decisions', resolveResourceRequestOptions(options, (options) => ({
+            body,
+            ...options,
+            __security: { bearerAuth: true },
+        })));
+    }
+}
+exports.Decisions = Decisions;
+//# sourceMappingURL=decisions.js.map
 
 /***/ }),
 
@@ -87273,26 +97033,29 @@ function resolveResourceRequestOptions(options, buildOptions) {
  */
 class Images extends resource_1.APIResource {
     /**
-     * Creates a variation of a given image. This endpoint only supports `dall-e-2`.
+     * This endpoint is retired and no longer available. Use the image edits endpoint
+     * with a GPT Image model and a prompt to create a variation of an image. The
+     * request and response schemas below describe the legacy contract.
      *
-     * @example
-     * ```ts
-     * const imagesResponse = await client.images.createVariation({
-     *   image: fs.createReadStream('otter.png'),
-     * });
-     * ```
+     * @deprecated
      */
     createVariation(body, options) {
         return this._client.post('/images/variations', resolveResourceRequestOptions(options, (options) => (0, uploads_1.multipartFormRequestOptions)({ body, ...options, __security: { bearerAuth: true } }, this._client)));
     }
     edit(body, options) {
-        return this._client.post('/images/edits', resolveResourceRequestOptions(options, (options) => (0, uploads_1.multipartFormRequestOptions)({
+        return this._client.post('/images/edits', resolveResourceRequestOptions(options, (options) => (0, uploads_1.multipartFormRequestOptions)(((requestOptions) => ({
+            ...requestOptions,
+            body: Object.fromEntries(Object.entries(requestOptions.body ?? {}).map(([key, value]) => [
+                key,
+                key === 'safety_identifier' && value === null ? undefined : value,
+            ])),
+        }))({
             body,
             ...options,
             stream: body.stream ?? false,
             __metadata: { ...options?.__metadata, ...(body.model == null ? {} : { model: body.model }) },
             __security: { bearerAuth: true },
-        }, this._client)));
+        }), this._client)));
     }
     generate(body, options) {
         return this._client.post('/images/generations', resolveResourceRequestOptions(options, (options) => ({
@@ -87315,7 +97078,7 @@ exports.Images = Images;
 
 // File generated from our OpenAPI spec by Castiron. See CONTRIBUTING.md for details.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.Webhooks = exports.Videos = exports.VectorStores = exports.Uploads = exports.Skills = exports.Safety = exports.Responses = exports.Realtime = exports.Moderations = exports.Models = exports.Live = exports.Images = exports.Graders = exports.FineTuning = exports.Files = exports.Evals = exports.Embeddings = exports.Conversations = exports.ContentProvenanceChecks = exports.Containers = exports.Completions = exports.Beta = exports.Batches = exports.Audio = exports.Admin = void 0;
+exports.Webhooks = exports.Videos = exports.VectorStores = exports.Uploads = exports.Skills = exports.Safety = exports.Responses = exports.Realtime = exports.Moderations = exports.Models = exports.Live = exports.Images = exports.Graders = exports.FineTuning = exports.Files = exports.Evals = exports.Embeddings = exports.Decisions = exports.Conversations = exports.ContentProvenanceChecks = exports.Containers = exports.Completions = exports.Beta = exports.Batches = exports.Audio = exports.Admin = void 0;
 const tslib_1 = __nccwpck_require__(97533);
 tslib_1.__exportStar(__nccwpck_require__(4592), exports);
 tslib_1.__exportStar(__nccwpck_require__(75672), exports);
@@ -87335,6 +97098,8 @@ var content_provenance_checks_1 = __nccwpck_require__(53510);
 Object.defineProperty(exports, "ContentProvenanceChecks", ({ enumerable: true, get: function () { return content_provenance_checks_1.ContentProvenanceChecks; } }));
 var conversations_1 = __nccwpck_require__(83786);
 Object.defineProperty(exports, "Conversations", ({ enumerable: true, get: function () { return conversations_1.Conversations; } }));
+var decisions_1 = __nccwpck_require__(11150);
+Object.defineProperty(exports, "Decisions", ({ enumerable: true, get: function () { return decisions_1.Decisions; } }));
 var embeddings_1 = __nccwpck_require__(26639);
 Object.defineProperty(exports, "Embeddings", ({ enumerable: true, get: function () { return embeddings_1.Embeddings; } }));
 var evals_1 = __nccwpck_require__(15758);
@@ -89683,7 +99448,7 @@ tslib_1.__exportStar(__nccwpck_require__(31743), exports);
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.VERSION = void 0;
 /** Version of the installed OpenAI SDK package. */
-exports.VERSION = '7.27.0'; // x-release-please-version
+exports.VERSION = '7.38.0'; // x-release-please-version
 //# sourceMappingURL=version.js.map
 
 /***/ }),
@@ -96350,9 +106115,15 @@ function generateNullableCheck(doc, ctx, schema, accessor, buildsValue = true) {
     doc.write(`}`);
     return outputVar;
 }
+function generateSizeGate(doc, schema, size) {
+    for (const [max, check] of util.sizeCaps(schema._zod.def.checks)) {
+        doc.write(`if (${size} > ${numericOperand(max, check._zod.def.check)}) return INVALID;`);
+    }
+}
 function generateArrayCheck(doc, ctx, schema, accessor, buildsValue = true) {
     const def = schema._zod.def;
     doc.write(`if (!Array.isArray(${accessor})) return INVALID;`);
+    generateSizeGate(doc, schema, `${accessor}.length`);
     // Build a new array with validated/transformed elements.
     const outputVar = buildsValue ? newVar(ctx) : null;
     const iVar = newVar(ctx);
@@ -96816,6 +106587,7 @@ function literalPropertyKey(ctx, key) {
 function generateMapCheck(doc, ctx, schema, accessor) {
     const def = schema._zod.def;
     doc.write(`if (!(${accessor} instanceof Map)) return INVALID;`);
+    generateSizeGate(doc, schema, `${accessor}.size`);
     const outputVar = newVar(ctx);
     const kVar = newVar(ctx);
     const valVar = newVar(ctx);
@@ -96832,6 +106604,7 @@ function generateMapCheck(doc, ctx, schema, accessor) {
 function generateSetCheck(doc, ctx, schema, accessor) {
     const def = schema._zod.def;
     doc.write(`if (!(${accessor} instanceof Set)) return INVALID;`);
+    generateSizeGate(doc, schema, `${accessor}.size`);
     const outputVar = newVar(ctx);
     const valVar = newVar(ctx);
     doc.write(`const ${outputVar} = new Set();`);
@@ -100537,6 +110310,33 @@ exports.$ZodDate = core.$constructor("$ZodDate", (inst, def) => {
         return payload;
     };
 });
+// an oversized container fails its leading size checks before any element is parsed
+function capSize(inst, size) {
+    const caps = util.sizeCaps(inst._zod.def.checks);
+    if (!caps.length)
+        return;
+    const cap = Math.min(...caps.map((c) => c[0]));
+    const parse = inst._zod.parse;
+    inst._zod.parse = (payload, ctx) => {
+        const n = size(payload.value);
+        if (n > cap && !ctx?.skipChecks && ctx?.direction !== "backward") {
+            for (const [max, ch] of util.sizeCaps(inst._zod.def.checks)) {
+                if (n > max && ch._zod.def.when(payload)) {
+                    const start = payload.issues.length;
+                    ch._zod.check(payload);
+                    // the value is still the raw input, so no later check may read it
+                    payload.issues[start].continue = false;
+                    util.attachSchema(payload.issues, start, inst);
+                    return payload;
+                }
+            }
+        }
+        return parse(payload, ctx);
+    };
+}
+const arraySize = (input) => (Array.isArray(input) ? input.length : -1);
+const mapSize = (input) => (input instanceof Map ? input.size : -1);
+const setSize = (input) => (input instanceof Set ? input.size : -1);
 function handleArrayResult(result, final, index) {
     if (result.issues.length) {
         final.issues.push(...util.prefixIssues(index, result.issues));
@@ -100582,6 +110382,7 @@ exports.$ZodArray = core.$constructor("$ZodArray", (inst, def) => {
         }
         return payload; //handleArrayResultsAsync(parseResults, final);
     };
+    capSize(inst, arraySize);
 });
 function handlePropertyResult(result, final, key, input, optin, optout) {
     const isPresent = key in input;
@@ -101619,6 +111420,7 @@ exports.$ZodMap = core.$constructor("$ZodMap", (inst, def) => {
             return Promise.all(proms).then(() => payload);
         return payload;
     };
+    capSize(inst, mapSize);
 });
 function handleMapResult(keyResult, valueResult, final, key, input, inst, ctx) {
     if (keyResult.issues.length) {
@@ -101688,6 +111490,7 @@ exports.$ZodSet = core.$constructor("$ZodSet", (inst, def) => {
             return Promise.all(proms).then(() => payload);
         return payload;
     };
+    capSize(inst, setSize);
 });
 function handleSetResult(result, final) {
     if (result.issues.length) {
@@ -103089,6 +112892,7 @@ exports.aborted = aborted;
 exports.explicitlyAborted = explicitlyAborted;
 exports.prefixIssues = prefixIssues;
 exports.unwrapMessage = unwrapMessage;
+exports.sizeCaps = sizeCaps;
 exports.attachSchema = attachSchema;
 exports.finalizeIssue = finalizeIssue;
 exports.getSizableOrigin = getSizableOrigin;
@@ -103663,6 +113467,20 @@ function unwrapMessage(message) {
     return typeof message === "string" ? message : message?.message;
 }
 /* A check holds no link back to the schema it is attached to — the same check instance is shared by every clone of that schema — so the owner is stamped onto the issues a check just raised, at the only point where both are in scope. Runs on the failure path only; `start` is the issue count from before the check ran. */
+/** The leading size checks of `defChecks` that set an upper bound, each paired with it. */
+function sizeCaps(defChecks) {
+    const caps = [];
+    for (const ch of defChecks ?? []) {
+        const d = ch._zod.def;
+        // a later check may rewrite the value
+        if (!/_(length|size)$|_equals$/.test(d.check))
+            break;
+        const max = d.maximum ?? d.length ?? d.size;
+        if (max >= 0)
+            caps.push([max, ch]);
+    }
+    return caps;
+}
 function attachSchema(issues, start, inst) {
     var _a;
     for (let i = start; i < issues.length; i++) {
@@ -104004,7 +113822,7 @@ exports.version = void 0;
 exports.version = {
     major: 4,
     minor: 6,
-    patch: 5,
+    patch: 7,
 };
 
 // seal-cjs-exports
