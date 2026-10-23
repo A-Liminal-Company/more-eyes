@@ -173,6 +173,32 @@ describe("renderSummary with red-team verdicts", () => {
     expect(summary).toContain("validated by the caller");
   });
 
+  it("shows the missing fact for a needs-context verdict", () => {
+    const groups = [group({ category: "security", models: ["a", "b"] })];
+    const summary = renderSummary(groups, 3, [
+      {
+        demonstrated: false,
+        verdict: "needs_context",
+        missingFact: "Whether middleware.ts guards /admin.",
+        reasoning: "The handler never checks the session itself.",
+      },
+    ]);
+
+    expect(summary).toContain("needs context");
+    expect(summary).toContain("What would settle this");
+    expect(summary).toContain("```\nCheck: Whether middleware.ts guards /admin.\n```");
+  });
+
+  it("labels a refuted verdict", () => {
+    const groups = [group({ models: ["a", "b"] })];
+    const summary = renderSummary(groups, 3, [
+      { demonstrated: false, verdict: "refuted", reasoning: "Parameterised query." },
+    ]);
+
+    expect(summary).toContain("refuted by the code");
+    expect(summary).toContain("Why the code prevents this");
+  });
+
   it("omits the section entirely for groups with no verdict", () => {
     const groups = [group({ models: ["a", "b"] }), group({ models: ["c"] })];
     const summary = renderSummary(groups, 3, [demonstrated, undefined]);
