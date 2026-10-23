@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import * as core from "@actions/core";
 import * as github from "@actions/github";
 import { groupFindings, type FindingGroup, type ModelFinding } from "../../src/lib/consensus";
@@ -12,7 +13,7 @@ import {
 } from "../../src/lib/redteam";
 import { reviewWithModels } from "../../src/lib/review";
 import { chunkFiles, filterFiles, parseDiffFiles } from "./diff";
-import { evaluateGate, renderSummary, type FailOnSeverity } from "./report";
+import { buildReport, evaluateGate, renderSummary, type FailOnSeverity, type ModelRuns } from "./report";
 import { capBatches, resolveDiffSource } from "./source";
 
 function parseList(input: string): string[] {
@@ -131,6 +132,8 @@ export async function run(): Promise<void> {
     `Reviewing ${files.length} files in ${batches.length} batch(es) with models: ${modelIds.join(", ")}`
   );
 
+  const modelRuns: ModelRuns = Object.fromEntries(modelIds.map((id) => [id, { ok: 0, failed: 0 }]));
+
   // Shared across every batch — see the note at the redTeamGroups call below.
   let redTeamBudget = redTeamMaxFindings();
 
@@ -149,9 +152,12 @@ export async function run(): Promise<void> {
     });
 
     for (const review of reviews) {
+      const runs = (modelRuns[review.modelId] ??= { ok: 0, failed: 0 });
       if (review.status === "ok") {
+        runs.ok += 1;
         core.info(`${review.modelId}: ${review.result.findings.length} finding(s)`);
       } else {
+        runs.failed += 1;
         core.info(`${review.modelId}: failed - ${review.error}`);
       }
     }
@@ -209,6 +215,33 @@ export async function run(): Promise<void> {
   core.setOutput("skipped", "false");
   core.setOutput("truncated", dropped > 0 ? "true" : "false");
 
+  const gateOptions = { failOnSeverity, minAgreement };
+  const gate = evaluateGate(allGroups, gateOptions);
+
+  // Written before any setFailed below, so a held run still leaves its report.
+  const reportPath = core.getInput("report_path").trim();
+  if (reportPath) {
+    const report = buildReport({
+      title,
+      models: modelIds,
+      modelRuns,
+      batches: batches.length,
+      droppedBatches: dropped,
+      groups: allGroups,
+      gate,
+      gateOptions,
+      generatedAt: new Date().toISOString(),
+    });
+    try {
+      await mkdir(dirname(reportPath), { recursive: true });
+      await writeFile(reportPath, JSON.stringify(report, null, 2) + "\n", "utf8");
+      core.setOutput("report_path", reportPath);
+    } catch (err) {
+      // A missing report must not change the review's verdict.
+      core.warning(`Could not write report_path ${reportPath}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   if (dropped > 0 && failOnTruncation) {
     core.setFailed(
       `${dropped} batch(es) were not reviewed (max_batches=${maxBatches}) and fail_on_truncation is on.`
@@ -216,7 +249,6 @@ export async function run(): Promise<void> {
     return;
   }
 
-  const gate = evaluateGate(allGroups, { failOnSeverity, minAgreement });
   if (gate.shouldFail && gate.reason) {
     core.setFailed(gate.reason);
   }
