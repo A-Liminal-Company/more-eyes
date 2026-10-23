@@ -299,18 +299,33 @@ models share training biases and converge on the same wrong answer. Setting
 `REDTEAM_MODEL` to a model slug adds an opt-in pass that answers something
 agreement cannot: **can the issue actually be shown?**
 
-For each finding the focused view keeps, that model is asked to construct the
-concrete exploit — the input, the call, the conditions, and what goes wrong.
-Findings come back labeled **exploit demonstrated** or **not demonstrated**,
-with the reasoning and any exploit behind a collapsed disclosure.
+For each finding the focused view keeps, that model acts as an independent
+verifier. The method follows Cloudflare's open-source
+[security-audit skill](https://github.com/cloudflare/security-audit-skill): it
+did not write the finding, it starts by trying to refute it, and it must name a
+real boundary — who the attacker is, what they send, which control it gets
+past, and what concretely goes wrong for whom. Each finding comes back with one
+of three verdicts:
+
+| Verdict | Means | Must include |
+|---|---|---|
+| **exploit demonstrated** | Traced end to end from a real entry point to the harm | The concrete exploit |
+| **needs context** | The path is real, but one fact the snippet doesn't show decides it (a middleware, a database rule, a caller) | That one fact, as something you can check |
+| **refuted by the code** | Something visible prevents it, or there is no real harm | Which control stops it |
+
+"Needs context" matters because a snippet rarely includes its middleware or
+schema, so it is the most common honest answer — and it used to be
+indistinguishable from "the code visibly prevents this". A missing second layer
+of defence, when the first visibly holds, is refuted: that is hardening advice,
+not a vulnerability.
 
 The pass is **static only**. The model is given no execution tool and is told it
 cannot run anything, because a pasted snippet doesn't run standalone anyway.
-It's also told that failing to construct an exploit is a valuable answer rather
-than a failure — a finding nobody can demonstrate is worth knowing about. A
-`demonstrated: true` that arrives with no actual exploit text is downgraded to
-false: an unsubstantiated yes is precisely the confident-wrong answer this is
-meant to catch.
+A verdict must carry what it claims: **exploit demonstrated** with no exploit
+text, or **needs context** with no named fact, drops to a neutral **not
+demonstrated** — an unsubstantiated yes is precisely the confident-wrong answer
+this is meant to catch. Rows stored before verdicts existed keep their old
+two-way label.
 
 **It annotates, never decides.** An undemonstrated finding keeps its place in
 the list and, in the Action, cannot fail a build. Some real issues simply aren't

@@ -5,6 +5,7 @@ import {
   keyMapFor,
   parseRedTeamResult,
   redTeamCategories,
+  redTeamLabel,
   selectForRedTeam,
 } from "./redteam";
 
@@ -256,6 +257,7 @@ describe("parseRedTeamResult", () => {
       })
     ).toEqual({
       demonstrated: true,
+      verdict: "confirmed",
       exploit: "Pass b = 0 and the function throws.",
       reasoning: "The divisor is never checked.",
     });
@@ -309,5 +311,101 @@ describe("parseRedTeamResult", () => {
         reasoning: "Something",
       })?.demonstrated
     ).toBe(false);
+  });
+});
+
+describe("parseRedTeamResult with verdicts", () => {
+  it("keeps a confirmed verdict that carries an exploit", () => {
+    expect(
+      parseRedTeamResult({
+        verdict: "confirmed",
+        exploit: "Any logged-in user sends GET /invoices/42 and reads another org's invoice.",
+        reasoning: "The query filters on id only, never on orgId.",
+      })
+    ).toEqual({
+      demonstrated: true,
+      verdict: "confirmed",
+      exploit: "Any logged-in user sends GET /invoices/42 and reads another org's invoice.",
+      reasoning: "The query filters on id only, never on orgId.",
+    });
+  });
+
+  it("drops a confirmed verdict with no exploit to unproven", () => {
+    const result = parseRedTeamResult({
+      verdict: "confirmed",
+      reasoning: "Definitely exploitable.",
+    });
+
+    expect(result?.demonstrated).toBe(false);
+    expect(result?.verdict).toBeUndefined();
+  });
+
+  it("keeps needs_context with the exact missing fact", () => {
+    expect(
+      parseRedTeamResult({
+        verdict: "needs_context",
+        missing_fact: "Whether middleware.ts checks the session for /admin routes.",
+        reasoning: "The handler itself never checks the caller.",
+      })
+    ).toEqual({
+      demonstrated: false,
+      verdict: "needs_context",
+      missingFact: "Whether middleware.ts checks the session for /admin routes.",
+      reasoning: "The handler itself never checks the caller.",
+    });
+  });
+
+  it("drops needs_context that cannot name the missing fact", () => {
+    // A "needs context" that cannot say which context is a vague concern.
+    const result = parseRedTeamResult({
+      verdict: "needs_context",
+      missing_fact: "  ",
+      reasoning: "Might depend on things.",
+    });
+
+    expect(result?.verdict).toBeUndefined();
+    expect(result?.missingFact).toBeUndefined();
+  });
+
+  it("keeps a refuted verdict and ignores a stray missing fact", () => {
+    expect(
+      parseRedTeamResult({
+        verdict: "refuted",
+        missing_fact: "irrelevant",
+        reasoning: "The query is parameterised two lines above.",
+      })
+    ).toEqual({
+      demonstrated: false,
+      verdict: "refuted",
+      reasoning: "The query is parameterised two lines above.",
+    });
+  });
+
+  it("ignores an unknown verdict", () => {
+    expect(
+      parseRedTeamResult({ verdict: "maybe", reasoning: "Unclear." })?.verdict
+    ).toBeUndefined();
+  });
+});
+
+describe("redTeamLabel", () => {
+  it("labels each verdict distinctly", () => {
+    const base = { demonstrated: false, reasoning: "r" };
+    expect(redTeamLabel({ ...base, demonstrated: true, verdict: "confirmed" }).badge).toBe(
+      "exploit demonstrated"
+    );
+    expect(redTeamLabel({ ...base, verdict: "needs_context" }).badge).toBe("needs context");
+    expect(redTeamLabel({ ...base, verdict: "refuted" }).badge).toBe("refuted by the code");
+  });
+
+  it("reads rows stored before verdicts existed the way they always read", () => {
+    expect(redTeamLabel({ demonstrated: true, exploit: "x", reasoning: "r" }).kind).toBe(
+      "confirmed"
+    );
+    expect(redTeamLabel({ demonstrated: false, reasoning: "r" })).toEqual({
+      kind: "unproven",
+      badge: "not demonstrated",
+      heading: "Why this could not be demonstrated",
+    });
   });
 });

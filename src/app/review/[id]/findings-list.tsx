@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { isFocused, outlierSignal, type FindingGroup } from "@/lib/consensus";
 import { modelLabel } from "@/lib/models";
-import type { RedTeamResult } from "@/lib/redteam";
+import { redTeamLabel, type RedTeamResult } from "@/lib/redteam";
 import type { Finding } from "@/lib/validation";
 
 const SEVERITY_STYLES: Record<Finding["severity"], string> = {
@@ -35,15 +35,18 @@ const STATUS_LABEL: Record<"new" | "persistent", string> = {
 };
 
 /**
- * Demonstrability reads as a second, independent trust signal beside agreement:
- * a model built a working exploit, or tried and could not. "Not demonstrated" is
- * deliberately styled as neutral rather than as a dismissal — a model failing to
- * write an exploit is a hint, not a verdict, and some real issues are simply not
- * demonstrable from a snippet alone.
+ * Demonstrability reads as a second, independent trust signal beside agreement.
+ * Only "confirmed" is loud. "Needs context" is amber because it is a question
+ * for the reader — one fact the snippet does not show decides it. "Refuted" and
+ * the older "not demonstrated" stay neutral rather than reading as a dismissal:
+ * a checker model can be wrong too.
  */
-const REDTEAM_STYLES: Record<"yes" | "no", string> = {
-  yes: "border-red-600 text-red-800 dark:border-red-500 dark:text-red-300",
-  no: "border-current opacity-70",
+const REDTEAM_STYLES: Record<ReturnType<typeof redTeamLabel>["kind"], string> = {
+  confirmed: "border-red-600 text-red-800 dark:border-red-500 dark:text-red-300",
+  needs_context:
+    "border-amber-600 text-amber-800 dark:border-amber-500 dark:text-amber-300",
+  refuted: "border-current opacity-70",
+  unproven: "border-current opacity-70",
 };
 
 export function FindingsList({ groups }: { groups: DisplayFindingGroup[] }) {
@@ -99,6 +102,7 @@ export function FindingsList({ groups }: { groups: DisplayFindingGroup[] }) {
         <ul className="flex flex-col gap-3">
           {visible.map((group, i) => {
             const outlier = outlierSignal(group);
+            const redTeam = group.redTeam && redTeamLabel(group.redTeam);
             return (
               <li
                 key={i}
@@ -130,15 +134,13 @@ export function FindingsList({ groups }: { groups: DisplayFindingGroup[] }) {
                       {STATUS_LABEL[group.status]}
                     </span>
                   )}
-                  {group.redTeam && (
+                  {redTeam && (
                     <span
                       className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
-                        REDTEAM_STYLES[group.redTeam.demonstrated ? "yes" : "no"]
+                        REDTEAM_STYLES[redTeam.kind]
                       }`}
                     >
-                      {group.redTeam.demonstrated
-                        ? "exploit demonstrated"
-                        : "not demonstrated"}
+                      {redTeam.badge}
                     </span>
                   )}
                 </div>
@@ -189,13 +191,16 @@ export function FindingsList({ groups }: { groups: DisplayFindingGroup[] }) {
                   ))}
                 </ul>
 
-                {group.redTeam && (
+                {group.redTeam && redTeam && (
                   <details className="mt-2 text-xs opacity-80">
                     <summary className="cursor-pointer select-none">
-                      {group.redTeam.demonstrated
-                        ? "How this is exploited"
-                        : "Why this could not be demonstrated"}
+                      {redTeam.heading}
                     </summary>
+                    {group.redTeam.missingFact && (
+                      <p className="mt-1 font-medium">
+                        Check: {group.redTeam.missingFact}
+                      </p>
+                    )}
                     <p className="mt-1">{group.redTeam.reasoning}</p>
                     {group.redTeam.exploit && (
                       <pre className="mt-1 overflow-x-auto whitespace-pre-wrap rounded bg-black/10 p-2 dark:bg-white/10">
