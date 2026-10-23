@@ -4,7 +4,7 @@
  * scope only: sticky/inline PR comments are M3 (see docs/pr-action-design.md).
  */
 import { outlierSignal, type FindingGroup, type ModelFinding } from "../../src/lib/consensus";
-import type { RedTeamResult } from "../../src/lib/redteam";
+import { redTeamLabel, type RedTeamResult } from "../../src/lib/redteam";
 
 export type Severity = "high" | "medium" | "low";
 export type FailOnSeverity = "none" | Severity;
@@ -124,16 +124,13 @@ export function renderSummary(
   groups.forEach((group, i) => {
     const outlier = outlierSignal(group);
     const verdict = redTeam?.[i];
+    const label = verdict ? redTeamLabel(verdict) : undefined;
     lines.push(`### [${group.severity.toUpperCase()}] ${group.title}`);
     lines.push("");
     lines.push(
       `*${group.category} · ${group.models.length}/${totalModels} models agree` +
         `${outlier ? ` · ${outlier}` : ""}` +
-        `${
-          verdict
-            ? ` · ${verdict.demonstrated ? "exploit demonstrated" : "not demonstrated"}`
-            : ""
-        }*`
+        `${label ? ` · ${label.badge}` : ""}*`
     );
     lines.push("");
 
@@ -144,16 +141,14 @@ export function renderSummary(
       if (finding.rationale) lines.push(`  - Why: ${finding.rationale}`);
     }
 
-    if (verdict) {
+    if (verdict && label) {
       lines.push("");
-      lines.push(
-        `<details><summary>${
-          verdict.demonstrated
-            ? "How this is exploited"
-            : "Why this could not be demonstrated"
-        }</summary>`
-      );
+      lines.push(`<details><summary>${label.heading}</summary>`);
       lines.push("");
+      if (verdict.missingFact) {
+        lines.push(fence(`Check: ${verdict.missingFact}`));
+        lines.push("");
+      }
       lines.push(fence(verdict.reasoning));
       if (verdict.exploit) {
         lines.push("");
