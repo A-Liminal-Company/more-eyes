@@ -52,8 +52,9 @@ inputs:
     default: "2"
   redteam_model:
     description: >-
-      Model id used to attempt a concrete exploit for each reported finding,
-      adding a "demonstrated / not demonstrated" signal alongside agreement.
+      Model id used to independently check each reported finding, labeling it
+      "exploit demonstrated", "needs context", or "refuted by the code"
+      alongside agreement.
       Empty (the default) disables the pass. Costs one extra call per reported
       finding, and never fails the run — demonstrability is reported, not gated
       on.

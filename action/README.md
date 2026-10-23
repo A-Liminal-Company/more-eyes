@@ -61,16 +61,19 @@ through `env:` as shown above.
 | `review_title` / `review_description` | *(PR number / PR title)* | Context handed to the models. |
 | `max_batches` | `0` (no cap) | Cap on diff batches reviewed, since each costs one call per model. Anything dropped is reported in the summary and the `truncated` output, never silently. |
 | `fail_on_truncation` | `false` | `true` fails the run when `max_batches` left part of the diff unreviewed. |
-| `redteam_model` | *(empty = off)* | Model id that attempts a concrete exploit per reported finding, labeling it demonstrated or not. Costs one extra call per reported finding. Never fails the run — see below. |
+| `redteam_model` | *(empty = off)* | Model id that independently checks each reported finding, labeling it exploit demonstrated, needs context, or refuted by the code. Costs one extra call per reported finding. Never fails the run — see below. |
 | `redteam_categories` | `security,bug,reliability` | Which categories are worth an exploit attempt. Widening to `performance,style` mostly buys calls with no exploit to find. |
 | `redteam_max_findings` | `10` | Ceiling on exploit attempts for the whole run. A large diff is reviewed in batches; this budget is shared across them, so it bounds the run's cost regardless of how many batches the diff splits into. |
 
 ### Demonstrability
 
 With `redteam_model` set, each reported finding gets one adversarial follow-up
-call asking for the concrete exploit — the input, the call, what goes wrong. The
-job summary then labels findings **exploit demonstrated** or **not
-demonstrated**, with the reasoning in a collapsed block.
+call from a model that tries to refute it first. The job summary then labels it
+**exploit demonstrated** (with the concrete exploit), **needs context** (with
+the one fact the diff doesn't show that would settle it), or **refuted by the
+code**, with the reasoning in a collapsed block. A verdict that can't back
+itself up shows as **not demonstrated**. See the main README's
+Demonstrability section for the method.
 
 It is **static analysis only**: the model gets no execution tool and nothing is
 ever run in your runner. And it is **advisory** — `evaluateGate` ignores
