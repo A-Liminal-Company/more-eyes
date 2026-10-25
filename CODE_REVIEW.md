@@ -132,8 +132,10 @@ closing pass below — it applies just as much to these counts.
   clean summary — which a teammate would then trust before shipping. This
   defeats the app's entire purpose.
 - **Done:** Reviewer instructions moved into the system prompt; submitted content
-  wrapped in `<submission>` tags explicitly marked untrusted, with angle
-  brackets escaped so input cannot close the delimiters. The system prompt
+  wrapped in `<me-submission>` tags explicitly marked untrusted, and any `<`
+  that would start an `me-` delimiter is escaped so input cannot open or close
+  one. Other code passes through verbatim. (Until 2026-10-25 every `<` and `>`
+  was escaped, which made models report `-&gt;` as broken source.) The system prompt
   instructs the model to report injection attempts as findings rather than obey
   them.
 - **Remains:** Defense-in-depth, not a guarantee — prompt injection has no
@@ -1339,3 +1341,21 @@ DeepInfra, the one admitted intermediary, no longer serves it.
 - **Left as is:** DeepInfra stays in `ALLOWED_PROVIDERS`, so re-adding Inkling is
   a one-entry revert if DeepInfra serves it again. It currently serves no
   rostered model, so the admission routes nothing today.
+
+### Prompt escaping no longer rewrites ordinary code — 2026-10-25
+
+`escapeForPrompt` turned every `<` and `>` in a submission into `&lt;` and `&gt;`
+so input could not close the `<submission>` delimiters. Models then saw
+`def main() -&gt; int:` and reported it as invalid source. On aliminal-ops#128,
+two of three models agreed on a high "HTML entities in cli.py" finding and the
+gate blocked a PR whose code was valid and whose tests passed.
+
+- **Done:** the delimiters now carry an `me-` prefix (`<me-submission>`,
+  `<me-code>`, `<me-finding>`, ...), which ordinary code never contains, and
+  only a `<` that starts one of those names is escaped (spacing and case
+  variants included). Everything else reaches the model as written. Applies to
+  the reviewers and the red-team pass, which share the function.
+- **Tests:** `shared.test.ts` covers closing-tag injection, spacing and case
+  variants, and verbatim pass-through of `->`, `>=`, generics and HTML.
+- **Remains:** the same defense-in-depth caveat as S-3. Prompt injection has no
+  complete fix.
