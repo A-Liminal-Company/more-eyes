@@ -34363,7 +34363,27 @@ const errors_1 = __nccwpck_require__(88594);
 const provider_policy_1 = __nccwpck_require__(97183);
 const validation_1 = __nccwpck_require__(66678);
 const shared_1 = __nccwpck_require__(66019);
+/**
+ * A model that answers with no tool call, or a tool call with neither a summary
+ * nor a finding, has not failed the way a 4xx has: the same request usually
+ * returns a real review on the next try (Claude Sonnet 5 returned an empty review
+ * on batch 1 of 10 in the 2026-10-10 release vet, then 5-6 findings on the
+ * others). The SDK's own retry only covers HTTP errors, so retry these once here.
+ * "Ran out of output tokens" is not retried: it repeats.
+ */
+const RETRYABLE = /returned an empty review|did not return a structured review/;
 async function reviewWithOpenRouter(providerModel, input) {
+    try {
+        return await reviewOnce(providerModel, input);
+    }
+    catch (err) {
+        if (err instanceof errors_1.ReviewError && RETRYABLE.test(err.message)) {
+            return reviewOnce(providerModel, input);
+        }
+        throw err;
+    }
+}
+async function reviewOnce(providerModel, input) {
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) {
         throw new errors_1.ReviewError("OPENROUTER_API_KEY is not configured on the server.");
@@ -34460,7 +34480,7 @@ exports.REVIEW_DEADLINE_MS = Number(process.env.REVIEW_DEADLINE_MS ?? 90_000);
 /** Retries multiply wall-clock time, so keep them low behind the deadline. */
 exports.MAX_RETRIES = 1;
 /** Output budget for one review call: the hidden thinking plus the tool call. */
-exports.MAX_OUTPUT_TOKENS = 4096;
+exports.MAX_OUTPUT_TOKENS = 8192;
 /**
  * Ceiling on a model's hidden thinking, inside MAX_OUTPUT_TOKENS.
  *
