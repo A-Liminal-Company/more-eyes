@@ -44,4 +44,64 @@ describe("reviewWithOpenRouter", () => {
       "openai/gpt-5.5 did not return a structured review."
     );
   });
+
+  const emptyReview = {
+    choices: [
+      {
+        finish_reason: "stop",
+        message: {
+          tool_calls: [
+            { type: "function", function: { name: "x", arguments: "{}" } },
+          ],
+        },
+      },
+    ],
+  };
+  const goodReview = {
+    choices: [
+      {
+        finish_reason: "stop",
+        message: {
+          tool_calls: [
+            {
+              type: "function",
+              function: { name: "x", arguments: JSON.stringify({ summary: "ok", findings: [] }) },
+            },
+          ],
+        },
+      },
+    ],
+  };
+
+  it("uses the 8192-token output budget", async () => {
+    create.mockResolvedValue(goodReview);
+    await reviewWithOpenRouter("anthropic/claude-sonnet-5", input);
+    expect(MAX_OUTPUT_TOKENS).toBe(8192);
+    expect(create.mock.calls[0][0].max_tokens).toBe(8192);
+  });
+
+  it("retries once when the model returns an empty review", async () => {
+    create.mockResolvedValueOnce(emptyReview).mockResolvedValueOnce(goodReview);
+    const result = await reviewWithOpenRouter("anthropic/claude-sonnet-5", input);
+    expect(result.summary).toBe("ok");
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries once when the model skips the tool, then gives up", async () => {
+    create.mockResolvedValue({
+      choices: [{ finish_reason: "stop", message: { content: "no" } }],
+    });
+    await expect(reviewWithOpenRouter("openai/gpt-5.5", input)).rejects.toThrow(
+      "did not return a structured review"
+    );
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry when the output budget ran out", async () => {
+    create.mockResolvedValue({ choices: [{ finish_reason: "length", message: {} }] });
+    await expect(reviewWithOpenRouter("google/gemini-3.5-flash", input)).rejects.toThrow(
+      "ran out of output tokens"
+    );
+    expect(create).toHaveBeenCalledTimes(1);
+  });
 });

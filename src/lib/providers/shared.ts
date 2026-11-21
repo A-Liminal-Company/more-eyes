@@ -29,7 +29,7 @@ export const REVIEW_DEADLINE_MS = Number(
 export const MAX_RETRIES = 1;
 
 /** Output budget for one review call: the hidden thinking plus the tool call. */
-export const MAX_OUTPUT_TOKENS = 4096;
+export const MAX_OUTPUT_TOKENS = 8192;
 
 /**
  * Ceiling on a model's hidden thinking, inside MAX_OUTPUT_TOKENS.
