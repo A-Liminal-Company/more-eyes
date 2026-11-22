@@ -19,7 +19,31 @@ import {
   type ReviewInput,
 } from "./shared";
 
+/**
+ * A model that answers with no tool call, or a tool call with neither a summary
+ * nor a finding, has not failed the way a 4xx has: the same request usually
+ * returns a real review on the next try (Claude Sonnet 5 returned an empty review
+ * on batch 1 of 10 in the 2026-10-10 release vet, then 5-6 findings on the
+ * others). The SDK's own retry only covers HTTP errors, so retry these once here.
+ * "Ran out of output tokens" is not retried: it repeats.
+ */
+const RETRYABLE = /returned an empty review|did not return a structured review/;
+
 export async function reviewWithOpenRouter(
+  providerModel: string,
+  input: ReviewInput
+): Promise<ReviewResult> {
+  try {
+    return await reviewOnce(providerModel, input);
+  } catch (err) {
+    if (err instanceof ReviewError && RETRYABLE.test(err.message)) {
+      return reviewOnce(providerModel, input);
+    }
+    throw err;
+  }
+}
+
+async function reviewOnce(
   providerModel: string,
   input: ReviewInput
 ): Promise<ReviewResult> {

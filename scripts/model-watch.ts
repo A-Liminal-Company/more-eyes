@@ -60,17 +60,30 @@ function input(code: string, title: string): ReviewInput {
   };
 }
 
+// A 429 is the provider saying "not now", not the model being broken. Retry it
+// with a pause so one busy minute does not read as a dead model; if it persists
+// the report says "rate limited" so a person can tell the two apart.
+const RATE_LIMIT = /\b429\b|rate.?limit/i;
+const RATE_LIMIT_PAUSES_MS = [20_000, 60_000];
+
 async function timed(modelId: string, review: ReviewInput): Promise<RunResult> {
   const start = Date.now();
-  try {
-    const result = await reviewCode(modelId, review);
-    return { ok: true, findings: result.findings.length, ms: Date.now() - start };
-  } catch (err) {
-    return {
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-      ms: Date.now() - start,
-    };
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const result = await reviewCode(modelId, review);
+      return { ok: true, findings: result.findings.length, ms: Date.now() - start };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (RATE_LIMIT.test(message) && attempt < RATE_LIMIT_PAUSES_MS.length) {
+        await new Promise((r) => setTimeout(r, RATE_LIMIT_PAUSES_MS[attempt]));
+        continue;
+      }
+      return {
+        ok: false,
+        error: RATE_LIMIT.test(message) ? `rate limited by the provider: ${message}` : message,
+        ms: Date.now() - start,
+      };
+    }
   }
 }
 
